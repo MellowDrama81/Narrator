@@ -96,19 +96,29 @@ public sealed class JsonNarratorStore :
     async Task<IReadOnlyList<StoryTurn>> IStoryStateRepository.GetTurnsAsync(Guid id, int? takeLast, CancellationToken cancellationToken)
     {
         ValidateId(id);
-        var state = await ((IStoryStateRepository)this).GetAsync(id, cancellationToken);
-        if (state is null) return [];
-        var files = Directory.Exists(TurnsFolder(StateFolder(StatesPath, id)))
-            ? Directory.EnumerateFiles(TurnsFolder(StateFolder(StatesPath, id)), "*.json").OrderBy(x => x).ToArray()
-            : [];
-        if (takeLast is not null) files = files.TakeLast(Math.Max(0, takeLast.Value)).ToArray();
-        var result = new List<StoryTurn>();
-        foreach (var file in files)
+        return await LockedAsync($"state:{id}", async () =>
         {
-            var turn = await JsonFileStore.ReadAsync<StoryTurn>(file, cancellationToken);
-            if (turn is not null && turn.SequenceNumber <= state.LastCommittedTurnSequence) result.Add(turn);
-        }
-        return result.OrderBy(x => x.SequenceNumber).ToArray();
+            var folder = StateFolder(StatesPath, id);
+            var state = await LoadStateAndRecoverAsync(folder, cancellationToken);
+            if (state is null) return [];
+            return await ReadTurnsAsync(folder, state, takeLast, cancellationToken);
+        }, cancellationToken);
+    }
+
+    async Task<StoryStateAggregateSnapshot?> IStoryStateRepository.GetSnapshotAsync(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        ValidateId(id);
+        return await LockedAsync($"state:{id}", async () =>
+        {
+            var folder = StateFolder(StatesPath, id);
+            var state = await LoadStateAndRecoverAsync(folder, cancellationToken);
+            if (state is null) return null;
+            return new StoryStateAggregateSnapshot(
+                state,
+                await ReadTurnsAsync(folder, state, null, cancellationToken));
+        }, cancellationToken);
     }
 
     async Task IStoryStateRepository.CreateAsync(StoryState state, StoryTurn openingTurn, CancellationToken cancellationToken)
@@ -171,8 +181,55 @@ public sealed class JsonNarratorStore :
     async Task IStoryStateRepository.SaveAsync(StoryState state, CancellationToken cancellationToken)
     {
         ValidateId(state.Id);
-        await LockedAsync($"state:{state.Id}", () =>
-            JsonFileStore.WriteAsync(StateFile(StateFolder(StatesPath, state.Id)), state, cancellationToken), cancellationToken);
+        await LockedAsync($"state:{state.Id}", async () =>
+        {
+            var folder = StateFolder(StatesPath, state.Id);
+            var current = await LoadStateAndRecoverAsync(folder, cancellationToken)
+                ?? throw new FileNotFoundException("Story State not found.");
+            if (current.LastCommittedTurnSequence != state.LastCommittedTurnSequence)
+                throw new InvalidOperationException("The Story State changed after it was loaded. Reload it and try again.");
+            await JsonFileStore.WriteAsync(StateFile(folder), state, cancellationToken);
+        }, cancellationToken);
+    }
+
+    async Task IStoryStateRepository.UpdateLabelAsync(Guid id, string label, CancellationToken cancellationToken)
+    {
+        ValidateId(id);
+        if (string.IsNullOrWhiteSpace(label)) throw new ArgumentException("A Story State label is required.", nameof(label));
+        await LockedAsync($"state:{id}", async () =>
+        {
+            var folder = StateFolder(StatesPath, id);
+            var current = await LoadStateAndRecoverAsync(folder, cancellationToken)
+                ?? throw new FileNotFoundException("Story State not found.");
+            await JsonFileStore.WriteAsync(StateFile(folder), current with { Label = label }, cancellationToken);
+        }, cancellationToken);
+    }
+
+    async Task IStoryStateRepository.SwapSortOrderAsync(
+        Guid firstId,
+        Guid secondId,
+        CancellationToken cancellationToken)
+    {
+        ValidateId(firstId);
+        ValidateId(secondId);
+        if (firstId == secondId) return;
+        await LockedManyAsync([$"state:{firstId}", $"state:{secondId}"], async () =>
+        {
+            var firstFolder = StateFolder(StatesPath, firstId);
+            var secondFolder = StateFolder(StatesPath, secondId);
+            var first = await LoadStateAndRecoverAsync(firstFolder, cancellationToken)
+                ?? throw new FileNotFoundException("First Story State not found.");
+            var second = await LoadStateAndRecoverAsync(secondFolder, cancellationToken)
+                ?? throw new FileNotFoundException("Second Story State not found.");
+            await JsonFileStore.WriteAsync(
+                StateFile(firstFolder),
+                first with { SortOrder = second.SortOrder },
+                cancellationToken);
+            await JsonFileStore.WriteAsync(
+                StateFile(secondFolder),
+                second with { SortOrder = first.SortOrder },
+                cancellationToken);
+        }, cancellationToken);
     }
 
     async Task<StoryState> IStoryStateRepository.CopyAsync(Guid id, CancellationToken cancellationToken)
@@ -297,19 +354,24 @@ public sealed class JsonNarratorStore :
         }
     }
 
-    Task ITrashStore.DeletePermanentlyAsync(string trashId, CancellationToken cancellationToken)
+    async Task ITrashStore.DeletePermanentlyAsync(string trashId, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var file = Path.Combine(TrashDefinitionsPath, trashId);
-        var directory = Path.Combine(TrashStatesPath, trashId);
-        if (File.Exists(file))
+        var item = (await ((ITrashStore)this).ListAsync(cancellationToken))
+            .SingleOrDefault(x => string.Equals(x.TrashId, trashId, StringComparison.Ordinal))
+            ?? throw new FileNotFoundException("Trash item not found.");
+        var path = Path.Combine(
+            item.Type == TrashItemType.StoryDefinition ? TrashDefinitionsPath : TrashStatesPath,
+            item.TrashId);
+        if (item.Type == TrashItemType.StoryDefinition)
         {
-            File.Delete(file);
-            if (File.Exists(file + ".bak")) File.Delete(file + ".bak");
+            File.Delete(path);
+            if (File.Exists(path + ".bak")) File.Delete(path + ".bak");
         }
-        else if (Directory.Exists(directory)) Directory.Delete(directory, true);
-        else throw new FileNotFoundException("Trash item not found.");
-        return Task.CompletedTask;
+        else
+        {
+            Directory.Delete(path, true);
+        }
     }
 
     Task ITrashStore.EmptyAsync(CancellationToken cancellationToken)
@@ -325,10 +387,10 @@ public sealed class JsonNarratorStore :
         var path = StateFile(folder);
         var state = await JsonFileStore.ReadAsync<StoryState>(path, cancellationToken, ReportRecovery);
         if (state is null) return null;
-        if (!await IsStateConsistentAsync(folder, state, cancellationToken))
+        if (!await IsCommitBoundaryConsistentAsync(folder, state, cancellationToken))
         {
             var backup = await JsonFileStore.ReadExactAsync<StoryState>(path + ".bak", cancellationToken);
-            if (backup is null || !await IsStateConsistentAsync(folder, backup, cancellationToken))
+            if (backup is null || !await IsCommitBoundaryConsistentAsync(folder, backup, cancellationToken))
             {
                 JsonFileStore.Quarantine(path);
                 JsonFileStore.Quarantine(path + ".bak");
@@ -339,13 +401,10 @@ public sealed class JsonNarratorStore :
             ReportRecovery($"Restored Story State '{state.Id}' to its last internally consistent commit.");
             state = backup;
         }
-        var turns = TurnsFolder(folder);
-        foreach (var file in Directory.EnumerateFiles(turns, "*.json"))
-        {
-            var name = Path.GetFileName(file);
-            if (int.TryParse(name.AsSpan(0, Math.Min(8, name.Length)), out var sequence) && sequence > state.LastCommittedTurnSequence)
-                File.Delete(file);
-        }
+        foreach (var orphan in Directory.EnumerateFiles(
+                     TurnsFolder(folder),
+                     $"{state.LastCommittedTurnSequence + 1:D8}-*.json"))
+            File.Delete(orphan);
         return state;
     }
 
@@ -462,16 +521,50 @@ public sealed class JsonNarratorStore :
         int lastCommittedSequence,
         CancellationToken cancellationToken)
     {
-        var result = new List<StoryTurn>();
-        foreach (var file in Directory.EnumerateFiles(TurnsFolder(folder), "*.json").OrderBy(x => x))
-        {
-            var turn = await JsonFileStore.ReadAsync<StoryTurn>(file, cancellationToken);
-            if (turn is not null && turn.SequenceNumber <= lastCommittedSequence) result.Add(turn);
-        }
-        return result.OrderBy(x => x.SequenceNumber).ToArray();
+        var state = await JsonFileStore.ReadExactAsync<StoryState>(StateFile(folder), cancellationToken)
+            ?? throw new InvalidDataException("The Story State document is unavailable.");
+        if (state.LastCommittedTurnSequence != lastCommittedSequence)
+            throw new InvalidDataException("The Story State changed while its turns were being read.");
+        return (await ReadTurnsAsync(folder, state, null, cancellationToken)).ToArray();
     }
 
-    private static async Task<bool> IsStateConsistentAsync(
+    private static async Task<IReadOnlyList<StoryTurn>> ReadTurnsAsync(
+        string folder,
+        StoryState state,
+        int? takeLast,
+        CancellationToken cancellationToken)
+    {
+        if (takeLast is <= 0) return [];
+        var firstSequence = takeLast is null
+            ? 0
+            : Math.Max(0, state.LastCommittedTurnSequence - takeLast.Value + 1);
+        var result = new List<StoryTurn>(state.LastCommittedTurnSequence - firstSequence + 1);
+        for (var sequence = firstSequence; sequence <= state.LastCommittedTurnSequence; sequence++)
+            result.Add(await ReadTurnAsync(folder, state.Id, sequence, cancellationToken));
+        return result;
+    }
+
+    private static async Task<StoryTurn> ReadTurnAsync(
+        string folder,
+        Guid stateId,
+        int sequence,
+        CancellationToken cancellationToken)
+    {
+        var matches = Directory.EnumerateFiles(TurnsFolder(folder), $"{sequence:D8}-*.json").ToArray();
+        if (matches.Length != 1)
+            throw new InvalidDataException($"Story Turn {sequence} is missing or duplicated.");
+        var turn = await JsonFileStore.ReadExactAsync<StoryTurn>(matches[0], cancellationToken)
+            ?? throw new InvalidDataException($"Story Turn {sequence} is invalid.");
+        var idText = Path.GetFileNameWithoutExtension(matches[0]).AsSpan(9);
+        if (turn.StoryStateId != stateId ||
+            turn.SequenceNumber != sequence ||
+            !Guid.TryParse(idText, out var fileId) ||
+            fileId != turn.Id)
+            throw new InvalidDataException($"Story Turn {sequence} has inconsistent identity data.");
+        return turn;
+    }
+
+    private static async Task<bool> IsCommitBoundaryConsistentAsync(
         string folder,
         StoryState state,
         CancellationToken cancellationToken)
@@ -479,20 +572,15 @@ public sealed class JsonNarratorStore :
         if (state.Id == Guid.Empty || state.LastCommittedTurnSequence < 0) return false;
         var turnsFolder = TurnsFolder(folder);
         if (!Directory.Exists(turnsFolder)) return false;
-        for (var sequence = 0; sequence <= state.LastCommittedTurnSequence; sequence++)
+        try
         {
-            var matches = Directory.EnumerateFiles(turnsFolder, $"{sequence:D8}-*.json").ToArray();
-            if (matches.Length != 1) return false;
-            var turn = await JsonFileStore.ReadExactAsync<StoryTurn>(matches[0], cancellationToken);
-            if (turn is null || turn.StoryStateId != state.Id || turn.SequenceNumber != sequence)
-            {
-                if (turn is null) JsonFileStore.Quarantine(matches[0]);
-                return false;
-            }
-            var idText = Path.GetFileNameWithoutExtension(matches[0]).AsSpan(9);
-            if (!Guid.TryParse(idText, out var fileId) || fileId != turn.Id) return false;
+            _ = await ReadTurnAsync(folder, state.Id, state.LastCommittedTurnSequence, cancellationToken);
+            return true;
         }
-        return true;
+        catch (InvalidDataException)
+        {
+            return false;
+        }
     }
 
     private async Task PurgeTrashAsync(CancellationToken cancellationToken)
@@ -545,6 +633,33 @@ public sealed class JsonNarratorStore :
         var gate = _locks.GetOrAdd(key, _ => new(1, 1));
         await gate.WaitAsync(cancellationToken);
         try { return await action(); } finally { gate.Release(); }
+    }
+
+    private async Task LockedManyAsync(
+        IReadOnlyList<string> keys,
+        Func<Task> action,
+        CancellationToken cancellationToken)
+    {
+        var gates = keys
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .Select(x => _locks.GetOrAdd(x, _ => new(1, 1)))
+            .ToArray();
+        var acquired = new List<SemaphoreSlim>(gates.Length);
+        try
+        {
+            foreach (var gate in gates)
+            {
+                await gate.WaitAsync(cancellationToken);
+                acquired.Add(gate);
+            }
+            await action();
+        }
+        finally
+        {
+            for (var index = acquired.Count - 1; index >= 0; index--)
+                acquired[index].Release();
+        }
     }
 
     private void CleanupStaging()

@@ -34,6 +34,18 @@ public sealed class GuiArchitectureTests
                 $"Unexpected GUI package reference: {line.Trim()}"));
     }
 
+    [Fact]
+    public void WorkspaceRestoreSelectsActiveTabBySavedIdentity()
+    {
+        var mainTabbedPage = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "Mellow.Narrator.Gui",
+            "MainTabbedPage.cs"));
+
+        Assert.Contains("restoredPages.TryGetValue(state.ActiveTabId", mainTabbedPage, StringComparison.Ordinal);
+        Assert.DoesNotContain("Children[activePosition]", mainTabbedPage, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

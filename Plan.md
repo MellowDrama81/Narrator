@@ -44,7 +44,7 @@ Do not silently fall back to another model when the selected model is unavailabl
 ## Baseline Provider Contract
 
 Use the Chat Completions API as the initial compatibility target.
-Send generation requests as JSON to `POST {baseUrl}/chat/completions` using system, user and assistant messages.
+Send generation requests as JSON to `POST {baseUrl}/chat/completions` using developer or system instructions, plus user and assistant messages. Prefer the modern `developer` role and `max_completion_tokens` field. During connection testing, fall back through the system role and legacy `max_tokens` field when required by the selected compatible provider, and persist the working combination as detected capabilities.
 Use non-streaming responses so a complete structured response can be validated before any state is displayed or persisted.
 Attempt model discovery using `GET {baseUrl}/models`. Model discovery is optional; allow the user to enter a model ID manually when the endpoint is unavailable.
 The Responses API may be supported by a separate provider adapter in a future version.
@@ -59,6 +59,7 @@ Provide a connection test which:
 - Confirms that the selected model can generate a minimal response.
 - Probes strict JSON Schema Structured Outputs, then JSON mode and finally prompted JSON.
 - Records the supported structured-output tier for the API connection.
+- Records whether the selected provider/model accepts `max_completion_tokens` or legacy `max_tokens`, and developer or system instruction messages.
 - Reports authentication, endpoint, model and structured-output failures separately.
 
 A provider is usable only if it can produce responses which pass the application's schema and domain validation.
@@ -588,7 +589,14 @@ public sealed record ConnectionCapabilities(
     bool SupportsModelDiscovery,
     StructuredOutputTier StructuredOutputTier,
     string? TestedModelId,
-    DateTimeOffset? TestedAtUtc);
+    DateTimeOffset? TestedAtUtc)
+{
+    public OutputTokenParameter OutputTokenParameter { get; init; } = OutputTokenParameter.MaxCompletionTokens;
+    public InstructionMessageRole InstructionMessageRole { get; init; } = InstructionMessageRole.Developer;
+}
+
+public enum OutputTokenParameter { MaxCompletionTokens, MaxTokens }
+public enum InstructionMessageRole { Developer, System }
 
 public enum StructuredOutputTier
 {
@@ -750,7 +758,7 @@ Do not persist LLM response DTOs before validation or expose persistence records
 
 Define the persistence contracts in `Mellow.Narrator.Core`:
 - `IStoryDefinitionRepository` for listing, loading, saving and moving Story Definitions to trash.
-- `IStoryStateRepository` for listing, loading, creating, committing turns, copying and moving Story States to trash.
+- `IStoryStateRepository` for listing, loading recent turns on demand, capturing a complete aggregate snapshot for export/copy, creating, committing turns, applying granular label/order metadata updates, copying and moving Story States to trash. Whole-state saves must reject a stale last-committed sequence rather than overwrite a newer commit.
 - `IWorkspaceStateStore` for loading and atomically saving open-tab state.
 - `IApiConnectionSettingsStore` for non-sensitive connection settings.
 - `ITrashStore` for listing, restoring, permanently deleting and purging trash items.
@@ -904,6 +912,7 @@ Use a fake HTTP handler or local in-process test server to verify:
 - Optional Bearer authentication without credential logging.
 - Optional model discovery and manual model-ID fallback.
 - Strict JSON Schema, JSON mode and prompted-JSON capability probing.
+- Negotiation and reuse of modern `max_completion_tokens`/developer and legacy `max_tokens`/system request contracts.
 - Non-streaming Chat Completions request and response handling.
 - Cancellation and one in-flight request per Story State.
 - Tab closure, Android backgrounding and process recreation during an in-flight request.

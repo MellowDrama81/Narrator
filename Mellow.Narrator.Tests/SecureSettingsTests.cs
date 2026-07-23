@@ -163,6 +163,8 @@ public sealed class SecureSettingsTests
             Task.FromResult<StoryState?>(null);
         public Task<IReadOnlyList<StoryTurn>> GetTurnsAsync(Guid id, int? takeLast = null, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<StoryTurn>>([]);
+        public Task<StoryStateAggregateSnapshot?> GetSnapshotAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<StoryStateAggregateSnapshot?>(null);
         public Task CreateAsync(StoryState state, StoryTurn openingTurn, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public Task ImportAsync(StoryState state, IReadOnlyList<StoryTurn> turns, CancellationToken cancellationToken = default) =>
@@ -170,6 +172,10 @@ public sealed class SecureSettingsTests
         public Task CommitTurnAsync(StoryState state, StoryTurn turn, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public Task SaveAsync(StoryState state, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task UpdateLabelAsync(Guid id, string label, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task SwapSortOrderAsync(Guid firstId, Guid secondId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public Task<StoryState> CopyAsync(Guid id, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();

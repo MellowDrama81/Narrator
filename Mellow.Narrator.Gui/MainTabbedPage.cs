@@ -215,6 +215,13 @@ public sealed class MainTabbedPage : TabbedPage
         try
         {
             var state = await _workspace.LoadAsync();
+            var restoredPages = new Dictionary<Guid, NarratorNavigationPage>();
+            foreach (var fixedTab in state.Tabs.Where(x => x.Type is TabType.Settings or TabType.StoryDefinitionList or TabType.PlayStoryList))
+            {
+                var fixedPage = Children.OfType<NarratorNavigationPage>()
+                    .FirstOrDefault(x => x.IsFixed && x.TabType == fixedTab.Type);
+                if (fixedPage is not null) restoredPages[fixedTab.TabId] = fixedPage;
+            }
             _settingsPage.RestoreInterruptedOperation(
                 state.Tabs.FirstOrDefault(x => x.Type == TabType.Settings)?.PendingOperation);
             foreach (var tab in state.Tabs.OrderBy(x => x.Position).Where(x => x.Position >= 3))
@@ -233,12 +240,16 @@ public sealed class MainTabbedPage : TabbedPage
                         completedDefinition.UpdatedAtUtc > definitionOperation.StartedAtUtc))
                 {
                     OpenDefinition(definitionId);
+                    if (CurrentPage is NarratorNavigationPage completedPage)
+                        restoredPages[tab.TabId] = completedPage;
                     continue;
                 }
                 if (tab.PendingOperation is { Type: PendingOperationType.GenerateOpeningScene, TargetRecordId: { } stateId } &&
                     await _services.GetRequiredService<IStoryStateRepository>().GetAsync(stateId) is not null)
                 {
                     OpenPlay(stateId);
+                    if (CurrentPage is NarratorNavigationPage completedPage)
+                        restoredPages[tab.TabId] = completedPage;
                     continue;
                 }
                 var playState = tab.PlayStoryTabState;
@@ -252,13 +263,34 @@ public sealed class MainTabbedPage : TabbedPage
                     playState = new("");
                     pending = null;
                 }
-                if (tab.Type == TabType.StoryPrompt) OpenPrompt(tab.DurableRecordId, tab.StoryPromptDraft, pending);
-                else if (tab.DurableRecordId is { } id && tab.Type == TabType.StoryDefinition) OpenDefinition(id);
-                else if (tab.DurableRecordId is { } playId && tab.Type == TabType.PlayStory) OpenPlay(playId, playState, pending);
-                else if (tab.DurableRecordId is { } startId && tab.Type == TabType.StartStory) OpenStart(startId, tab.StartStoryDraft, pending);
+                var restored = false;
+                if (tab.Type == TabType.StoryPrompt)
+                {
+                    OpenPrompt(tab.DurableRecordId, tab.StoryPromptDraft, pending);
+                    restored = true;
+                }
+                else if (tab.DurableRecordId is { } id && tab.Type == TabType.StoryDefinition)
+                {
+                    OpenDefinition(id);
+                    restored = true;
+                }
+                else if (tab.DurableRecordId is { } playId && tab.Type == TabType.PlayStory)
+                {
+                    OpenPlay(playId, playState, pending);
+                    restored = true;
+                }
+                else if (tab.DurableRecordId is { } startId && tab.Type == TabType.StartStory)
+                {
+                    OpenStart(startId, tab.StartStoryDraft, pending);
+                    restored = true;
+                }
+                if (restored && CurrentPage is NarratorNavigationPage restoredPage)
+                    restoredPages[tab.TabId] = restoredPage;
             }
-            var activePosition = state.Tabs.FirstOrDefault(x => x.TabId == state.ActiveTabId)?.Position ?? 0;
-            if (activePosition >= 0 && activePosition < Children.Count) CurrentPage = Children[activePosition];
+            if (restoredPages.TryGetValue(state.ActiveTabId, out var activePage))
+                CurrentPage = activePage;
+            else
+                CurrentPage = Children.OfType<NarratorNavigationPage>().First(x => x.TabType == TabType.Settings);
             await SaveWorkspaceAsync();
             var notices = await _services.GetRequiredService<IRecoveryNoticeStore>().ConsumeAsync();
             if (notices.Count > 0)

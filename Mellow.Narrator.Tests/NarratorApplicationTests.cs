@@ -60,6 +60,21 @@ public sealed class NarratorApplicationTests
     }
 
     [Fact]
+    public async Task ValidateAnswer_RejectsWhitespaceWithoutCallingProvider()
+    {
+        var provider = new FakeProvider();
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.ValidateAnswerAsync(
+            Guid.NewGuid(),
+            new(Guid.NewGuid(), "Name?", "Required", 0),
+            "   ",
+            []));
+
+        Assert.Equal(0, provider.ValidationCalls);
+    }
+
+    [Fact]
     public async Task PlayTurn_UsesConfiguredRecentWindowAndCurrentModel()
     {
         var stateId = Guid.NewGuid();
@@ -164,6 +179,13 @@ public sealed class NarratorApplicationTests
             var values = _turns.GetValueOrDefault(id) ?? [];
             return Task.FromResult<IReadOnlyList<StoryTurn>>(takeLast is null ? values.ToArray() : values.TakeLast(takeLast.Value).ToArray());
         }
+        public Task<StoryStateAggregateSnapshot?> GetSnapshotAsync(Guid id, CancellationToken cancellationToken = default)
+        {
+            var state = _states.GetValueOrDefault(id);
+            return Task.FromResult(state is null
+                ? null
+                : new StoryStateAggregateSnapshot(state, (_turns.GetValueOrDefault(id) ?? []).ToArray()));
+        }
         public Task CreateAsync(StoryState state, StoryTurn openingTurn, CancellationToken cancellationToken = default)
         {
             _states[state.Id] = state;
@@ -179,6 +201,10 @@ public sealed class NarratorApplicationTests
             return Task.CompletedTask;
         }
         public Task SaveAsync(StoryState state, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task UpdateLabelAsync(Guid id, string label, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task SwapSortOrderAsync(Guid firstId, Guid secondId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public Task<StoryState> CopyAsync(Guid id, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
@@ -208,11 +234,15 @@ public sealed class NarratorApplicationTests
     {
         public StoryGenerationResponse StoryResponse { get; init; } = new("", [], [], [], null, null, null);
         public int OpeningCalls { get; private set; }
+        public int ValidationCalls { get; private set; }
         public GenerationContext? LastContext { get; private set; }
         public Task<ConnectionTestResult> TestConnectionAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
-        public Task<PlayerAnswerValidationResponse> ValidatePlayerAnswerAsync(ApiConnectionSettings settings, string? credential, PlayerQuestion question, string answer, IReadOnlyList<PlayerResponse> previousAnswers, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+        public Task<PlayerAnswerValidationResponse> ValidatePlayerAnswerAsync(ApiConnectionSettings settings, string? credential, PlayerQuestion question, string answer, IReadOnlyList<PlayerResponse> previousAnswers, CancellationToken cancellationToken = default)
+        {
+            ValidationCalls++;
+            return Task.FromResult(new PlayerAnswerValidationResponse(false, null));
+        }
         public Task<StoryDefinitionGenerationResponse> GenerateStoryDefinitionAsync(ApiConnectionSettings settings, string? credential, string storyPrompt, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public Task<StoryGenerationResponse> GenerateOpeningAsync(ApiConnectionSettings settings, string? credential, GenerationContext context, CancellationToken cancellationToken = default)

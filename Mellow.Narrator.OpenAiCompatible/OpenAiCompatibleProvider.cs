@@ -32,18 +32,32 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
             catch (ProviderException ex) when (ex.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed) { }
 
             var tier = StructuredOutputTier.Unsupported;
-            foreach (var candidate in new[] { StructuredOutputTier.StrictJsonSchema, StructuredOutputTier.JsonMode, StructuredOutputTier.PromptedJson })
+            ProviderRequestContract? supportedContract = null;
+            foreach (var contract in RequestContractCandidates())
             {
-                try
+                foreach (var candidate in new[] { StructuredOutputTier.StrictJsonSchema, StructuredOutputTier.JsonMode, StructuredOutputTier.PromptedJson })
                 {
-                    var response = await CompleteAsync(settings, credential,
-                        [Message("system", "Return a JSON object with exactly one boolean property named ok."), Message("user", "Return ok as true.")],
-                        SimpleProbeSchema(), candidate, cancellationToken);
-                    if (response["ok"]?.GetValue<bool>() == true) { tier = candidate; break; }
+                    try
+                    {
+                        var response = await CompleteAsync(settings, credential,
+                            [Message("system", "Return a JSON object with exactly one boolean property named ok."), Message("user", "Return ok as true.")],
+                            SimpleProbeSchema(), candidate, cancellationToken, contract);
+                        if (response["ok"]?.GetValue<bool>() == true)
+                        {
+                            tier = candidate;
+                            supportedContract = contract;
+                            break;
+                        }
+                    }
+                    catch (Exception ex) when (ex is ProviderException or JsonException) { }
                 }
-                catch (Exception ex) when (ex is ProviderException or JsonException) { }
+                if (supportedContract is not null) break;
             }
-            var capabilities = new ConnectionCapabilities(discovery, tier, settings.ModelId, timeProvider.GetUtcNow());
+            var capabilities = new ConnectionCapabilities(discovery, tier, settings.ModelId, timeProvider.GetUtcNow())
+            {
+                OutputTokenParameter = supportedContract?.OutputTokenParameter ?? OutputTokenParameter.MaxCompletionTokens,
+                InstructionMessageRole = supportedContract?.InstructionMessageRole ?? InstructionMessageRole.Developer
+            };
             return tier == StructuredOutputTier.Unsupported
                 ? new(false, models, capabilities, "The model could not produce a valid structured response.")
                 : new(true, models, capabilities, null);
@@ -142,19 +156,36 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
 
     private async Task<JsonObject> CompleteAsync(
         ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> messages, JsonObject schema,
-        StructuredOutputTier tier, CancellationToken cancellationToken)
+        StructuredOutputTier tier,
+        CancellationToken cancellationToken,
+        ProviderRequestContract? requestContract = null)
     {
         RequireConnection(settings);
         var requestMessages = tier == StructuredOutputTier.PromptedJson
             ? messages.Concat([Message("system", $"Return an object matching this JSON Schema exactly: {schema.ToJsonString(Json)}")]).ToArray()
             : messages;
+        requestContract ??= new(
+            settings.Capabilities.OutputTokenParameter,
+            settings.Capabilities.InstructionMessageRole);
+        var instructionRole = requestContract.InstructionMessageRole == InstructionMessageRole.Developer
+            ? "developer"
+            : "system";
+        var serializedMessages = requestMessages.Select(message =>
+        {
+            var clone = message.DeepClone().AsObject();
+            if (string.Equals(clone["role"]?.GetValue<string>(), "system", StringComparison.Ordinal))
+                clone["role"] = instructionRole;
+            return clone;
+        }).ToArray();
         var body = new JsonObject
         {
             ["model"] = settings.ModelId,
-            ["messages"] = new JsonArray(requestMessages.Select(x => x.DeepClone()).ToArray()),
-            ["max_tokens"] = settings.MaxOutputTokens,
+            ["messages"] = new JsonArray(serializedMessages.Select(x => (JsonNode)x).ToArray()),
             ["stream"] = false
         };
+        body[requestContract.OutputTokenParameter == OutputTokenParameter.MaxCompletionTokens
+            ? "max_completion_tokens"
+            : "max_tokens"] = settings.MaxOutputTokens;
         if (settings.Parameters.Temperature is { } temperature) body["temperature"] = temperature;
         if (settings.Parameters.TopP is { } topP) body["top_p"] = topP;
         if (!string.IsNullOrWhiteSpace(settings.Parameters.ReasoningEffort)) body["reasoning_effort"] = settings.Parameters.ReasoningEffort;
@@ -266,6 +297,7 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
             var json = JsonNode.Parse(bytes);
             detail = json?["error"]?["message"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Provider error";
         }
+        catch (OperationCanceledException) { throw; }
         catch { detail = response.ReasonPhrase ?? "Provider error"; }
         var message = response.StatusCode switch
         {
@@ -527,7 +559,19 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
             throw new ProviderException("Base URL and model ID are required.", null);
     }
 
+    private static IReadOnlyList<ProviderRequestContract> RequestContractCandidates() =>
+    [
+        new(OutputTokenParameter.MaxCompletionTokens, InstructionMessageRole.Developer),
+        new(OutputTokenParameter.MaxCompletionTokens, InstructionMessageRole.System),
+        new(OutputTokenParameter.MaxTokens, InstructionMessageRole.Developer),
+        new(OutputTokenParameter.MaxTokens, InstructionMessageRole.System)
+    ];
+
     private static string SafeMessage(Exception ex) => ex is ProviderException ? ex.Message : "The provider response could not be processed.";
+
+    private sealed record ProviderRequestContract(
+        OutputTokenParameter OutputTokenParameter,
+        InstructionMessageRole InstructionMessageRole);
 
     private sealed record StoryResponseDto(
         string Narration,

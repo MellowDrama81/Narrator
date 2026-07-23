@@ -229,8 +229,9 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
     {
         try
         {
-            var state = await _repository.GetAsync(_stateId) ?? throw new NarratorException("Story State not found.");
-            await ImportExportService.ExportStateAsync(state, await _repository.GetTurnsAsync(_stateId));
+            var snapshot = await _repository.GetSnapshotAsync(_stateId)
+                ?? throw new NarratorException("Story State not found.");
+            await ImportExportService.ExportStateAsync(snapshot.State, snapshot.Turns);
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }

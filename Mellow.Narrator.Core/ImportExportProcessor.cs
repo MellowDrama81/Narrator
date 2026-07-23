@@ -118,9 +118,13 @@ public static class ImportExportProcessor
         ValidateBible(state.Setup.Definition.InitialStoryBible, limits);
         ValidateBible(state.CurrentStoryBible, limits);
         ValidateMaintenance(state.StoryBibleMaintenanceHistory);
-        var questionIds = state.Setup.Definition.PlayerQuestions.Select(x => x.Id).ToHashSet();
+        var questionsById = state.Setup.Definition.PlayerQuestions.ToDictionary(x => x.Id);
         if (state.Setup.PlayerResponses.Select(x => x.QuestionId).Distinct().Count() != state.Setup.PlayerResponses.Count ||
-            state.Setup.PlayerResponses.Any(x => !questionIds.Contains(x.QuestionId)))
+            state.Setup.PlayerResponses.Count != questionsById.Count ||
+            state.Setup.PlayerResponses.Any(response =>
+                !questionsById.TryGetValue(response.QuestionId, out var question) ||
+                !string.Equals(response.Question, question.Question, StringComparison.Ordinal) ||
+                !string.Equals(response.ValidationInstruction, question.ValidationInstruction, StringComparison.Ordinal)))
             throw new InvalidDataException("Player responses do not match the snapshot questions.");
         foreach (var response in state.Setup.PlayerResponses)
             ValidateText(response.Answer, limits.MaxPlayerAnswerCharacters, "player answer");

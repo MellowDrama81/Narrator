@@ -92,6 +92,10 @@ public sealed record StoryTurn(
     DateTimeOffset CompletedAtUtc,
     GenerationMetadata Generation);
 
+public sealed record StoryStateAggregateSnapshot(
+    StoryState State,
+    IReadOnlyList<StoryTurn> Turns);
+
 public sealed record StoryDefinitionSummary(Guid Id, string Title, int SortOrder, DateTimeOffset UpdatedAtUtc);
 public sealed record StoryStateSummary(Guid Id, string Label, int SortOrder, DateTimeOffset StartedAtUtc, DateTimeOffset? LastActionAtUtc);
 

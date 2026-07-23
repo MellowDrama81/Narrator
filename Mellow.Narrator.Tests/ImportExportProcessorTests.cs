@@ -47,6 +47,38 @@ public sealed class ImportExportProcessorTests
     }
 
     [Fact]
+    public void StateCopy_RejectsMissingResponse()
+    {
+        var (state, turn) = CreateState();
+        state = state with { Setup = state.Setup with { PlayerResponses = [] } };
+
+        Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyState(
+            state,
+            [turn],
+            1,
+            NarratorDefaults.Create().ContentLimits));
+    }
+
+    [Fact]
+    public void StateCopy_RejectsResponseTextThatDoesNotMatchQuestionSnapshot()
+    {
+        var (state, turn) = CreateState();
+        state = state with
+        {
+            Setup = state.Setup with
+            {
+                PlayerResponses = [state.Setup.PlayerResponses[0] with { Question = "Different question?" }]
+            }
+        };
+
+        Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyState(
+            state,
+            [turn],
+            1,
+            NarratorDefaults.Create().ContentLimits));
+    }
+
+    [Fact]
     public void DefinitionCopy_RejectsNonUtcTimestamp()
     {
         var now = DateTimeOffset.UtcNow;

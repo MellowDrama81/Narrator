@@ -40,6 +40,9 @@ public sealed class ProviderTests
         Assert.Equal("secret", captured.Headers.Authorization.Parameter);
         Assert.Contains("story-model", body);
         Assert.Contains("A red moon story", body);
+        Assert.Contains("\"max_completion_tokens\"", body);
+        Assert.DoesNotContain("\"max_tokens\"", body);
+        Assert.Contains("\"role\":\"developer\"", body);
     }
 
     [Fact]
@@ -112,6 +115,70 @@ public sealed class ProviderTests
         Assert.Equal(entry.Id, Assert.Single(result.RelevantStoryBibleEntryIds));
     }
 
+    [Fact]
+    public async Task ConnectionTest_NegotiatesLegacyTokenFieldAndSystemRole()
+    {
+        var acceptedProbe = false;
+        string? generatedBody = null;
+        var handler = new StubHandler(async request =>
+        {
+            if (request.Method == HttpMethod.Get)
+                return new(HttpStatusCode.NotFound);
+            var body = await request.Content!.ReadAsStringAsync();
+            var legacy = body.Contains("\"max_tokens\"", StringComparison.Ordinal) &&
+                         body.Contains("\"role\":\"system\"", StringComparison.Ordinal);
+            if (!legacy)
+            {
+                return new(HttpStatusCode.BadRequest)
+                {
+                    Content = new StringContent("""{"error":{"message":"Unsupported request contract"}}""")
+                };
+            }
+            if (!acceptedProbe)
+            {
+                acceptedProbe = true;
+                return Response("""{"ok":true}""");
+            }
+            generatedBody = body;
+            return Response("""{"initialStoryBibleEntries":[{"category":"world","name":"Moon","content":"Red","importance":4}]}""");
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var settings = Settings();
+
+        var connection = await provider.TestConnectionAsync(settings, null);
+        await provider.GenerateStoryDefinitionAsync(
+            settings with { Capabilities = connection.Capabilities },
+            null,
+            "Story");
+
+        Assert.True(connection.Success);
+        Assert.Equal(OutputTokenParameter.MaxTokens, connection.Capabilities.OutputTokenParameter);
+        Assert.Equal(InstructionMessageRole.System, connection.Capabilities.InstructionMessageRole);
+        Assert.Contains("\"max_tokens\"", generatedBody);
+        Assert.DoesNotContain("\"max_completion_tokens\"", generatedBody);
+        Assert.Contains("\"role\":\"system\"", generatedBody);
+    }
+
+    [Fact]
+    public async Task CancellationWhileReadingErrorBody_RemainsCancellation()
+    {
+        var handler = new StubHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StreamContent(new CancellationOnlyStream())
+        }));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            provider.ValidatePlayerAnswerAsync(
+                Settings(),
+                null,
+                new(Guid.NewGuid(), "Name?", "Required", 0),
+                "Alex",
+                [],
+                cancellation.Token));
+    }
+
     private static ApiConnectionSettings Settings() => NarratorDefaults.Create() with
     {
         BaseUrl = new("https://example.test/v1/"),
@@ -132,5 +199,33 @@ public sealed class ProviderTests
     private sealed class StubHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> callback) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => callback(request);
+    }
+
+    private sealed class CancellationOnlyStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+        public override async Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
     }
 }

@@ -165,6 +165,8 @@ public sealed class NarratorApplication(
         Guid definitionId, PlayerQuestion question, string answer, IReadOnlyList<PlayerResponse> previousAnswers,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(answer))
+            throw new NarratorException("Enter an answer before validating it.");
         var (settings, credential) = await ConnectionAsync(cancellationToken);
         if (answer.Length > settings.ContentLimits.MaxPlayerAnswerCharacters)
             throw new NarratorException("The answer exceeds the configured limit.");

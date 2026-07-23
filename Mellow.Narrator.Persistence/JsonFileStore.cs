@@ -108,7 +108,7 @@ internal static class JsonFileStore
             var (value, version) = DeserializeWithVersion<T>(bytes);
             return (true, value, bytes, version != CurrentFormatVersion);
         }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or NotSupportedException)
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
             return (false, default, null, false);
         }

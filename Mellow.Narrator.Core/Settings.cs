@@ -28,12 +28,18 @@ public sealed record ContentLimitSettings(
     int MaxResponseBodyBytes);
 
 public enum StructuredOutputTier { Untested, StrictJsonSchema, JsonMode, PromptedJson, Unsupported }
+public enum OutputTokenParameter { MaxCompletionTokens, MaxTokens }
+public enum InstructionMessageRole { Developer, System }
 
 public sealed record ConnectionCapabilities(
     bool SupportsModelDiscovery,
     StructuredOutputTier StructuredOutputTier,
     string? TestedModelId,
-    DateTimeOffset? TestedAtUtc);
+    DateTimeOffset? TestedAtUtc)
+{
+    public OutputTokenParameter OutputTokenParameter { get; init; } = OutputTokenParameter.MaxCompletionTokens;
+    public InstructionMessageRole InstructionMessageRole { get; init; } = InstructionMessageRole.Developer;
+}
 
 public sealed record ApiConnectionSettings(
     Uri? BaseUrl,

@@ -13,10 +13,13 @@ public interface IStoryStateRepository
     Task<IReadOnlyList<StoryStateSummary>> ListAsync(CancellationToken cancellationToken = default);
     Task<StoryState?> GetAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<StoryTurn>> GetTurnsAsync(Guid id, int? takeLast = null, CancellationToken cancellationToken = default);
+    Task<StoryStateAggregateSnapshot?> GetSnapshotAsync(Guid id, CancellationToken cancellationToken = default);
     Task CreateAsync(StoryState state, StoryTurn openingTurn, CancellationToken cancellationToken = default);
     Task ImportAsync(StoryState state, IReadOnlyList<StoryTurn> turns, CancellationToken cancellationToken = default);
     Task CommitTurnAsync(StoryState state, StoryTurn turn, CancellationToken cancellationToken = default);
     Task SaveAsync(StoryState state, CancellationToken cancellationToken = default);
+    Task UpdateLabelAsync(Guid id, string label, CancellationToken cancellationToken = default);
+    Task SwapSortOrderAsync(Guid firstId, Guid secondId, CancellationToken cancellationToken = default);
     Task<StoryState> CopyAsync(Guid id, CancellationToken cancellationToken = default);
     Task MoveToTrashAsync(Guid id, CancellationToken cancellationToken = default);
 }

@@ -104,7 +104,7 @@ public sealed class StoryStateListPage : ContentPage
             initialValue: value.Label,
             maxLength: settings.ContentLimits.MaxStoryLabelCharacters);
         if (string.IsNullOrWhiteSpace(label)) return;
-        try { await _repository.SaveAsync(value with { Label = label }); await Refresh(); }
+        try { await _repository.UpdateLabelAsync(value.Id, label); await Refresh(); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
@@ -115,11 +115,7 @@ public sealed class StoryStateListPage : ContentPage
         var otherIndex = index + delta;
         if (otherIndex < 0 || otherIndex >= _items.Count) return;
         var other = _items[otherIndex];
-        var first = await _repository.GetAsync(selected.Id);
-        var second = await _repository.GetAsync(other.Id);
-        if (first is null || second is null) return;
-        await _repository.SaveAsync(first with { SortOrder = second.SortOrder });
-        await _repository.SaveAsync(second with { SortOrder = first.SortOrder });
+        await _repository.SwapSortOrderAsync(selected.Id, other.Id);
         await Refresh();
     }
 
@@ -143,8 +139,9 @@ public sealed class StoryStateListPage : ContentPage
         if (Selected is not { } selected) return;
         try
         {
-            var state = await _repository.GetAsync(selected.Id) ?? throw new NarratorException("Story State not found.");
-            await ImportExportService.ExportStateAsync(state, await _repository.GetTurnsAsync(state.Id));
+            var snapshot = await _repository.GetSnapshotAsync(selected.Id)
+                ?? throw new NarratorException("Story State not found.");
+            await ImportExportService.ExportStateAsync(snapshot.State, snapshot.Turns);
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }

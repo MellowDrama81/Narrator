@@ -27,6 +27,26 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task ConnectionCapabilities_RoundTripNegotiatedRequestContract()
+    {
+        var repository = (IApiConnectionSettingsStore)_store;
+        var expected = NarratorDefaults.Create() with
+        {
+            Capabilities = new(false, StructuredOutputTier.JsonMode, "model", DateTimeOffset.UtcNow)
+            {
+                OutputTokenParameter = OutputTokenParameter.MaxTokens,
+                InstructionMessageRole = InstructionMessageRole.System
+            }
+        };
+
+        await repository.SaveAsync(expected);
+        var actual = await repository.LoadAsync();
+
+        Assert.Equal(OutputTokenParameter.MaxTokens, actual.Capabilities.OutputTokenParameter);
+        Assert.Equal(InstructionMessageRole.System, actual.Capabilities.InstructionMessageRole);
+    }
+
+    [Fact]
     public async Task StoryTurn_RoundTripsAndOrphanIsRolledBack()
     {
         var repository = (IStoryStateRepository)_store;
@@ -137,6 +157,52 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task RecentTurns_DoNotReadOlderTurnDocuments()
+    {
+        var repository = (IStoryStateRepository)_store;
+        var (state, opening) = State();
+        await repository.CreateAsync(state, opening);
+        var first = opening with { Id = Guid.NewGuid(), SequenceNumber = 1, PlayerAction = "first" };
+        await repository.CommitTurnAsync(state = state with { LastCommittedTurnSequence = 1 }, first);
+        var second = opening with { Id = Guid.NewGuid(), SequenceNumber = 2, PlayerAction = "second" };
+        await repository.CommitTurnAsync(state = state with { LastCommittedTurnSequence = 2 }, second);
+        var openingPath = Path.Combine(
+            _root,
+            "Mellow.Narrator",
+            "story-states",
+            state.Id.ToString("D"),
+            "turns",
+            $"00000000-{opening.Id:D}.json");
+        await File.WriteAllTextAsync(openingPath, "{}");
+
+        Assert.Contains(await repository.ListAsync(), x => x.Id == state.Id);
+        var recent = await repository.GetTurnsAsync(state.Id, 1);
+
+        Assert.Equal(2, Assert.Single(recent).SequenceNumber);
+        await Assert.ThrowsAsync<InvalidDataException>(() => repository.GetTurnsAsync(state.Id));
+    }
+
+    [Fact]
+    public async Task StaleWholeStateSaveIsRejectedAndMetadataUpdatePreservesCommittedTurn()
+    {
+        var repository = (IStoryStateRepository)_store;
+        var (state, opening) = State();
+        await repository.CreateAsync(state, opening);
+        var stale = await repository.GetAsync(state.Id);
+        var nextTurn = opening with { Id = Guid.NewGuid(), SequenceNumber = 1, PlayerAction = "advance" };
+        await repository.CommitTurnAsync(state with { LastCommittedTurnSequence = 1 }, nextTurn);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            repository.SaveAsync(stale! with { Label = "Stale label" }));
+        await repository.UpdateLabelAsync(state.Id, "Current label");
+
+        var current = await repository.GetAsync(state.Id);
+        Assert.Equal("Current label", current!.Label);
+        Assert.Equal(1, current.LastCommittedTurnSequence);
+        Assert.Equal(2, (await repository.GetSnapshotAsync(state.Id))!.Turns.Count);
+    }
+
+    [Fact]
     public async Task PermanentTrashDeletion_RemovesDefinitionBackup()
     {
         var definitions = (IStoryDefinitionRepository)_store;
@@ -151,6 +217,20 @@ public sealed class PersistenceTests : IDisposable
 
         var trashFolder = Path.Combine(_root, "Mellow.Narrator", "trash", "story-definitions");
         Assert.Empty(Directory.EnumerateFiles(trashFolder));
+    }
+
+    [Fact]
+    public async Task PermanentTrashDeletion_RejectsPathsOutsideTrash()
+    {
+        var settings = (IApiConnectionSettingsStore)_store;
+        var trash = (ITrashStore)_store;
+        var expected = NarratorDefaults.Create() with { ModelId = "preserve-me" };
+        await settings.SaveAsync(expected);
+
+        await Assert.ThrowsAsync<FileNotFoundException>(() =>
+            trash.DeletePermanentlyAsync(Path.Combine("..", "..", "settings", "api-connection.json")));
+
+        Assert.Equal("preserve-me", (await settings.LoadAsync()).ModelId);
     }
 
     [Fact]
@@ -203,6 +283,28 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(definition.Id, loaded!.Id);
         Assert.True(File.Exists(path + ".bak"));
         Assert.Contains("\"formatVersion\": 1", await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public async Task NewerFormatPrimary_IsNotReplacedByOlderBackup()
+    {
+        var repository = (IStoryDefinitionRepository)_store;
+        var definition = Definition();
+        await repository.SaveAsync(definition);
+        await repository.SaveAsync(definition with { Title = "Current" });
+        var path = Path.Combine(_root, "Mellow.Narrator", "story-definitions", $"{definition.Id:D}.json");
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+        };
+        await File.WriteAllTextAsync(
+            path,
+            JsonSerializer.Serialize(new { formatVersion = 2, data = definition with { Title = "Newer format" } }, options));
+
+        await Assert.ThrowsAsync<NotSupportedException>(() => repository.GetAsync(definition.Id));
+
+        Assert.Contains("\"formatVersion\":2", (await File.ReadAllTextAsync(path)).Replace(" ", ""));
     }
 
     [Fact]
