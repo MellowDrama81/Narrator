@@ -270,8 +270,14 @@ public sealed class JsonNarratorStore :
     Task IWorkspaceStateStore.SaveAsync(WorkspaceState state, CancellationToken cancellationToken) =>
         LockedAsync("workspace", () => JsonFileStore.WriteAsync(WorkspacePath, state, cancellationToken), cancellationToken);
 
-    async Task<ApiConnectionSettings> IApiConnectionSettingsStore.LoadAsync(CancellationToken cancellationToken) =>
-        await JsonFileStore.ReadAsync<ApiConnectionSettings>(SettingsPath, cancellationToken, ReportRecovery) ?? NarratorDefaults.Create();
+    async Task<ApiConnectionSettings> IApiConnectionSettingsStore.LoadAsync(CancellationToken cancellationToken)
+    {
+        var loaded = await JsonFileStore.ReadAsync<ApiConnectionSettings>(SettingsPath, cancellationToken, ReportRecovery);
+        if (loaded is null) return NarratorDefaults.Create();
+        return loaded.PromptTemplates is null
+            ? loaded with { PromptTemplates = PromptTemplateDefaults.Create() }
+            : loaded;
+    }
 
     Task IApiConnectionSettingsStore.SaveAsync(ApiConnectionSettings settings, CancellationToken cancellationToken) =>
         LockedAsync("settings", () => JsonFileStore.WriteAsync(SettingsPath, settings, cancellationToken), cancellationToken);

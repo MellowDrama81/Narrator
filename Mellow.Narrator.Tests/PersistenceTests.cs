@@ -1,6 +1,7 @@
 using Mellow.Narrator.Core;
 using Mellow.Narrator.Persistence;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace Mellow.Narrator.Tests;
@@ -36,6 +37,10 @@ public sealed class PersistenceTests : IDisposable
             {
                 OutputTokenParameter = OutputTokenParameter.MaxTokens,
                 InstructionMessageRole = InstructionMessageRole.System
+            },
+            PromptTemplates = PromptTemplateDefaults.Create() with
+            {
+                StoryNarrationInstruction = "Persist this narration template."
             }
         };
 
@@ -44,6 +49,24 @@ public sealed class PersistenceTests : IDisposable
 
         Assert.Equal(OutputTokenParameter.MaxTokens, actual.Capabilities.OutputTokenParameter);
         Assert.Equal(InstructionMessageRole.System, actual.Capabilities.InstructionMessageRole);
+        Assert.Equal("Persist this narration template.", actual.PromptTemplates.StoryNarrationInstruction);
+    }
+
+    [Fact]
+    public async Task ConnectionSettingsWithoutPromptTemplates_LoadDefaults()
+    {
+        var repository = (IApiConnectionSettingsStore)_store;
+        await repository.SaveAsync(NarratorDefaults.Create());
+        var path = Path.Combine(_root, "Mellow.Narrator", "settings", "api-connection.json");
+        var document = JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
+        document["data"]!.AsObject().Remove("promptTemplates");
+        await File.WriteAllTextAsync(path, document.ToJsonString());
+
+        var loaded = await repository.LoadAsync();
+
+        Assert.Equal(
+            PromptTemplateDefaults.Create().StoryNarrationInstruction,
+            loaded.PromptTemplates.StoryNarrationInstruction);
     }
 
     [Fact]

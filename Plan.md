@@ -71,6 +71,16 @@ Use a defined response schema for player-answer warning checks, Story Definition
 Prefer strict JSON Schema Structured Outputs. If it is unavailable, use JSON mode. If JSON mode is also unavailable, prompt the model to return JSON, validate it locally and retry once with the validation errors.
 Treat a refusal as a failed operation rather than as malformed structured output.
 
+## Prompt Templates
+
+Persist application-wide prompt templates as non-sensitive Settings and use the currently saved templates for every subsequently started LLM operation, including existing stories. Provide configurable templates for player-answer validation, initial Story Bible generation, story narration, corrective response-validation retries, prompted-JSON schema instructions, opening-scene requests and the continue-story fallback request.
+
+Keep Story Prompts and per-question natural-language validation instructions in Story Definitions. Continue to send Story Prompt, player responses, the full Story Bible, recent turns and player actions as structured application-owned context; these data envelopes are not user-editable templates.
+
+The corrective retry template must contain `{validationError}` and the prompted-JSON template must contain `{schema}`. Replace those placeholders exactly when constructing a request. Require every template to be non-empty and no longer than 20,000 characters. Provide built-in defaults and a Reset Prompt Templates action which changes the fields but still requires Save.
+
+Keep connection-test and capability-probe prompts adapter-owned and non-configurable so edited templates cannot invalidate capability detection.
+
 A story-turn response contains narration, suggested player actions, the IDs of existing Story Bible entries relevant to the turn and a list of updates to apply to the Story Bible:
 
 ```json
@@ -548,7 +558,19 @@ public sealed record ApiConnectionSettings(
     StoryGenerationSettings StoryGeneration,
     RetrySettings Retry,
     ContentLimitSettings ContentLimits,
-    ConnectionCapabilities Capabilities);
+    ConnectionCapabilities Capabilities)
+{
+    public PromptTemplateSettings PromptTemplates { get; init; } = PromptTemplateDefaults.Create();
+}
+
+public sealed record PromptTemplateSettings(
+    string PlayerAnswerValidationInstruction,
+    string StoryDefinitionInstruction,
+    string StoryNarrationInstruction,
+    string CorrectiveRetryInstruction,
+    string PromptedJsonInstruction,
+    string OpeningSceneInstruction,
+    string ContinueStoryInstruction);
 
 public sealed record ModelParameters(
     double? Temperature,
@@ -632,6 +654,7 @@ Create the initial configuration from one versioned Core defaults factory. Persi
 | Initial retry delay | 1 second | 0.25 to 30 seconds |
 | Maximum retry delay | 10 seconds | 1 to 120 seconds |
 | Maximum automatic `Retry-After` wait | 60 seconds | 1 to 600 seconds |
+| Each prompt template | Built-in template | 1 to 20,000 characters |
 
 Advanced content limits use these defaults:
 
@@ -1061,6 +1084,7 @@ With an API connected, attempt to load a list of available models and allow the 
 Explain that changing the selected model applies to all subsequent LLM operations, including existing stories.
 Show request timeout, maximum output tokens, optional temperature, optional top-p, optional reasoning effort, recent-turn count and maximum Story Bible entry count as normal generation settings. Send optional model parameters only when configured.
 Provide an Advanced section for retry timing, Story Bible warning/per-entry/total limits and all input, structured-response and response-body limits.
+Provide a Prompt Templates page for editing the application-wide templates, explaining the required `{validationError}` and `{schema}` placeholders, and resetting all templates to their built-in defaults without saving automatically.
 Show each setting's allowed range and default value. Validate fields before saving, preserve the user's invalid text while showing errors, and provide Reset Section to Defaults actions which still require Save before taking effect.
 Before saving lower Story Bible limits, report how many existing Story Definitions and Story States would no longer conform. Saving the settings is allowed after acknowledgement but does not modify those records.
 Allow the user to test the connection and show its detected capabilities.

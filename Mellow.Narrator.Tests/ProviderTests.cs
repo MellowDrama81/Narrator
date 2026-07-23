@@ -30,7 +30,11 @@ public sealed class ProviderTests
         {
             BaseUrl = new("https://example.test/v1/"),
             ModelId = "story-model",
-            Capabilities = new(false, StructuredOutputTier.PromptedJson, "story-model", DateTimeOffset.UtcNow)
+            Capabilities = new(false, StructuredOutputTier.PromptedJson, "story-model", DateTimeOffset.UtcNow),
+            PromptTemplates = PromptTemplateDefaults.Create() with
+            {
+                StoryDefinitionInstruction = "CUSTOM DEFINITION INSTRUCTION"
+            }
         };
 
         var result = await provider.GenerateStoryDefinitionAsync(settings, "secret", "A red moon story");
@@ -40,6 +44,7 @@ public sealed class ProviderTests
         Assert.Equal("secret", captured.Headers.Authorization.Parameter);
         Assert.Contains("story-model", body);
         Assert.Contains("A red moon story", body);
+        Assert.Contains("CUSTOM DEFINITION INSTRUCTION", body);
         Assert.Contains("\"max_completion_tokens\"", body);
         Assert.DoesNotContain("\"max_tokens\"", body);
         Assert.Contains("\"role\":\"developer\"", body);
@@ -49,20 +54,31 @@ public sealed class ProviderTests
     public async Task GenerateDefinition_RetriesOnceAfterLocalValidationFailure()
     {
         var requests = 0;
-        var handler = new StubHandler(request =>
+        var bodies = new List<string>();
+        var handler = new StubHandler(async request =>
         {
             requests++;
+            bodies.Add(await request.Content!.ReadAsStringAsync());
             var content = requests == 1
                 ? """{"initialStoryBibleEntries":[{"category":"world","name":"Moon","content":"Red","importance":9}]}"""
                 : """{"initialStoryBibleEntries":[{"category":"world","name":"Moon","content":"Red","importance":4}]}""";
-            return Task.FromResult(Response(content));
+            return Response(content);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var settings = Settings() with
+        {
+            PromptTemplates = PromptTemplateDefaults.Create() with
+            {
+                CorrectiveRetryInstruction = $"CUSTOM CORRECTION {PromptTemplateDefaults.ValidationErrorPlaceholder}"
+            }
+        };
 
-        var result = await provider.GenerateStoryDefinitionAsync(Settings(), null, "Story");
+        var result = await provider.GenerateStoryDefinitionAsync(settings, null, "Story");
 
         Assert.Equal(2, requests);
         Assert.Equal(4, Assert.Single(result.InitialStoryBibleEntries).Importance);
+        Assert.Contains("CUSTOM CORRECTION", bodies[1]);
+        Assert.Contains("importance", bodies[1], StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -76,14 +92,24 @@ public sealed class ProviderTests
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
 
+        var settings = Settings() with
+        {
+            PromptTemplates = PromptTemplateDefaults.Create() with
+            {
+                PlayerAnswerValidationInstruction = "CUSTOM VALIDATION INSTRUCTION",
+                PromptedJsonInstruction = $"CUSTOM SCHEMA {PromptTemplateDefaults.SchemaPlaceholder}"
+            }
+        };
+
         await provider.ValidatePlayerAnswerAsync(
-            Settings(),
+            settings,
             null,
             new(Guid.NewGuid(), "Name?", "Required", 0),
             "Alex",
             []);
 
-        Assert.Contains("JSON Schema", body);
+        Assert.Contains("CUSTOM VALIDATION INSTRUCTION", body);
+        Assert.Contains("CUSTOM SCHEMA", body);
         Assert.Contains("hasWarning", body);
     }
 
@@ -92,13 +118,15 @@ public sealed class ProviderTests
     {
         var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Fact", "Content", 3, 0);
         var requests = 0;
-        var handler = new StubHandler(request =>
+        string? body = null;
+        var handler = new StubHandler(async request =>
         {
             requests++;
+            body = await request.Content!.ReadAsStringAsync();
             var relevant = requests == 1 ? Guid.NewGuid() : entry.Id;
-            return Task.FromResult(Response($$"""
+            return Response($$"""
                 {"narration":"Scene","suggestedActions":["Continue"],"relevantStoryBibleEntryIds":["{{relevant}}"],"storyBibleUpdates":[]}
-                """));
+                """);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
@@ -109,10 +137,18 @@ public sealed class ProviderTests
             "Continue",
             1);
 
-        var result = await provider.GenerateTurnAsync(Settings(), null, context);
+        var settings = Settings() with
+        {
+            PromptTemplates = PromptTemplateDefaults.Create() with
+            {
+                StoryNarrationInstruction = "CUSTOM NARRATION INSTRUCTION"
+            }
+        };
+        var result = await provider.GenerateTurnAsync(settings, null, context);
 
         Assert.Equal(2, requests);
         Assert.Equal(entry.Id, Assert.Single(result.RelevantStoryBibleEntryIds));
+        Assert.Contains("CUSTOM NARRATION INSTRUCTION", body);
     }
 
     [Fact]

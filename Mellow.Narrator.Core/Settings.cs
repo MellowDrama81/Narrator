@@ -2,6 +2,36 @@ namespace Mellow.Narrator.Core;
 
 public sealed record ModelParameters(double? Temperature, double? TopP, string? ReasoningEffort);
 
+public sealed record PromptTemplateSettings(
+    string PlayerAnswerValidationInstruction,
+    string StoryDefinitionInstruction,
+    string StoryNarrationInstruction,
+    string CorrectiveRetryInstruction,
+    string PromptedJsonInstruction,
+    string OpeningSceneInstruction,
+    string ContinueStoryInstruction);
+
+public static class PromptTemplateDefaults
+{
+    public const int MaximumTemplateCharacters = 20000;
+    public const string ValidationErrorPlaceholder = "{validationError}";
+    public const string SchemaPlaceholder = "{schema}";
+
+    public static PromptTemplateSettings Create() => new(
+        "You validate one interactive-story setup answer. Apply the validation instruction in context. Return JSON only. A failed rule is advisory: set hasWarning true and explain concisely.",
+        "Create the initial Story Bible for an interactive story. Include every durable fact required to narrate consistently. Keep entries concise, avoid duplicates, and assign importance 1 through 5. Return JSON only.",
+        """
+        You narrate an interactive story. Return JSON only. The Story Bible is authoritative and complete.
+        Narrate the immediate scene, offer concise suggested actions, flag every existing Bible entry relevant now,
+        and return only incremental Story Bible updates. Preserve durable facts, replace rather than duplicate,
+        remove obsolete facts, and assign importance 1 through 5.
+        """,
+        $"Your previous response failed validation: {ValidationErrorPlaceholder}. Return a corrected JSON object only.",
+        $"Return an object matching this JSON Schema exactly: {SchemaPlaceholder}",
+        "Create the opening scene.",
+        "Continue the story.");
+}
+
 public sealed record StoryGenerationSettings(
     int RecentTurnCount,
     int MaxStoryBibleEntries,
@@ -50,7 +80,10 @@ public sealed record ApiConnectionSettings(
     StoryGenerationSettings StoryGeneration,
     RetrySettings Retry,
     ContentLimitSettings ContentLimits,
-    ConnectionCapabilities Capabilities);
+    ConnectionCapabilities Capabilities)
+{
+    public PromptTemplateSettings PromptTemplates { get; init; } = PromptTemplateDefaults.Create();
+}
 
 public static class NarratorDefaults
 {
@@ -86,6 +119,7 @@ public static class SettingsValidator
         Range(errors, "MaxRetryAfter", value.Retry.MaxRetryAfter.TotalSeconds, 1, 600);
         if (value.Retry.MaxDelay < value.Retry.InitialDelay)
             errors["MaxDelay"] = "Maximum retry delay must be at least the initial delay.";
+        ValidatePromptTemplates(errors, value.PromptTemplates);
 
         var c = value.ContentLimits;
         Range(errors, nameof(c.MaxStoryTitleCharacters), c.MaxStoryTitleCharacters, 1, 1000);
@@ -103,6 +137,44 @@ public static class SettingsValidator
         Range(errors, nameof(c.MaxStoryBibleUpdatesPerResponse), c.MaxStoryBibleUpdatesPerResponse, 1, 1000);
         Range(errors, nameof(c.MaxResponseBodyBytes), c.MaxResponseBodyBytes, 64 * 1024, 16 * 1024 * 1024);
         return errors;
+    }
+
+    private static void ValidatePromptTemplates(
+        IDictionary<string, string> errors,
+        PromptTemplateSettings? templates)
+    {
+        if (templates is null)
+        {
+            errors[nameof(ApiConnectionSettings.PromptTemplates)] = "Prompt templates are required.";
+            return;
+        }
+
+        Prompt(errors, nameof(templates.PlayerAnswerValidationInstruction), templates.PlayerAnswerValidationInstruction);
+        Prompt(errors, nameof(templates.StoryDefinitionInstruction), templates.StoryDefinitionInstruction);
+        Prompt(errors, nameof(templates.StoryNarrationInstruction), templates.StoryNarrationInstruction);
+        Prompt(errors, nameof(templates.CorrectiveRetryInstruction), templates.CorrectiveRetryInstruction);
+        Prompt(errors, nameof(templates.PromptedJsonInstruction), templates.PromptedJsonInstruction);
+        Prompt(errors, nameof(templates.OpeningSceneInstruction), templates.OpeningSceneInstruction);
+        Prompt(errors, nameof(templates.ContinueStoryInstruction), templates.ContinueStoryInstruction);
+        if (!string.IsNullOrWhiteSpace(templates.CorrectiveRetryInstruction) &&
+            !templates.CorrectiveRetryInstruction.Contains(PromptTemplateDefaults.ValidationErrorPlaceholder, StringComparison.Ordinal))
+            errors[nameof(templates.CorrectiveRetryInstruction)] =
+                $"Must contain {PromptTemplateDefaults.ValidationErrorPlaceholder}.";
+        if (!string.IsNullOrWhiteSpace(templates.PromptedJsonInstruction) &&
+            !templates.PromptedJsonInstruction.Contains(PromptTemplateDefaults.SchemaPlaceholder, StringComparison.Ordinal))
+            errors[nameof(templates.PromptedJsonInstruction)] =
+                $"Must contain {PromptTemplateDefaults.SchemaPlaceholder}.";
+    }
+
+    private static void Prompt(
+        IDictionary<string, string> errors,
+        string name,
+        string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            errors[name] = "Must not be empty.";
+        else if (value.Length > PromptTemplateDefaults.MaximumTemplateCharacters)
+            errors[name] = $"Must not exceed {PromptTemplateDefaults.MaximumTemplateCharacters} characters.";
     }
 
     private static void OptionalRange(IDictionary<string, string> errors, string name, double? value, double min, double max)

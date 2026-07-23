@@ -41,7 +41,7 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
                     {
                         var response = await CompleteAsync(settings, credential,
                             [Message("system", "Return a JSON object with exactly one boolean property named ok."), Message("user", "Return ok as true.")],
-                            SimpleProbeSchema(), candidate, cancellationToken, contract);
+                            SimpleProbeSchema(), candidate, cancellationToken, contract, false);
                         if (response["ok"]?.GetValue<bool>() == true)
                         {
                             tier = candidate;
@@ -81,7 +81,7 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
         };
         var messages = new[]
         {
-            Message("system", "You validate one interactive-story setup answer. Apply the validation instruction in context. Return JSON only. A failed rule is advisory: set hasWarning true and explain concisely."),
+            Message("system", settings.PromptTemplates.PlayerAnswerValidationInstruction),
             Message("user", JsonSerializer.Serialize(payload, Json))
         };
         return await CompleteWithCorrectionAsync(
@@ -98,7 +98,7 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
     {
         var messages = new[]
         {
-            Message("system", "Create the initial Story Bible for an interactive story. Include every durable fact required to narrate consistently. Keep entries concise, avoid duplicates, and assign importance 1 through 5. Return JSON only."),
+            Message("system", settings.PromptTemplates.StoryDefinitionInstruction),
             Message("user", storyPrompt)
         };
         return await CompleteWithCorrectionAsync(
@@ -121,7 +121,7 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
     private async Task<StoryGenerationResponse> GenerateStoryAsync(
         ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
     {
-        var messages = BuildStoryMessages(context, opening);
+        var messages = BuildStoryMessages(settings.PromptTemplates, context, opening);
         return await CompleteWithCorrectionAsync(
             settings,
             credential,
@@ -148,7 +148,10 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
         catch (Exception ex) when (ex is JsonException or NarratorException)
         {
             var corrected = messages.Concat([
-                Message("system", $"Your previous response failed validation: {ex.Message}. Return a corrected JSON object only.")
+                Message("system", settings.PromptTemplates.CorrectiveRetryInstruction.Replace(
+                    PromptTemplateDefaults.ValidationErrorPlaceholder,
+                    ex.Message,
+                    StringComparison.Ordinal))
             ]).ToArray();
             return parseAndValidate(await CompleteAsync(settings, credential, corrected, schema, tier, cancellationToken));
         }
@@ -158,11 +161,18 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
         ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> messages, JsonObject schema,
         StructuredOutputTier tier,
         CancellationToken cancellationToken,
-        ProviderRequestContract? requestContract = null)
+        ProviderRequestContract? requestContract = null,
+        bool useConfiguredPromptTemplates = true)
     {
         RequireConnection(settings);
+        var promptedJsonInstruction = useConfiguredPromptTemplates
+            ? settings.PromptTemplates.PromptedJsonInstruction
+            : $"Return an object matching this JSON Schema exactly: {PromptTemplateDefaults.SchemaPlaceholder}";
         var requestMessages = tier == StructuredOutputTier.PromptedJson
-            ? messages.Concat([Message("system", $"Return an object matching this JSON Schema exactly: {schema.ToJsonString(Json)}")]).ToArray()
+            ? messages.Concat([Message("system", promptedJsonInstruction.Replace(
+                PromptTemplateDefaults.SchemaPlaceholder,
+                schema.ToJsonString(Json),
+                StringComparison.Ordinal))]).ToArray()
             : messages;
         requestContract ??= new(
             settings.Capabilities.OutputTokenParameter,
@@ -327,15 +337,12 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
         return request;
     }
 
-    private static IReadOnlyList<JsonObject> BuildStoryMessages(GenerationContext context, bool opening)
+    private static IReadOnlyList<JsonObject> BuildStoryMessages(
+        PromptTemplateSettings templates,
+        GenerationContext context,
+        bool opening)
     {
-        var system = """
-            You narrate an interactive story. Return JSON only. The Story Bible is authoritative and complete.
-            Narrate the immediate scene, offer concise suggested actions, flag every existing Bible entry relevant now,
-            and return only incremental Story Bible updates. Preserve durable facts, replace rather than duplicate,
-            remove obsolete facts, and assign importance 1 through 5.
-            """;
-        var messages = new List<JsonObject> { Message("system", system) };
+        var messages = new List<JsonObject> { Message("system", templates.StoryNarrationInstruction) };
         messages.Add(Message("user", JsonSerializer.Serialize(new
         {
             storyPrompt = context.Definition.StoryPrompt,
@@ -347,7 +354,9 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
             if (turn.PlayerAction is not null) messages.Add(Message("user", turn.PlayerAction));
             messages.Add(Message("assistant", turn.Narration));
         }
-        messages.Add(Message("user", opening ? "Create the opening scene." : context.PlayerAction ?? "Continue the story."));
+        messages.Add(Message(
+            "user",
+            opening ? templates.OpeningSceneInstruction : context.PlayerAction ?? templates.ContinueStoryInstruction));
         return messages;
     }
 

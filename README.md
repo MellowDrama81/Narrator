@@ -1,6 +1,6 @@
 # Mellow Narrator
 
-Mellow Narrator is a .NET 10 MAUI application for creating and playing durable, LLM-driven interactive stories on Windows and Android.
+Mellow Narrator is a .NET 10 MAUI application for creating and playing durable, LLM-driven interactive stories on Windows and Android. Application-wide LLM prompt templates are configurable from Settings.
 
 ## Projects
 

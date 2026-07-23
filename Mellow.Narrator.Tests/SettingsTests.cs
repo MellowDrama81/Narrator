@@ -11,6 +11,13 @@ public sealed class SettingsTests
         Assert.Empty(SettingsValidator.Validate(settings));
         Assert.Equal(8, settings.StoryGeneration.RecentTurnCount);
         Assert.Equal(200, settings.StoryGeneration.MaxStoryBibleEntries);
+        Assert.Contains("Story Bible", settings.PromptTemplates.StoryDefinitionInstruction);
+        Assert.Contains(
+            PromptTemplateDefaults.ValidationErrorPlaceholder,
+            settings.PromptTemplates.CorrectiveRetryInstruction);
+        Assert.Contains(
+            PromptTemplateDefaults.SchemaPlaceholder,
+            settings.PromptTemplates.PromptedJsonInstruction);
     }
 
     [Fact]
@@ -60,5 +67,43 @@ public sealed class SettingsTests
             Retry = new(2, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(60))
         };
         Assert.Contains("MaxDelay", SettingsValidator.Validate(value).Keys);
+    }
+
+    [Fact]
+    public void Validator_RejectsEmptyAndOversizedPromptTemplates()
+    {
+        var defaults = PromptTemplateDefaults.Create();
+        var value = NarratorDefaults.Create() with
+        {
+            PromptTemplates = defaults with
+            {
+                PlayerAnswerValidationInstruction = "",
+                StoryNarrationInstruction = new string('x', PromptTemplateDefaults.MaximumTemplateCharacters + 1)
+            }
+        };
+
+        var errors = SettingsValidator.Validate(value);
+
+        Assert.Contains(nameof(PromptTemplateSettings.PlayerAnswerValidationInstruction), errors.Keys);
+        Assert.Contains(nameof(PromptTemplateSettings.StoryNarrationInstruction), errors.Keys);
+    }
+
+    [Fact]
+    public void Validator_RequiresDynamicPromptPlaceholders()
+    {
+        var defaults = PromptTemplateDefaults.Create();
+        var value = NarratorDefaults.Create() with
+        {
+            PromptTemplates = defaults with
+            {
+                CorrectiveRetryInstruction = "Try again.",
+                PromptedJsonInstruction = "Return valid JSON."
+            }
+        };
+
+        var errors = SettingsValidator.Validate(value);
+
+        Assert.Contains(nameof(PromptTemplateSettings.CorrectiveRetryInstruction), errors.Keys);
+        Assert.Contains(nameof(PromptTemplateSettings.PromptedJsonInstruction), errors.Keys);
     }
 }

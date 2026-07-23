@@ -59,6 +59,7 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
                     Ui.Buttons(
                         Ui.Button("Advanced Settings", async (_, _) => await Navigation.PushModalAsync(new NavigationPage(new AdvancedSettingsPage(_app)))),
                         Ui.Button("Manage Trash", async (_, _) => await Navigation.PushModalAsync(new NavigationPage(new TrashPage(_trash))))),
+                    Ui.Button("Prompt Templates", async (_, _) => await Navigation.PushModalAsync(new NavigationPage(new PromptTemplatesPage(_app)))),
                     _status
                 }
             }
