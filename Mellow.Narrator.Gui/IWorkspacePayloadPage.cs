@@ -1,0 +1,21 @@
+using Mellow.Narrator.Core;
+
+namespace Mellow.Narrator.Gui;
+
+internal interface IWorkspacePayloadPage
+{
+    StoryPromptDraft? StoryPromptDraft => null;
+    StartStoryDraft? StartStoryDraft => null;
+    PlayStoryTabState? PlayStoryTabState => null;
+    PendingOperationState? PendingOperation => null;
+}
+
+internal interface ICloseGuardPage
+{
+    Task<bool> CanCloseAsync();
+}
+
+internal interface IInFlightRequestPage
+{
+    void CancelInFlightRequest();
+}
