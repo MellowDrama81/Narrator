@@ -14,8 +14,10 @@ public static class StoryBibleProcessor
         IReadOnlyList<Guid> relevantIds,
         IReadOnlyList<ProposedStoryBibleUpdate> updates,
         int turnNumber,
-        StoryGenerationSettings limits)
+        StoryGenerationSettings limits,
+        Func<Guid>? createId = null)
     {
+        createId ??= Guid.NewGuid;
         var entries = current.Entries.ToDictionary(x => x.Id);
         var relevant = relevantIds.ToHashSet();
         if (relevant.Any(x => !entries.ContainsKey(x)))
@@ -28,7 +30,7 @@ public static class StoryBibleProcessor
             if (update.Operation == StoryBibleOperation.Add)
             {
                 ValidateProposal(update.Entry);
-                var id = Guid.NewGuid();
+                var id = createId();
                 var after = ToEntry(id, update.Entry!, turnNumber);
                 entries.Add(id, after);
                 relevant.Add(id);
@@ -91,6 +93,15 @@ public static class StoryBibleProcessor
         bible.Entries.Count <= limits.MaxStoryBibleEntries
         && bible.Entries.All(x => SerializedLength(x) <= limits.MaxStoryBibleEntryCharacters)
         && SerializedLength(bible) <= limits.MaxStoryBibleCharacters;
+
+    public static bool IsApproachingLimits(StoryBible bible, StoryGenerationSettings limits)
+    {
+        var threshold = limits.StoryBibleWarningPercent / 100d;
+        var largest = bible.Entries.Count == 0 ? 0 : bible.Entries.Max(SerializedLength);
+        return bible.Entries.Count >= limits.MaxStoryBibleEntries * threshold ||
+            largest >= limits.MaxStoryBibleEntryCharacters * threshold ||
+            SerializedLength(bible) >= limits.MaxStoryBibleCharacters * threshold;
+    }
 
     private static void CullCount(IDictionary<Guid, StoryBibleEntry> entries, int max, ICollection<AppliedStoryBibleChange> changes)
     {

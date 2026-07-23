@@ -6,13 +6,18 @@ namespace Mellow.Narrator.Gui;
 public sealed class StoryStateListPage : ContentPage
 {
     private readonly IStoryStateRepository _repository;
+    private readonly INarratorApplication _application;
     private readonly MainTabbedPage _tabs;
     private readonly ObservableCollection<StoryStateSummary> _items = [];
     private readonly CollectionView _list;
 
-    public StoryStateListPage(IStoryStateRepository repository, MainTabbedPage tabs)
+    public StoryStateListPage(
+        IStoryStateRepository repository,
+        INarratorApplication application,
+        MainTabbedPage tabs)
     {
         _repository = repository;
+        _application = application;
         _tabs = tabs;
         Title = "Stories";
         _list = new CollectionView
@@ -24,10 +29,18 @@ public sealed class StoryStateListPage : ContentPage
                 var label = new Label { FontAttributes = FontAttributes.Bold, FontSize = 18 };
                 label.SetBinding(Label.TextProperty, nameof(StoryStateSummary.Label));
                 var dates = new Label { FontSize = 12 };
-                dates.SetBinding(Label.TextProperty, nameof(StoryStateSummary.StartedAtUtc), stringFormat: "Started {0:g}");
+                dates.SetBinding(Label.TextProperty, nameof(StoryStateSummary.StartedAtUtc),
+                    converter: new LocalTimestampConverter(), stringFormat: "Started {0}");
                 var lastAction = new Label { FontSize = 12 };
-                lastAction.SetBinding(Label.TextProperty, nameof(StoryStateSummary.LastActionAtUtc), stringFormat: "Last action {0:g}");
-                return new VerticalStackLayout { Padding = new Thickness(4, 8), Children = { label, dates, lastAction } };
+                lastAction.SetBinding(Label.TextProperty, new Binding(
+                    nameof(StoryStateSummary.LastActionAtUtc),
+                    stringFormat: "Last action: {0}",
+                    converter: new LocalTimestampConverter(),
+                    converterParameter: "No completed player action"));
+                var open = new Label { TextColor = Colors.DarkGreen, FontSize = 12 };
+                open.BindingContextChanged += (_, _) =>
+                    open.Text = open.BindingContext is StoryStateSummary item && _tabs.IsStoryOpen(item.Id) ? "Open in a tab" : "";
+                return new VerticalStackLayout { Padding = new Thickness(4, 8), Children = { label, dates, lastAction, open } };
             })
         };
         var grid = new Grid
@@ -70,6 +83,11 @@ public sealed class StoryStateListPage : ContentPage
     private async void Copy(object? sender, EventArgs e)
     {
         if (Selected is not { } selected) return;
+        if (_tabs.IsStoryRequestInFlight(selected.Id))
+        {
+            await DisplayAlertAsync("Copy unavailable", "Wait for the current story request to finish or cancel it first.", "OK");
+            return;
+        }
         try { var copy = await _repository.CopyAsync(selected.Id); await Refresh(); _tabs.OpenPlay(copy.Id); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
@@ -79,9 +97,14 @@ public sealed class StoryStateListPage : ContentPage
         if (Selected is not { } selected) return;
         var value = await _repository.GetAsync(selected.Id);
         if (value is null) return;
-        var label = await DisplayPromptAsync("Story label", "Enter a label for this Story State.", initialValue: value.Label, maxLength: 200);
+        var settings = await _application.GetSettingsAsync();
+        var label = await DisplayPromptAsync(
+            "Story label",
+            "Enter a label for this Story State.",
+            initialValue: value.Label,
+            maxLength: settings.ContentLimits.MaxStoryLabelCharacters);
         if (string.IsNullOrWhiteSpace(label)) return;
-        try { await _repository.SaveAsync(value with { Label = label.Trim() }); await Refresh(); }
+        try { await _repository.SaveAsync(value with { Label = label }); await Refresh(); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
@@ -111,7 +134,7 @@ public sealed class StoryStateListPage : ContentPage
 
     private async void Import(object? sender, EventArgs e)
     {
-        try { var imported = await ImportExportService.ImportStateAsync(_repository); await Refresh(); if (imported is not null) _tabs.OpenPlay(imported.Id); }
+        try { var imported = await ImportExportService.ImportStateAsync(_repository, _application); await Refresh(); if (imported is not null) _tabs.OpenPlay(imported.Id); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 

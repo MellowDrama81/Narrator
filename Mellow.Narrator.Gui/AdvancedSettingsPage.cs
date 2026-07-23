@@ -5,6 +5,33 @@ namespace Mellow.Narrator.Gui;
 
 public sealed class AdvancedSettingsPage : ContentPage
 {
+    private static readonly IReadOnlyDictionary<string, string> Help = new Dictionary<string, string>
+    {
+        ["temperature"] = "default blank; range 0–2",
+        ["topP"] = "default blank; range 0–1",
+        ["reasoning"] = "default blank",
+        ["bibleEntry"] = "default 4000; range 100–50000",
+        ["bibleTotal"] = "default 60000; range 1000–1000000",
+        ["bibleWarning"] = "default 80%; range 50–95",
+        ["retries"] = "default 2; range 0–5",
+        ["retryInitial"] = "default 1; range 0.25–30",
+        ["retryMax"] = "default 10; range 1–120",
+        ["retryAfter"] = "default 60; range 1–600",
+        ["title"] = "default 200; range 1–1000",
+        ["label"] = "default 200; range 1–1000",
+        ["prompt"] = "default 20000; range 100–200000",
+        ["question"] = "default 1000; range 1–10000",
+        ["validation"] = "default 2000; range 1–20000",
+        ["answer"] = "default 4000; range 1–50000",
+        ["action"] = "default 4000; range 1–50000",
+        ["narration"] = "default 20000; range 100–200000",
+        ["suggestedCount"] = "default 6; range 1–20",
+        ["suggestedLength"] = "default 500; range 1–5000",
+        ["category"] = "default 100; range 1–1000",
+        ["name"] = "default 200; range 1–2000",
+        ["updates"] = "default 100; range 1–1000",
+        ["responseBytes"] = "default 2097152; range 65536–16777216"
+    };
     private readonly INarratorApplication _app;
     private readonly Dictionary<string, Entry> _fields = [];
     private ApiConnectionSettings? _settings;
@@ -70,6 +97,19 @@ public sealed class AdvancedSettingsPage : ContentPage
                     Int("answer"), Int("action"), Int("narration"), Int("suggestedCount"), Int("suggestedLength"),
                     Int("category"), Int("name"), Int("updates"), Int("responseBytes"))
             };
+            var lowered = updated.StoryGeneration.MaxStoryBibleEntryCharacters < s.StoryGeneration.MaxStoryBibleEntryCharacters ||
+                updated.StoryGeneration.MaxStoryBibleCharacters < s.StoryGeneration.MaxStoryBibleCharacters;
+            if (lowered)
+            {
+                var impact = await _app.GetBibleLimitImpactAsync(updated.StoryGeneration);
+                if ((impact.StoryDefinitionCount > 0 || impact.StoryStateCount > 0) &&
+                    !await DisplayAlertAsync(
+                        "Existing Story Bibles exceed the proposed limits",
+                        $"{impact.StoryDefinitionCount} Story Definitions and {impact.StoryStateCount} Story States will require resolution before generation. Saving does not modify them.",
+                        "Save Anyway",
+                        "Cancel"))
+                    return;
+            }
             await _app.SaveSettingsAsync(updated, null);
             _settings = updated;
             await DisplayAlertAsync("Advanced Settings", "Settings saved.", "OK");
@@ -114,7 +154,7 @@ public sealed class AdvancedSettingsPage : ContentPage
     {
         var entry = new Entry { Keyboard = key == "reasoning" ? Keyboard.Default : Keyboard.Numeric };
         _fields[key] = entry;
-        content.Children.Add(new Label { Text = label });
+        content.Children.Add(new Label { Text = Help.TryGetValue(key, out var help) ? $"{label} ({help})" : label });
         content.Children.Add(entry);
     }
     private void Set(string key, object? value) => _fields[key].Text = value is null ? "" : Convert.ToString(value, CultureInfo.InvariantCulture);

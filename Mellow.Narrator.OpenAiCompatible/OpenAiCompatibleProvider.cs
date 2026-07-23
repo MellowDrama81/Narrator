@@ -70,8 +70,13 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
             Message("system", "You validate one interactive-story setup answer. Apply the validation instruction in context. Return JSON only. A failed rule is advisory: set hasWarning true and explain concisely."),
             Message("user", JsonSerializer.Serialize(payload, Json))
         };
-        var node = await CompleteWithCorrectionAsync(settings, credential, messages, ValidationSchema(), cancellationToken);
-        return node.Deserialize<PlayerAnswerValidationResponse>(Json) ?? throw new JsonException("Empty validation response.");
+        return await CompleteWithCorrectionAsync(
+            settings,
+            credential,
+            messages,
+            ValidationSchema(),
+            ParseValidationResponse,
+            cancellationToken);
     }
 
     public async Task<StoryDefinitionGenerationResponse> GenerateStoryDefinitionAsync(
@@ -82,8 +87,13 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
             Message("system", "Create the initial Story Bible for an interactive story. Include every durable fact required to narrate consistently. Keep entries concise, avoid duplicates, and assign importance 1 through 5. Return JSON only."),
             Message("user", storyPrompt)
         };
-        var node = await CompleteWithCorrectionAsync(settings, credential, messages, DefinitionSchema(settings), cancellationToken);
-        return node.Deserialize<StoryDefinitionGenerationResponse>(Json) ?? throw new JsonException("Empty Story Definition response.");
+        return await CompleteWithCorrectionAsync(
+            settings,
+            credential,
+            messages,
+            DefinitionSchema(settings),
+            node => ParseDefinitionResponse(node, settings),
+            cancellationToken);
     }
 
     public Task<StoryGenerationResponse> GenerateOpeningAsync(
@@ -98,33 +108,35 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
         ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
     {
         var messages = BuildStoryMessages(context, opening);
-        var node = await CompleteWithCorrectionAsync(settings, credential, messages, TurnSchema(settings), cancellationToken);
-        var dto = node.Deserialize<StoryResponseDto>(Json) ?? throw new JsonException("Empty story response.");
-        if (dto.Narration.Length > settings.ContentLimits.MaxNarrationCharacters) throw new JsonException("Narration is too long.");
-        if (dto.SuggestedActions.Count > settings.ContentLimits.MaxSuggestedActions ||
-            dto.SuggestedActions.Any(x => x.Length > settings.ContentLimits.MaxSuggestedActionCharacters))
-            throw new JsonException("Suggested actions exceed configured limits.");
-        if (dto.StoryBibleUpdates.Count > settings.ContentLimits.MaxStoryBibleUpdatesPerResponse)
-            throw new JsonException("Too many Story Bible updates.");
-        var meta = node["_transport"] as JsonObject;
-        node.Remove("_transport");
-        return new(dto.Narration, dto.SuggestedActions, dto.RelevantStoryBibleEntryIds, dto.StoryBibleUpdates,
-            meta?["responseId"]?.GetValue<string>(), meta?["inputTokens"]?.GetValue<int?>(), meta?["outputTokens"]?.GetValue<int?>());
+        return await CompleteWithCorrectionAsync(
+            settings,
+            credential,
+            messages,
+            TurnSchema(settings),
+            node => ParseStoryResponse(node, settings, context, opening),
+            cancellationToken);
     }
 
-    private async Task<JsonObject> CompleteWithCorrectionAsync(
-        ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> messages, JsonObject schema,
+    private async Task<T> CompleteWithCorrectionAsync<T>(
+        ApiConnectionSettings settings,
+        string? credential,
+        IReadOnlyList<JsonObject> messages,
+        JsonObject schema,
+        Func<JsonObject, T> parseAndValidate,
         CancellationToken cancellationToken)
     {
         var tier = settings.Capabilities.StructuredOutputTier;
         if (tier is StructuredOutputTier.Untested or StructuredOutputTier.Unsupported) tier = StructuredOutputTier.PromptedJson;
-        try { return await CompleteAsync(settings, credential, messages, schema, tier, cancellationToken); }
-        catch (JsonException ex)
+        try
+        {
+            return parseAndValidate(await CompleteAsync(settings, credential, messages, schema, tier, cancellationToken));
+        }
+        catch (Exception ex) when (ex is JsonException or NarratorException)
         {
             var corrected = messages.Concat([
                 Message("system", $"Your previous response failed validation: {ex.Message}. Return a corrected JSON object only.")
             ]).ToArray();
-            return await CompleteAsync(settings, credential, corrected, schema, tier, cancellationToken);
+            return parseAndValidate(await CompleteAsync(settings, credential, corrected, schema, tier, cancellationToken));
         }
     }
 
@@ -133,10 +145,13 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
         StructuredOutputTier tier, CancellationToken cancellationToken)
     {
         RequireConnection(settings);
+        var requestMessages = tier == StructuredOutputTier.PromptedJson
+            ? messages.Concat([Message("system", $"Return an object matching this JSON Schema exactly: {schema.ToJsonString(Json)}")]).ToArray()
+            : messages;
         var body = new JsonObject
         {
             ["model"] = settings.ModelId,
-            ["messages"] = new JsonArray(messages.Select(x => (JsonNode)x).ToArray()),
+            ["messages"] = new JsonArray(requestMessages.Select(x => x.DeepClone()).ToArray()),
             ["max_tokens"] = settings.MaxOutputTokens,
             ["stream"] = false
         };
@@ -211,9 +226,11 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
         throw new ProviderException(last is TaskCanceledException ? "The provider request timed out." : "The provider request failed.", null, last);
     }
 
-    private static TimeSpan? RetryDelay(ApiConnectionSettings settings, HttpResponseMessage response, int attempt)
+    private TimeSpan? RetryDelay(ApiConnectionSettings settings, HttpResponseMessage response, int attempt)
     {
-        var retryAfter = response.Headers.RetryAfter?.Delta;
+        var retryAfter = response.Headers.RetryAfter?.Delta ??
+            response.Headers.RetryAfter?.Date - timeProvider.GetUtcNow();
+        if (retryAfter < TimeSpan.Zero) retryAfter = TimeSpan.Zero;
         if (retryAfter is not null) return retryAfter <= settings.Retry.MaxRetryAfter ? retryAfter : null;
         return Backoff(settings, attempt);
     }
@@ -250,8 +267,25 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
             detail = json?["error"]?["message"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Provider error";
         }
         catch { detail = response.ReasonPhrase ?? "Provider error"; }
-        return new ProviderException($"{(int)response.StatusCode} {detail}", response.StatusCode);
+        var message = response.StatusCode switch
+        {
+            HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
+                $"Authentication failed: {detail}",
+            HttpStatusCode.NotFound =>
+                $"API endpoint was not found: {detail}",
+            HttpStatusCode.BadRequest when ContainsAny(detail, "temperature", "top_p", "reasoning_effort") =>
+                $"The selected model rejected a configured parameter: {detail}",
+            HttpStatusCode.BadRequest when ContainsAny(detail, "context length", "context_length", "maximum context") =>
+                $"The provider rejected the request for context length. Reduce the recent-turn count: {detail}",
+            HttpStatusCode.BadRequest when ContainsAny(detail, "model", "not found") =>
+                $"The selected model is unavailable: {detail}",
+            _ => $"{(int)response.StatusCode} {detail}"
+        };
+        return new ProviderException(message, response.StatusCode);
     }
+
+    private static bool ContainsAny(string value, params string[] terms) =>
+        terms.Any(x => value.Contains(x, StringComparison.OrdinalIgnoreCase));
 
     private static HttpRequestMessage CreateRequest(HttpMethod method, ApiConnectionSettings settings, string relative, string? credential)
     {
@@ -285,6 +319,154 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
         return messages;
     }
 
+    private static PlayerAnswerValidationResponse ParseValidationResponse(JsonObject node)
+    {
+        node.Remove("_transport");
+        RequireProperties(node, "hasWarning", "warning");
+        var hasWarning = RequiredBoolean(node, "hasWarning");
+        var warning = node["warning"] is null ? null : RequiredString(node, "warning");
+        if (hasWarning && string.IsNullOrWhiteSpace(warning))
+            throw new JsonException("A warning response must include warning text.");
+        if (!hasWarning && warning is not null)
+            throw new JsonException("A valid response must set warning to null.");
+        return new(hasWarning, warning);
+    }
+
+    private static StoryDefinitionGenerationResponse ParseDefinitionResponse(
+        JsonObject node,
+        ApiConnectionSettings settings)
+    {
+        node.Remove("_transport");
+        RequireProperties(node, "initialStoryBibleEntries");
+        var entries = RequiredArray(node, "initialStoryBibleEntries");
+        if (entries.Count > 2000) throw new JsonException("The initial Story Bible contains too many entries.");
+        foreach (var item in entries)
+            ValidateProposedEntry(item as JsonObject ?? throw new JsonException("A Story Bible entry must be an object."), settings);
+        var result = node.Deserialize<StoryDefinitionGenerationResponse>(Json)
+            ?? throw new JsonException("Empty Story Definition response.");
+        return result;
+    }
+
+    private static StoryGenerationResponse ParseStoryResponse(
+        JsonObject node,
+        ApiConnectionSettings settings,
+        GenerationContext context,
+        bool opening)
+    {
+        var meta = node["_transport"] as JsonObject;
+        node.Remove("_transport");
+        RequireProperties(node, "narration", "suggestedActions", "relevantStoryBibleEntryIds", "storyBibleUpdates");
+        var narration = RequiredString(node, "narration");
+        if (string.IsNullOrWhiteSpace(narration) || narration.Length > settings.ContentLimits.MaxNarrationCharacters)
+            throw new JsonException("Narration is empty or exceeds the configured limit.");
+        var suggestions = RequiredArray(node, "suggestedActions");
+        if (suggestions.Count > settings.ContentLimits.MaxSuggestedActions)
+            throw new JsonException("Too many suggested actions.");
+        foreach (var suggestion in suggestions)
+        {
+            var text = StringValue(suggestion, "A suggested action");
+            if (string.IsNullOrWhiteSpace(text) || text.Length > settings.ContentLimits.MaxSuggestedActionCharacters)
+                throw new JsonException("A suggested action is empty or exceeds the configured limit.");
+        }
+        var relevantNodes = RequiredArray(node, "relevantStoryBibleEntryIds");
+        var relevantText = relevantNodes.Select(x => StringValue(x, "A relevant entry ID")).ToArray();
+        if (relevantText.Distinct(StringComparer.OrdinalIgnoreCase).Count() != relevantText.Length)
+            throw new JsonException("The relevant-entry list contains duplicates.");
+        if (relevantText.Any(x => !Guid.TryParse(x, out _)))
+            throw new JsonException("A relevant entry ID is not a UUID.");
+
+        var updates = RequiredArray(node, "storyBibleUpdates");
+        if (updates.Count > settings.ContentLimits.MaxStoryBibleUpdatesPerResponse)
+            throw new JsonException("Too many Story Bible updates.");
+        foreach (var item in updates)
+        {
+            var update = item as JsonObject ?? throw new JsonException("A Story Bible update must be an object.");
+            RequireProperties(update, "operation", "entryId", "entry");
+            var operation = RequiredString(update, "operation");
+            if (operation is not ("add" or "replace" or "remove"))
+                throw new JsonException("A Story Bible update has an invalid operation.");
+            if (operation == "add" && update["entryId"] is not null)
+                throw new JsonException("An add update cannot contain an entry ID.");
+            if (operation != "add" && (update["entryId"] is null || !Guid.TryParse(StringValue(update["entryId"], "An entry ID"), out _)))
+                throw new JsonException("A replace or remove update requires an entry ID.");
+            if (operation == "remove")
+            {
+                if (update["entry"] is not null) throw new JsonException("A remove update cannot contain an entry.");
+            }
+            else
+            {
+                ValidateProposedEntry(update["entry"] as JsonObject
+                    ?? throw new JsonException("An add or replace update requires an entry."), settings);
+            }
+        }
+
+        var dto = node.Deserialize<StoryResponseDto>(Json) ?? throw new JsonException("Empty story response.");
+        var projectedRelevant = opening
+            ? dto.RelevantStoryBibleEntryIds.Concat(context.StoryBible.Entries.Select(x => x.Id)).Distinct().ToArray()
+            : dto.RelevantStoryBibleEntryIds;
+        _ = StoryBibleProcessor.Apply(
+            context.StoryBible,
+            projectedRelevant,
+            dto.StoryBibleUpdates,
+            context.NextTurnNumber,
+            settings.StoryGeneration);
+        return new(
+            dto.Narration,
+            dto.SuggestedActions,
+            dto.RelevantStoryBibleEntryIds,
+            dto.StoryBibleUpdates,
+            meta?["responseId"]?.GetValue<string>(),
+            meta?["inputTokens"]?.GetValue<int?>(),
+            meta?["outputTokens"]?.GetValue<int?>());
+    }
+
+    private static void ValidateProposedEntry(JsonObject entry, ApiConnectionSettings settings)
+    {
+        RequireProperties(entry, "category", "name", "content", "importance");
+        var category = RequiredString(entry, "category");
+        var name = RequiredString(entry, "name");
+        var content = RequiredString(entry, "content");
+        if (string.IsNullOrWhiteSpace(category) || category.Length > settings.ContentLimits.MaxStoryBibleCategoryCharacters)
+            throw new JsonException("A Story Bible category is empty or exceeds the configured limit.");
+        if (string.IsNullOrWhiteSpace(name) || name.Length > settings.ContentLimits.MaxStoryBibleNameCharacters)
+            throw new JsonException("A Story Bible name is empty or exceeds the configured limit.");
+        if (string.IsNullOrWhiteSpace(content))
+            throw new JsonException("A Story Bible entry has empty content.");
+        var importance = RequiredInteger(entry, "importance");
+        if (importance is < 1 or > 5) throw new JsonException("Story Bible importance must be from 1 to 5.");
+    }
+
+    private static void RequireProperties(JsonObject value, params string[] expected)
+    {
+        var actual = value.Select(x => x.Key).ToHashSet(StringComparer.Ordinal);
+        if (!actual.SetEquals(expected))
+            throw new JsonException($"Expected properties: {string.Join(", ", expected)}.");
+    }
+
+    private static JsonArray RequiredArray(JsonObject value, string name) =>
+        value[name] as JsonArray ?? throw new JsonException($"'{name}' must be an array.");
+
+    private static string RequiredString(JsonObject value, string name) =>
+        StringValue(value[name], $"'{name}'");
+
+    private static string StringValue(JsonNode? value, string description)
+    {
+        try { return value?.GetValue<string>() ?? throw new JsonException($"{description} must be a string."); }
+        catch (InvalidOperationException ex) { throw new JsonException($"{description} must be a string.", ex); }
+    }
+
+    private static bool RequiredBoolean(JsonObject value, string name)
+    {
+        try { return value[name]?.GetValue<bool>() ?? throw new JsonException($"'{name}' must be a boolean."); }
+        catch (InvalidOperationException ex) { throw new JsonException($"'{name}' must be a boolean.", ex); }
+    }
+
+    private static int RequiredInteger(JsonObject value, string name)
+    {
+        try { return value[name]?.GetValue<int>() ?? throw new JsonException($"'{name}' must be an integer."); }
+        catch (InvalidOperationException ex) { throw new JsonException($"'{name}' must be an integer.", ex); }
+    }
+
     private static JsonObject Message(string role, string content) => new() { ["role"] = role, ["content"] = content };
 
     private static JsonObject SimpleProbeSchema() => ObjectSchema(new Dictionary<string, JsonNode?> { ["ok"] = new JsonObject { ["type"] = "boolean" } }, ["ok"]);
@@ -300,7 +482,7 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
         ["initialStoryBibleEntries"] = new JsonObject
         {
             ["type"] = "array",
-            ["maxItems"] = settings.StoryGeneration.MaxStoryBibleEntries,
+            ["maxItems"] = 2000,
             ["items"] = ProposedEntrySchema(settings)
         }
     }, ["initialStoryBibleEntries"]);
@@ -327,7 +509,7 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
     {
         ["category"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxStoryBibleCategoryCharacters },
         ["name"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxStoryBibleNameCharacters },
-        ["content"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.StoryGeneration.MaxStoryBibleEntryCharacters },
+        ["content"] = new JsonObject { ["type"] = "string" },
         ["importance"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 5 }
     }, ["category", "name", "content", "importance"]);
 

@@ -6,13 +6,18 @@ namespace Mellow.Narrator.Gui;
 public sealed class StoryDefinitionListPage : ContentPage
 {
     private readonly IStoryDefinitionRepository _repository;
+    private readonly INarratorApplication _application;
     private readonly MainTabbedPage _tabs;
     private readonly ObservableCollection<StoryDefinitionSummary> _items = [];
     private readonly CollectionView _list;
 
-    public StoryDefinitionListPage(IStoryDefinitionRepository repository, MainTabbedPage tabs)
+    public StoryDefinitionListPage(
+        IStoryDefinitionRepository repository,
+        INarratorApplication application,
+        MainTabbedPage tabs)
     {
         _repository = repository;
+        _application = application;
         _tabs = tabs;
         Title = "Definitions";
         _list = new CollectionView
@@ -24,7 +29,8 @@ public sealed class StoryDefinitionListPage : ContentPage
                 var title = new Label { FontAttributes = FontAttributes.Bold, FontSize = 18 };
                 title.SetBinding(Label.TextProperty, nameof(StoryDefinitionSummary.Title));
                 var updated = new Label { FontSize = 12 };
-                updated.SetBinding(Label.TextProperty, nameof(StoryDefinitionSummary.UpdatedAtUtc), stringFormat: "Updated {0:g}");
+                updated.SetBinding(Label.TextProperty, nameof(StoryDefinitionSummary.UpdatedAtUtc),
+                    converter: new LocalTimestampConverter(), stringFormat: "Updated {0}");
                 return new VerticalStackLayout { Padding = new Thickness(4, 8), Children = { title, updated } };
             })
         };
@@ -97,7 +103,7 @@ public sealed class StoryDefinitionListPage : ContentPage
 
     private async void Import(object? sender, EventArgs e)
     {
-        try { var imported = await ImportExportService.ImportDefinitionAsync(_repository); await Refresh(); if (imported is not null) _tabs.OpenDefinition(imported.Id); }
+        try { var imported = await ImportExportService.ImportDefinitionAsync(_repository, _application); await Refresh(); if (imported is not null) _tabs.OpenDefinition(imported.Id); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 

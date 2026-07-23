@@ -21,8 +21,14 @@ public sealed class MainTabbedPage : TabbedPage
             _services.GetRequiredService<ITrashStore>(),
             this);
         AddFixed(_settingsPage, TabType.Settings);
-        AddFixed(new StoryDefinitionListPage(_services.GetRequiredService<IStoryDefinitionRepository>(), this), TabType.StoryDefinitionList);
-        AddFixed(new StoryStateListPage(_services.GetRequiredService<IStoryStateRepository>(), this), TabType.PlayStoryList);
+        AddFixed(new StoryDefinitionListPage(
+            _services.GetRequiredService<IStoryDefinitionRepository>(),
+            _services.GetRequiredService<INarratorApplication>(),
+            this), TabType.StoryDefinitionList);
+        AddFixed(new StoryStateListPage(
+            _services.GetRequiredService<IStoryStateRepository>(),
+            _services.GetRequiredService<INarratorApplication>(),
+            this), TabType.PlayStoryList);
         CurrentPageChanged += async (_, _) => await SaveWorkspaceAsync();
         Loaded += async (_, _) => await RestoreAsync();
     }
@@ -31,7 +37,11 @@ public sealed class MainTabbedPage : TabbedPage
     {
         var existing = Find(TabType.StoryDefinition, id);
         if (existing is not null) { CurrentPage = existing; return; }
-        AddDynamic(new StoryDefinitionPage(id, _services.GetRequiredService<IStoryDefinitionRepository>(), this), TabType.StoryDefinition, id);
+        AddDynamic(new StoryDefinitionPage(
+            id,
+            _services.GetRequiredService<IStoryDefinitionRepository>(),
+            _services.GetRequiredService<INarratorApplication>(),
+            this), TabType.StoryDefinition, id);
     }
 
     public void OpenSettings() => CurrentPage = Children.OfType<NarratorNavigationPage>().First(x => x.TabType == TabType.Settings);
@@ -41,9 +51,17 @@ public sealed class MainTabbedPage : TabbedPage
         var related = Children.OfType<NarratorNavigationPage>()
             .Where(x => x.RecordId == definitionId && x.TabType is TabType.StoryDefinition or TabType.StoryPrompt or TabType.StartStory)
             .ToArray();
-        if (related.Any(x => x.TabType is TabType.StoryPrompt or TabType.StartStory) &&
-            !await DisplayAlertAsync("Discard temporary progress?", "Deleting this definition will close its editor and Start Story tabs and discard their temporary progress.", "Discard and Delete", "Cancel"))
-            return false;
+        foreach (var temporary in related.Where(x => x.TabType is TabType.StoryPrompt or TabType.StartStory))
+        {
+            if (!await DisplayAlertAsync(
+                    "Discard temporary progress?",
+                    $"Close '{temporary.RootPage.Title}' and discard its temporary progress?",
+                    "Discard",
+                    "Cancel"))
+                return false;
+        }
+        foreach (var requestPage in related.Select(x => x.RootPage).OfType<IInFlightRequestPage>())
+            await requestPage.CancelInFlightRequestAsync();
         foreach (var page in related) Children.Remove(page);
         await SaveWorkspaceAsync();
         return true;
@@ -55,6 +73,8 @@ public sealed class MainTabbedPage : TabbedPage
         if (page is null) return true;
         if (!await DisplayAlertAsync("Close open story?", "The Play Story tab must be closed before moving its durable state to Trash.", "Close", "Cancel"))
             return false;
+        if (page.RootPage is IInFlightRequestPage requestPage)
+            await requestPage.CancelInFlightRequestAsync();
         Children.Remove(page);
         await SaveWorkspaceAsync();
         return true;
@@ -116,6 +136,22 @@ public sealed class MainTabbedPage : TabbedPage
         await SaveWorkspaceAsync();
     }
 
+    public async Task ReplaceCurrentWithPromptAsync(Guid id)
+    {
+        var previous = CurrentPage;
+        if (previous is NarratorNavigationPage page && !page.IsFixed) Children.Remove(previous);
+        OpenPrompt(id);
+        await SaveWorkspaceAsync();
+    }
+
+    public async Task ReplaceCurrentWithStartAsync(Guid id)
+    {
+        var previous = CurrentPage;
+        if (previous is NarratorNavigationPage page && !page.IsFixed) Children.Remove(previous);
+        OpenStart(id);
+        await SaveWorkspaceAsync();
+    }
+
     public Task ShowManageTabsAsync() => Navigation.PushModalAsync(new NavigationPage(new ManageTabsPage(this)));
 
     internal IReadOnlyList<NarratorNavigationPage> UnlockedTabs =>
@@ -142,10 +178,19 @@ public sealed class MainTabbedPage : TabbedPage
 
     internal Task SaveWorkspaceNowAsync() => SaveWorkspaceAsync();
 
-    internal void CancelInFlightRequests()
+    internal bool IsStoryRequestInFlight(Guid stateId) =>
+        Find(TabType.PlayStory, stateId)?.RootPage is IInFlightRequestPage { HasInFlightRequest: true };
+
+    internal bool IsStoryOpen(Guid stateId) => Find(TabType.PlayStory, stateId) is not null;
+
+    internal async Task CancelInFlightRequestsAsync()
     {
         foreach (var page in Children.OfType<NarratorNavigationPage>())
-            (page.RootPage as IInFlightRequestPage)?.CancelInFlightRequest();
+        {
+            if (page.RootPage is IInFlightRequestPage request)
+                await request.CancelInFlightRequestAsync(true);
+        }
+        await SaveWorkspaceAsync();
     }
 
     private void AddFixed(Page page, TabType type) => AddPage(page, Guid.NewGuid(), type, null, false);
@@ -174,6 +219,14 @@ public sealed class MainTabbedPage : TabbedPage
                 state.Tabs.FirstOrDefault(x => x.Type == TabType.Settings)?.PendingOperation);
             foreach (var tab in state.Tabs.OrderBy(x => x.Position).Where(x => x.Position >= 3))
             {
+                if (tab.Type is TabType.StoryDefinition or TabType.StartStory or TabType.StoryPrompt &&
+                    tab.DurableRecordId is { } referencedDefinition &&
+                    await _services.GetRequiredService<IStoryDefinitionRepository>().GetAsync(referencedDefinition) is null)
+                    continue;
+                if (tab.Type == TabType.PlayStory &&
+                    (tab.DurableRecordId is not { } referencedState ||
+                     await _services.GetRequiredService<IStoryStateRepository>().GetAsync(referencedState) is null))
+                    continue;
                 if (tab.PendingOperation is { Type: PendingOperationType.GenerateStoryDefinition, TargetRecordId: { } definitionId } definitionOperation &&
                     await _services.GetRequiredService<IStoryDefinitionRepository>().GetAsync(definitionId) is { } completedDefinition &&
                     (tab.StoryPromptDraft?.SourceStoryDefinitionId != definitionId ||
@@ -207,6 +260,12 @@ public sealed class MainTabbedPage : TabbedPage
             var activePosition = state.Tabs.FirstOrDefault(x => x.TabId == state.ActiveTabId)?.Position ?? 0;
             if (activePosition >= 0 && activePosition < Children.Count) CurrentPage = Children[activePosition];
             await SaveWorkspaceAsync();
+            var notices = await _services.GetRequiredService<IRecoveryNoticeStore>().ConsumeAsync();
+            if (notices.Count > 0)
+                await DisplayAlertAsync(
+                    "Data recovery completed",
+                    string.Join(Environment.NewLine, notices.Select(x => $"• {x.Message}")),
+                    "OK");
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }

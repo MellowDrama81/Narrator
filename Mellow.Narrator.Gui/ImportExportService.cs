@@ -8,109 +8,66 @@ namespace Mellow.Narrator.Gui;
 
 internal static class ImportExportService
 {
-    private const int FormatVersion = 1;
     private static readonly JsonSerializerOptions Json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        MaxDepth = 128,
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
     public static async Task ExportDefinitionAsync(StoryDefinition definition)
     {
-        var document = new StoryDefinitionExport(FormatVersion, DateTimeOffset.UtcNow, definition);
+        var document = new StoryDefinitionExport(ImportExportProcessor.CurrentFormatVersion, DateTimeOffset.UtcNow, definition);
         await ShareJsonAsync($"{Safe(definition.Title)}-definition.json", document);
     }
 
-    public static async Task<StoryDefinition?> ImportDefinitionAsync(IStoryDefinitionRepository repository)
+    public static async Task<StoryDefinition?> ImportDefinitionAsync(
+        IStoryDefinitionRepository repository,
+        INarratorApplication application)
     {
         var picked = await FilePicker.Default.PickAsync(new PickOptions { PickerTitle = "Import Story Definition JSON" });
         if (picked is null) return null;
         await using var stream = await picked.OpenReadAsync();
-        var document = await JsonSerializer.DeserializeAsync<StoryDefinitionExport>(stream, Json)
+        var document = JsonSerializer.Deserialize<StoryDefinitionExport>(await ReadLimitedAsync(stream), Json)
             ?? throw new InvalidDataException("The Story Definition export is empty.");
         CheckVersion(document.FormatVersion);
-        var source = document.Definition;
-        var ids = new Dictionary<Guid, Guid>();
-        Guid Map(Guid id) => ids.TryGetValue(id, out var value) ? value : ids[id] = Guid.NewGuid();
-        StoryBibleEntry MapEntry(StoryBibleEntry x) => x with { Id = Map(x.Id) };
-        AppliedStoryBibleChange MapChange(AppliedStoryBibleChange x) => x with
-        {
-            EntryId = Map(x.EntryId),
-            Before = x.Before is null ? null : MapEntry(x.Before),
-            After = x.After is null ? null : MapEntry(x.After)
-        };
-        var imported = source with
-        {
-            Id = Guid.NewGuid(),
-            PlayerQuestions = source.PlayerQuestions.Select(x => x with { Id = Guid.NewGuid() }).ToArray(),
-            InitialStoryBible = new(source.InitialStoryBible.Entries.Select(MapEntry).ToArray()),
-            StoryBibleMaintenanceHistory = source.StoryBibleMaintenanceHistory.Select(x => x with
-            {
-                Id = Guid.NewGuid(),
-                Changes = x.Changes.Select(MapChange).ToArray()
-            }).ToArray(),
-            SortOrder = (await repository.ListAsync()).Count
-        };
+        var settings = await application.GetSettingsAsync();
+        var summaries = await repository.ListAsync();
+        var imported = ImportExportProcessor.CopyDefinition(
+            document.Definition,
+            summaries.Count == 0 ? 0 : summaries.Max(x => x.SortOrder) + 1,
+            settings.ContentLimits);
         await repository.SaveAsync(imported);
         return imported;
     }
 
     public static async Task ExportStateAsync(StoryState state, IReadOnlyList<StoryTurn> turns)
     {
-        var document = new StoryStateExport(FormatVersion, DateTimeOffset.UtcNow, state, turns);
+        var document = new StoryStateExport(ImportExportProcessor.CurrentFormatVersion, DateTimeOffset.UtcNow, state, turns);
         await ShareJsonAsync($"{Safe(state.Label)}-story.json", document);
     }
 
-    public static async Task<StoryState?> ImportStateAsync(IStoryStateRepository repository)
+    public static async Task<StoryState?> ImportStateAsync(
+        IStoryStateRepository repository,
+        INarratorApplication application)
     {
         var picked = await FilePicker.Default.PickAsync(new PickOptions { PickerTitle = "Import Story State JSON" });
         if (picked is null) return null;
         await using var stream = await picked.OpenReadAsync();
-        var document = await JsonSerializer.DeserializeAsync<StoryStateExport>(stream, Json)
+        var document = JsonSerializer.Deserialize<StoryStateExport>(await ReadLimitedAsync(stream), Json)
             ?? throw new InvalidDataException("The Story State export is empty.");
         CheckVersion(document.FormatVersion);
-        if (document.Turns.Count == 0) throw new InvalidDataException("The Story State export has no turns.");
-
-        var source = document.State;
-        var stateId = Guid.NewGuid();
-        var ids = new Dictionary<Guid, Guid>();
-        Guid Map(Guid id) => ids.TryGetValue(id, out var value) ? value : ids[id] = Guid.NewGuid();
-        StoryBible MapBible(StoryBible bible) => new(bible.Entries.Select(x => x with { Id = Map(x.Id) }).ToArray());
-        AppliedStoryBibleChange MapChange(AppliedStoryBibleChange x) => x with
-        {
-            EntryId = Map(x.EntryId),
-            Before = x.Before is null ? null : x.Before with { Id = Map(x.Before.Id) },
-            After = x.After is null ? null : x.After with { Id = Map(x.After.Id) }
-        };
-        var imported = source with
-        {
-            Id = stateId,
-            Setup = source.Setup with
-            {
-                Definition = source.Setup.Definition with
-                {
-                    PlayerQuestions = source.Setup.Definition.PlayerQuestions.Select(x => x with { Id = Guid.NewGuid() }).ToArray(),
-                    InitialStoryBible = MapBible(source.Setup.Definition.InitialStoryBible)
-                }
-            },
-            CurrentStoryBible = MapBible(source.CurrentStoryBible),
-            StoryBibleMaintenanceHistory = source.StoryBibleMaintenanceHistory.Select(x => x with
-            {
-                Id = Guid.NewGuid(),
-                Changes = x.Changes.Select(MapChange).ToArray()
-            }).ToArray(),
-            SortOrder = (await repository.ListAsync()).Count
-        };
-        var turns = document.Turns.OrderBy(x => x.SequenceNumber).Select(x => x with
-        {
-            Id = Guid.NewGuid(),
-            StoryStateId = stateId,
-            RelevantStoryBibleEntryIds = x.RelevantStoryBibleEntryIds.Select(Map).ToArray(),
-            StoryBibleChanges = x.StoryBibleChanges.Select(MapChange).ToArray()
-        }).ToArray();
-        await repository.ImportAsync(imported, turns);
-        return imported;
+        var settings = await application.GetSettingsAsync();
+        var summaries = await repository.ListAsync();
+        var imported = ImportExportProcessor.CopyState(
+            document.State,
+            document.Turns,
+            summaries.Count == 0 ? 0 : summaries.Max(x => x.SortOrder) + 1,
+            settings.ContentLimits);
+        await repository.ImportAsync(imported.State, imported.Turns);
+        return imported.State;
     }
 
     private static async Task ShareJsonAsync<T>(string fileName, T value)
@@ -122,7 +79,25 @@ internal static class ImportExportService
 
     private static void CheckVersion(int version)
     {
-        if (version != FormatVersion) throw new NotSupportedException($"Export format {version} is not supported.");
+        if (version is < 0 or > ImportExportProcessor.CurrentFormatVersion)
+            throw new NotSupportedException($"Export format {version} is not supported.");
+    }
+
+    private static async Task<byte[]> ReadLimitedAsync(Stream stream)
+    {
+        if (stream.CanSeek && stream.Length > ImportExportProcessor.MaximumImportBytes)
+            throw new InvalidDataException("The import file exceeds the maximum supported size.");
+        using var output = new MemoryStream();
+        var buffer = new byte[81920];
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer);
+            if (read == 0) break;
+            if (output.Length + read > ImportExportProcessor.MaximumImportBytes)
+                throw new InvalidDataException("The import file exceeds the maximum supported size.");
+            output.Write(buffer, 0, read);
+        }
+        return output.ToArray();
     }
 
     private static string Safe(string value)

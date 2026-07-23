@@ -12,10 +12,15 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
     private readonly VerticalStackLayout _suggestions = new() { Spacing = 4 };
     private readonly Entry _action = new() { Placeholder = "What do you do?" };
     private readonly ActivityIndicator _busy = new();
+    private readonly Button _copy;
     private readonly VerticalStackLayout _bible = new();
     private readonly VerticalStackLayout _history = new() { IsVisible = false, Spacing = 8 };
+    private readonly Label _limitWarning = new() { TextColor = Colors.DarkOrange };
+    private readonly Button _loadAllTurns;
     private CancellationTokenSource? _request;
     private PendingOperationState? _pendingOperation;
+    private bool _historyLoaded;
+    private bool _allTurnsLoaded;
 
     public PlayStoryPage(
         Guid stateId,
@@ -31,6 +36,12 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
         _tabs = tabs;
         _pendingOperation = restoredOperation;
         _action.Text = restoredState?.PendingPlayerAction ?? "";
+        _copy = Ui.Button("Copy Story", Copy);
+        _loadAllTurns = Ui.Button("Load complete narration history", async (_, _) =>
+        {
+            _allTurnsLoaded = true;
+            await Refresh();
+        });
         Title = "Play Story";
         var bibleBody = new VerticalStackLayout { IsVisible = false, Children = { _bible } };
         Content = new ScrollView
@@ -41,10 +52,10 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
                 Spacing = 8,
                 Children =
                 {
-                    _narration, Ui.Heading("Suggested Actions"), _suggestions, _action,
-                    Ui.Buttons(Ui.Button("Continue", Play), Ui.Button("Copy Story", Copy), Ui.Button("Export", Export)),
+                    _limitWarning, _narration, _loadAllTurns, Ui.Heading("Suggested Actions"), _suggestions, _action,
+                    Ui.Buttons(Ui.Button("Continue", Play), _copy, Ui.Button("Export", Export)),
                     _busy, Ui.Button("Show / hide Story Bible", (_, _) => bibleBody.IsVisible = !bibleBody.IsVisible), bibleBody,
-                    Ui.Button("Show / hide Bible change history", (_, _) => _history.IsVisible = !_history.IsVisible), _history
+                    Ui.Button("Show / hide Bible change history", async (_, _) => await ToggleHistoryAsync()), _history
                 }
             }
         };
@@ -53,14 +64,21 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
 
     PlayStoryTabState? IWorkspacePayloadPage.PlayStoryTabState => new(_action.Text ?? "");
     PendingOperationState? IWorkspacePayloadPage.PendingOperation => _pendingOperation;
-    void IInFlightRequestPage.CancelInFlightRequest() => _request?.Cancel();
+    bool IInFlightRequestPage.HasInFlightRequest => _request is not null;
+    async Task IInFlightRequestPage.CancelInFlightRequestAsync(bool preserveInterruptedMarker)
+    {
+        var marker = preserveInterruptedMarker ? _pendingOperation : null;
+        _request?.Cancel();
+        while (_request is not null) await Task.Delay(20);
+        if (marker is not null) _pendingOperation = marker;
+    }
 
     async Task<bool> ICloseGuardPage.CanCloseAsync()
     {
         if (_request is not null)
         {
             if (!await DisplayAlertAsync("Cancel request?", "A story request is still in progress.", "Cancel and Close", "Keep Open")) return false;
-            _request.Cancel();
+            await ((IInFlightRequestPage)this).CancelInFlightRequestAsync();
         }
         if (string.IsNullOrWhiteSpace(_action.Text)) return true;
         return await DisplayAlertAsync("Discard pending action?", "The pending player action will be discarded. The durable Story State will remain.", "Discard", "Keep Open");
@@ -73,7 +91,12 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
         {
             _pendingOperation = null;
             await _tabs.SaveWorkspaceNowAsync();
-            await DisplayAlertAsync("Turn interrupted", "The incomplete turn was rolled back. Your player action is preserved; choose Continue to retry, or clear it to cancel.", "OK");
+            if (await DisplayActionSheetAsync(
+                    "The previous turn was interrupted. Your player action is preserved.",
+                    "Cancel",
+                    null,
+                    "Retry") == "Retry")
+                Play(null, EventArgs.Empty);
         }
         await Refresh();
     }
@@ -95,8 +118,15 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
                 state = await _app.CullStoryStateAsync(_stateId);
             }
             Title = state.Label;
+            if (Parent is NavigationPage navigation) navigation.Title = Title;
+            _limitWarning.Text = StoryBibleProcessor.IsApproachingLimits(state.CurrentStoryBible, settings.StoryGeneration)
+                ? "The Story Bible is approaching one or more configured limits."
+                : "";
             _narration.Children.Clear();
-            var turns = await _repository.GetTurnsAsync(_stateId);
+            var turns = await _repository.GetTurnsAsync(
+                _stateId,
+                _allTurnsLoaded ? null : Math.Max(1, settings.StoryGeneration.RecentTurnCount));
+            _loadAllTurns.IsVisible = !_allTurnsLoaded && state.LastCommittedTurnSequence + 1 > turns.Count;
             foreach (var turn in turns)
             {
                 if (turn.PlayerAction is not null) _narration.Children.Add(new Label { Text = $"> {turn.PlayerAction}", FontAttributes = FontAttributes.Italic });
@@ -111,29 +141,49 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
             }
             _bible.Children.Clear();
             _bible.Children.Add(StoryBibleView.Create(state.CurrentStoryBible));
-            _history.Children.Clear();
-            foreach (var record in state.StoryBibleMaintenanceHistory.OrderByDescending(x => x.CompletedAtUtc))
-            {
-                _history.Children.Add(new Label { Text = $"{record.CompletedAtUtc:g} — {record.Reason}", FontAttributes = FontAttributes.Bold });
-                foreach (var change in record.Changes) _history.Children.Add(StoryDefinitionPage.ChangeLabel(change));
-            }
-            foreach (var turn in turns.OrderByDescending(x => x.SequenceNumber))
-            {
-                if (turn.StoryBibleChanges.Count == 0) continue;
-                _history.Children.Add(new Label { Text = $"Turn {turn.SequenceNumber} — {turn.CompletedAtUtc:g}", FontAttributes = FontAttributes.Bold });
-                foreach (var change in turn.StoryBibleChanges) _history.Children.Add(StoryDefinitionPage.ChangeLabel(change));
-            }
+            if (_historyLoaded) await LoadHistoryAsync(state);
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private async Task ToggleHistoryAsync()
+    {
+        _history.IsVisible = !_history.IsVisible;
+        if (!_history.IsVisible || _historyLoaded) return;
+        var state = await _repository.GetAsync(_stateId) ?? throw new NarratorException("Story State not found.");
+        await LoadHistoryAsync(state);
+    }
+
+    private async Task LoadHistoryAsync(StoryState state)
+    {
+        _history.Children.Clear();
+        var groups = new List<(DateTimeOffset At, string Header, IReadOnlyList<AppliedStoryBibleChange> Changes)>();
+        groups.AddRange(state.StoryBibleMaintenanceHistory.Select(x =>
+            (x.CompletedAtUtc, x.Reason.ToString(), x.Changes)));
+        var allTurns = await _repository.GetTurnsAsync(_stateId);
+        groups.AddRange(allTurns.Where(x => x.StoryBibleChanges.Count > 0).Select(x =>
+            (x.CompletedAtUtc, $"Turn {x.SequenceNumber}", x.StoryBibleChanges)));
+        foreach (var group in groups.OrderByDescending(x => x.At))
+        {
+            _history.Children.Add(new Label
+            {
+                Text = $"{group.Header} — {group.At.ToLocalTime():g}",
+                FontAttributes = FontAttributes.Bold
+            });
+            foreach (var change in group.Changes) _history.Children.Add(StoryDefinitionPage.ChangeLabel(change));
+        }
+        _historyLoaded = true;
     }
 
     private async void Play(object? sender, EventArgs e)
     {
         if (string.IsNullOrWhiteSpace(_action.Text) || _request is not null) return;
+        var retry = false;
         try
         {
             _request = new();
             _busy.IsRunning = true;
+            _copy.IsEnabled = false;
             var action = _action.Text;
             var state = await _repository.GetAsync(_stateId) ?? throw new NarratorException("Story State not found.");
             _pendingOperation = new(
@@ -148,19 +198,29 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
             await Refresh();
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { await Ui.Error(this, ex); }
+        catch (Exception ex)
+        {
+            retry = await DisplayActionSheetAsync(
+                $"Story request failed: {ex.Message}",
+                "Cancel",
+                null,
+                "Retry") == "Retry";
+        }
         finally
         {
             _pendingOperation = null;
             _busy.IsRunning = false;
+            _copy.IsEnabled = true;
             _request?.Dispose();
             _request = null;
             await _tabs.SaveWorkspaceNowAsync();
         }
+        if (retry) Play(null, EventArgs.Empty);
     }
 
     private async void Copy(object? sender, EventArgs e)
     {
+        if (_request is not null) return;
         try { var copy = await _repository.CopyAsync(_stateId); _tabs.OpenPlay(copy.Id); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }

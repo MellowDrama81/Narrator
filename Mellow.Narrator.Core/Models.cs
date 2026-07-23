@@ -109,7 +109,10 @@ public sealed record StartStoryDraft(
     Guid SourceStoryDefinitionId,
     StoryDefinitionSnapshot Definition,
     int CurrentQuestionIndex,
-    IReadOnlyList<PlayerAnswerDraft> PlayerAnswers);
+    IReadOnlyList<PlayerAnswerDraft> PlayerAnswers)
+{
+    public IReadOnlyList<StoryBibleMaintenanceRecord> StoryBibleMaintenanceHistory { get; init; } = [];
+}
 
 public enum TabType { Settings, StoryDefinitionList, PlayStoryList, StoryDefinition, StoryPrompt, StartStory, PlayStory }
 public enum PendingOperationType { GenerateStoryDefinition, ValidatePlayerAnswer, GenerateOpeningScene, GenerateStoryTurn, TestApiConnection }
@@ -147,6 +150,8 @@ public sealed record TrashItem(
     long SizeBytes);
 
 public enum TrashItemType { StoryDefinition, StoryState }
+
+public sealed record RecoveryNotice(string Message, DateTimeOffset OccurredAtUtc);
 
 public sealed record StoryDefinitionExport(int FormatVersion, DateTimeOffset ExportedAtUtc, StoryDefinition Definition);
 public sealed record StoryStateExport(int FormatVersion, DateTimeOffset ExportedAtUtc, StoryState State, IReadOnlyList<StoryTurn> Turns);

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Mellow.Narrator.Core;
 using Microsoft.Maui.Layouts;
 
@@ -50,4 +51,15 @@ public sealed class NarratorNavigationPage : NavigationPage
     public TabType TabType { get; }
     public Guid? RecordId { get; }
     public bool IsFixed => TabType is TabType.Settings or TabType.StoryDefinitionList or TabType.PlayStoryList;
+}
+
+internal sealed class LocalTimestampConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is DateTimeOffset timestamp
+            ? timestamp.ToLocalTime().ToString("g", culture)
+            : parameter?.ToString() ?? "Not yet";
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
 }

@@ -45,6 +45,60 @@ public sealed class StoryBibleProcessorTests
         Assert.Throws<NarratorException>(() => StoryBibleProcessor.Apply(new([entry]), [], updates, 1, new(8, 10, 4000, 60000, 80)));
     }
 
+    [Fact]
+    public void Apply_RejectsUnknownRelevantEntry()
+    {
+        var entry = Entry("00000000-0000-0000-0000-000000000001", "fact", 3, 0);
+        Assert.Throws<NarratorException>(() =>
+            StoryBibleProcessor.Apply(new([entry]), [Guid.NewGuid()], [], 1, new(8, 10, 4000, 60000, 80)));
+    }
+
+    [Fact]
+    public void Apply_RejectsRemovalOfRelevantEntry()
+    {
+        var entry = Entry("00000000-0000-0000-0000-000000000001", "fact", 3, 0);
+        Assert.Throws<NarratorException>(() => StoryBibleProcessor.Apply(
+            new([entry]),
+            [entry.Id],
+            [new(StoryBibleOperation.Remove, entry.Id, null)],
+            1,
+            new(8, 10, 4000, 60000, 80)));
+    }
+
+    [Fact]
+    public void Apply_UsesInjectedIdAndMarksAdditionRelevant()
+    {
+        var id = Guid.Parse("00000000-0000-0000-0000-000000000099");
+        var result = StoryBibleProcessor.Apply(
+            StoryBible.Empty,
+            [],
+            [new(StoryBibleOperation.Add, null, new("fact", "Fact", "Content", 3))],
+            4,
+            new(8, 10, 4000, 60000, 80),
+            () => id);
+        Assert.Equal(id, Assert.Single(result.Bible.Entries).Id);
+        Assert.Contains(id, result.RelevantEntryIds);
+        Assert.Equal(4, result.Bible.Entries[0].LastRelevantTurnNumber);
+    }
+
+    [Fact]
+    public void CullToLimits_RemovesIndividuallyOversizedEntryFirst()
+    {
+        var oversized = new StoryBibleEntry(Guid.NewGuid(), "fact", "Large", new string('x', 500), 5, 10);
+        var small = Entry("00000000-0000-0000-0000-000000000002", "small", 1, 0);
+        var result = StoryBibleProcessor.CullToLimits(new([oversized, small]), new(8, 10, 200, 60000, 80));
+        Assert.DoesNotContain(result.Bible.Entries, x => x.Id == oversized.Id);
+        Assert.Contains(result.Bible.Entries, x => x.Id == small.Id);
+    }
+
+    [Fact]
+    public void ApproachingLimits_UsesConfiguredPercentage()
+    {
+        var entries = Enumerable.Range(0, 8)
+            .Select(i => new StoryBibleEntry(Guid.NewGuid(), "fact", $"F{i}", "x", 3, 0)).ToArray();
+        Assert.True(StoryBibleProcessor.IsApproachingLimits(new(entries), new(8, 10, 4000, 60000, 80)));
+    }
+
     private static StoryBibleEntry Entry(string id, string name, int importance, int relevant) =>
         new(Guid.Parse(id), "fact", name, $"{name} content", importance, relevant);
 }

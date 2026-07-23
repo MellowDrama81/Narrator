@@ -1,5 +1,7 @@
 using Mellow.Narrator.Core;
 using Mellow.Narrator.Persistence;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Mellow.Narrator.Tests;
 
@@ -108,6 +110,105 @@ public sealed class PersistenceTests : IDisposable
         await repository.ImportAsync(state, [opening]);
         Assert.NotNull(await repository.GetAsync(state.Id));
         Assert.Single(await repository.GetTurnsAsync(state.Id));
+    }
+
+    [Fact]
+    public async Task InvalidCommittedTurn_RestoresLastConsistentStateBackup()
+    {
+        var repository = (IStoryStateRepository)_store;
+        var (state, opening) = State();
+        await repository.CreateAsync(state, opening);
+        var nextTurn = opening with { Id = Guid.NewGuid(), SequenceNumber = 1, PlayerAction = "advance" };
+        await repository.CommitTurnAsync(state with { LastCommittedTurnSequence = 1 }, nextTurn);
+        var turnPath = Path.Combine(
+            _root,
+            "Mellow.Narrator",
+            "story-states",
+            state.Id.ToString("D"),
+            "turns",
+            $"00000001-{nextTurn.Id:D}.json");
+        await File.WriteAllTextAsync(turnPath, "{}");
+
+        var recovered = await repository.GetAsync(state.Id);
+
+        Assert.Equal(0, recovered!.LastCommittedTurnSequence);
+        Assert.Single(await repository.GetTurnsAsync(state.Id));
+        Assert.NotEmpty(await ((IRecoveryNoticeStore)_store).ConsumeAsync());
+    }
+
+    [Fact]
+    public async Task PermanentTrashDeletion_RemovesDefinitionBackup()
+    {
+        var definitions = (IStoryDefinitionRepository)_store;
+        var trash = (ITrashStore)_store;
+        var definition = Definition();
+        await definitions.SaveAsync(definition);
+        await definitions.SaveAsync(definition with { Title = "Updated" });
+        await definitions.MoveToTrashAsync(definition.Id);
+        var item = Assert.Single(await trash.ListAsync());
+
+        await trash.DeletePermanentlyAsync(item.TrashId);
+
+        var trashFolder = Path.Combine(_root, "Mellow.Narrator", "trash", "story-definitions");
+        Assert.Empty(Directory.EnumerateFiles(trashFolder));
+    }
+
+    [Fact]
+    public async Task TrashRestore_AppendsAfterHighestSortOrder()
+    {
+        var definitions = (IStoryDefinitionRepository)_store;
+        var trash = (ITrashStore)_store;
+        var first = Definition() with { SortOrder = 3, Title = "First" };
+        var second = Definition() with { SortOrder = 8, Title = "Second" };
+        await definitions.SaveAsync(first);
+        await definitions.SaveAsync(second);
+        await definitions.MoveToTrashAsync(first.Id);
+        var item = Assert.Single(await trash.ListAsync());
+
+        await trash.RestoreAsync(item.TrashId);
+
+        Assert.Equal(9, (await definitions.GetAsync(first.Id))!.SortOrder);
+    }
+
+    [Fact]
+    public async Task TrashRetention_KeepsNewestTenItems()
+    {
+        var definitions = (IStoryDefinitionRepository)_store;
+        var trash = (ITrashStore)_store;
+        for (var index = 0; index < 11; index++)
+        {
+            var definition = Definition() with { Title = $"Definition {index}" };
+            await definitions.SaveAsync(definition);
+            await definitions.MoveToTrashAsync(definition.Id);
+        }
+
+        Assert.Equal(10, (await trash.ListAsync()).Count);
+    }
+
+    [Fact]
+    public async Task VersionZeroDocument_IsMigratedAndRetainedAsBackup()
+    {
+        var definition = Definition();
+        var path = Path.Combine(_root, "Mellow.Narrator", "story-definitions", $"{definition.Id:D}.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+        };
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new { formatVersion = 0, data = definition }, options));
+
+        var loaded = await ((IStoryDefinitionRepository)_store).GetAsync(definition.Id);
+
+        Assert.Equal(definition.Id, loaded!.Id);
+        Assert.True(File.Exists(path + ".bak"));
+        Assert.Contains("\"formatVersion\": 1", await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public void PersistenceRoot_MustBeAbsolute()
+    {
+        Assert.Throws<ArgumentException>(() => new PersistenceOptions("relative-path").GetValidatedRoot());
     }
 
     public void Dispose()

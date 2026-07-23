@@ -13,8 +13,8 @@ public partial class App : Application
     protected override Window CreateWindow(IActivationState? activationState)
     {
         var window = new Window(_mainPage);
-        window.Stopped += (_, _) => _mainPage.CancelInFlightRequests();
-        window.Destroying += (_, _) => _mainPage.CancelInFlightRequests();
+        window.Stopped += async (_, _) => await _mainPage.CancelInFlightRequestsAsync();
+        window.Destroying += async (_, _) => await _mainPage.CancelInFlightRequestsAsync();
         return window;
     }
 }

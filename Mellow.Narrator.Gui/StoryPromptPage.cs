@@ -12,6 +12,7 @@ public sealed class StoryPromptPage : ContentPage, IWorkspacePayloadPage, IClose
     private readonly Editor _prompt = new() { Placeholder = "Story Prompt", AutoSize = EditorAutoSizeOption.TextChanges, MinimumHeightRequest = 160 };
     private readonly Editor _questions = new() { Placeholder = "One per line: Question | Validation instruction", AutoSize = EditorAutoSizeOption.TextChanges, MinimumHeightRequest = 120 };
     private readonly ActivityIndicator _busy = new();
+    private readonly List<Guid> _questionIds = [];
     private CancellationTokenSource? _request;
     private PendingOperationState? _pendingOperation;
 
@@ -41,6 +42,7 @@ public sealed class StoryPromptPage : ContentPage, IWorkspacePayloadPage, IClose
         };
         if (restoredDraft is not null)
         {
+            _questionIds.AddRange(restoredDraft.PlayerQuestions.OrderBy(x => x.SortOrder).Select(x => x.Id));
             _title.Text = restoredDraft.Title;
             _prompt.Text = restoredDraft.StoryPrompt;
             _questions.Text = string.Join(Environment.NewLine, restoredDraft.PlayerQuestions.OrderBy(x => x.SortOrder).Select(x => $"{x.Question} | {x.ValidationInstruction}"));
@@ -53,14 +55,21 @@ public sealed class StoryPromptPage : ContentPage, IWorkspacePayloadPage, IClose
     StoryPromptDraft? IWorkspacePayloadPage.StoryPromptDraft =>
         new(_sourceId, _title.Text ?? "", _prompt.Text ?? "", ParseQuestions(_questions.Text));
     PendingOperationState? IWorkspacePayloadPage.PendingOperation => _pendingOperation;
-    void IInFlightRequestPage.CancelInFlightRequest() => _request?.Cancel();
+    bool IInFlightRequestPage.HasInFlightRequest => _request is not null;
+    async Task IInFlightRequestPage.CancelInFlightRequestAsync(bool preserveInterruptedMarker)
+    {
+        var marker = preserveInterruptedMarker ? _pendingOperation : null;
+        _request?.Cancel();
+        while (_request is not null) await Task.Delay(20);
+        if (marker is not null) _pendingOperation = marker;
+    }
 
     async Task<bool> ICloseGuardPage.CanCloseAsync()
     {
         if (_request is not null)
         {
             if (!await DisplayAlertAsync("Cancel generation?", "Generation is still in progress.", "Cancel and Close", "Keep Open")) return false;
-            _request.Cancel();
+            await ((IInFlightRequestPage)this).CancelInFlightRequestAsync();
         }
         if (string.IsNullOrWhiteSpace(_title.Text) && string.IsNullOrWhiteSpace(_prompt.Text) && string.IsNullOrWhiteSpace(_questions.Text)) return true;
         return await DisplayAlertAsync("Discard draft?", "This temporary Story Prompt draft will be discarded.", "Discard", "Keep Open");
@@ -73,7 +82,12 @@ public sealed class StoryPromptPage : ContentPage, IWorkspacePayloadPage, IClose
         {
             _pendingOperation = null;
             await _tabs.SaveWorkspaceNowAsync();
-            await DisplayAlertAsync("Generation interrupted", "The incomplete operation was rolled back. Your draft is preserved; choose Generate Story Definition to retry, or close the tab to cancel.", "OK");
+            if (await DisplayActionSheetAsync(
+                    "Generation was interrupted. Your draft is preserved.",
+                    "Cancel",
+                    null,
+                    "Retry") == "Retry")
+                Generate(null, EventArgs.Empty);
         }
         if (_sourceId is null || !string.IsNullOrEmpty(_title.Text)) return;
         try
@@ -83,6 +97,8 @@ public sealed class StoryPromptPage : ContentPage, IWorkspacePayloadPage, IClose
             _prompt.Text = source.StoryPrompt;
             _questions.Text = string.Join(Environment.NewLine, source.PlayerQuestions.OrderBy(x => x.SortOrder)
                 .Select(x => $"{x.Question} | {x.ValidationInstruction}"));
+            _questionIds.Clear();
+            _questionIds.AddRange(source.PlayerQuestions.OrderBy(x => x.SortOrder).Select(x => x.Id));
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
@@ -90,6 +106,7 @@ public sealed class StoryPromptPage : ContentPage, IWorkspacePayloadPage, IClose
     private async void Generate(object? sender, EventArgs e)
     {
         if (_request is not null) return;
+        var retry = false;
         try
         {
             _request = new();
@@ -103,7 +120,14 @@ public sealed class StoryPromptPage : ContentPage, IWorkspacePayloadPage, IClose
             await _tabs.ReplaceCurrentWithDefinitionAsync(result.Id);
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { await Ui.Error(this, ex); }
+        catch (Exception ex)
+        {
+            retry = await DisplayActionSheetAsync(
+                $"Story Definition generation failed: {ex.Message}",
+                "Cancel",
+                null,
+                "Retry") == "Retry";
+        }
         finally
         {
             _pendingOperation = null;
@@ -112,13 +136,18 @@ public sealed class StoryPromptPage : ContentPage, IWorkspacePayloadPage, IClose
             _request = null;
             await _tabs.SaveWorkspaceNowAsync();
         }
+        if (retry) Generate(null, EventArgs.Empty);
     }
 
-    private static IReadOnlyList<PlayerQuestionDraft> ParseQuestions(string? text) =>
-        (text ?? "").Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-        .Select((line, index) =>
+    private IReadOnlyList<PlayerQuestionDraft> ParseQuestions(string? text)
+    {
+        var lines = (text ?? "").Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        while (_questionIds.Count < lines.Length) _questionIds.Add(Guid.NewGuid());
+        if (_questionIds.Count > lines.Length) _questionIds.RemoveRange(lines.Length, _questionIds.Count - lines.Length);
+        return lines.Select((line, index) =>
         {
             var parts = line.Split('|', 2, StringSplitOptions.TrimEntries);
-            return new PlayerQuestionDraft(Guid.NewGuid(), parts[0], parts.Length > 1 ? parts[1] : "The answer should be appropriate for the story.", index);
+            return new PlayerQuestionDraft(_questionIds[index], parts[0], parts.Length > 1 ? parts[1] : "", index);
         }).ToArray();
+    }
 }

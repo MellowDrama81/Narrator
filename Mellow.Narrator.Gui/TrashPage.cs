@@ -8,6 +8,7 @@ public sealed class TrashPage : ContentPage
     private readonly ITrashStore _trash;
     private readonly ObservableCollection<TrashItem> _items = [];
     private readonly CollectionView _list;
+    private readonly Label _usage = new();
 
     public TrashPage(ITrashStore trash)
     {
@@ -22,17 +23,24 @@ public sealed class TrashPage : ContentPage
                 var label = new Label();
                 label.SetBinding(Label.TextProperty, nameof(TrashItem.DisplayName));
                 var detail = new Label { FontSize = 12 };
-                detail.SetBinding(Label.TextProperty, nameof(TrashItem.DeletedAtUtc), stringFormat: "Deleted {0:g}");
+                detail.SetBinding(Label.TextProperty, nameof(TrashItem.DeletedAtUtc),
+                    converter: new LocalTimestampConverter(), stringFormat: "Deleted {0}");
                 return new VerticalStackLayout { Padding = 6, Children = { label, detail } };
             })
         };
         Content = new Grid
         {
             Padding = 16,
-            RowDefinitions = { new(GridLength.Auto), new(GridLength.Star) },
-            Children = { Ui.Buttons(Ui.Button("Restore", Restore), Ui.Button("Delete Permanently", Delete), Ui.Button("Empty Trash", Empty)), _list }
+            RowDefinitions = { new(GridLength.Auto), new(GridLength.Auto), new(GridLength.Star) },
+            Children =
+            {
+                Ui.Buttons(Ui.Button("Restore", Restore), Ui.Button("Delete Permanently", Delete), Ui.Button("Empty Trash", Empty)),
+                _usage,
+                _list
+            }
         };
-        ((Grid)Content).SetRow(_list, 1);
+        ((Grid)Content).SetRow(_usage, 1);
+        ((Grid)Content).SetRow(_list, 2);
         ToolbarItems.Add(new ToolbarItem("Done", null, async () => await Navigation.PopModalAsync()));
     }
 
@@ -43,6 +51,7 @@ public sealed class TrashPage : ContentPage
     {
         _items.Clear();
         foreach (var item in await _trash.ListAsync()) _items.Add(item);
+        _usage.Text = $"{_items.Count} items; {_items.Sum(x => x.SizeBytes) / 1024d / 1024d:N2} MiB";
     }
     private async void Restore(object? sender, EventArgs e)
     {

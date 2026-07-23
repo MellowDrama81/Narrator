@@ -14,6 +14,7 @@ public static class PersistenceServiceCollectionExtensions
         services.AddSingleton<IWorkspaceStateStore>(x => x.GetRequiredService<JsonNarratorStore>());
         services.AddSingleton<IApiConnectionSettingsStore>(x => x.GetRequiredService<JsonNarratorStore>());
         services.AddSingleton<ITrashStore>(x => x.GetRequiredService<JsonNarratorStore>());
+        services.AddSingleton<IRecoveryNoticeStore>(x => x.GetRequiredService<JsonNarratorStore>());
         return services;
     }
 }

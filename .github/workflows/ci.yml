@@ -1,0 +1,46 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore required workloads
+        run: dotnet workload restore Mellow.Narrator.slnx
+
+      - name: Restore packages
+        run: dotnet restore Mellow.Narrator.slnx
+
+      - name: Build Windows and Android targets
+        run: dotnet build Mellow.Narrator.slnx --configuration Release --no-restore
+
+      - name: Run Core, provider, and persistence tests
+        run: dotnet test Mellow.Narrator.Tests/Mellow.Narrator.Tests.csproj --configuration Release --no-build --no-restore --collect:"XPlat Code Coverage"
+
+      - name: Run fast GUI model tests
+        run: dotnet test Mellow.Narrator.Gui.Tests/Mellow.Narrator.Gui.Tests.csproj --configuration Release --no-build --no-restore --collect:"XPlat Code Coverage"
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: "**/TestResults/**/coverage.cobertura.xml"
+          if-no-files-found: warn

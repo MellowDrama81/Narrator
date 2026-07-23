@@ -7,13 +7,19 @@ public sealed class StoryDefinitionPage : ContentPage
 {
     private readonly Guid _id;
     private readonly IStoryDefinitionRepository _repository;
+    private readonly INarratorApplication _application;
     private readonly MainTabbedPage _tabs;
     private readonly VerticalStackLayout _content = new() { Padding = 16, Spacing = 8 };
 
-    public StoryDefinitionPage(Guid id, IStoryDefinitionRepository repository, MainTabbedPage tabs)
+    public StoryDefinitionPage(
+        Guid id,
+        IStoryDefinitionRepository repository,
+        INarratorApplication application,
+        MainTabbedPage tabs)
     {
         _id = id;
         _repository = repository;
+        _application = application;
         _tabs = tabs;
         Title = "Definition";
         Content = new ScrollView { Content = _content };
@@ -26,22 +32,26 @@ public sealed class StoryDefinitionPage : ContentPage
         {
             var value = await _repository.GetAsync(_id) ?? throw new NarratorException("Story Definition not found.");
             Title = value.Title;
+            if (Parent is NavigationPage navigation) navigation.Title = Title;
             _content.Children.Clear();
             _content.Children.Add(Ui.Heading(value.Title));
             _content.Children.Add(new Label { Text = value.StoryPrompt });
             _content.Children.Add(Ui.Buttons(
-                Ui.Button("Edit", (_, _) => _tabs.OpenPrompt(_id)),
-                Ui.Button("Start Story", (_, _) => _tabs.OpenStart(_id)),
+                Ui.Button("Edit", async (_, _) => await _tabs.ReplaceCurrentWithPromptAsync(_id)),
+                Ui.Button("Start Story", async (_, _) => await _tabs.ReplaceCurrentWithStartAsync(_id)),
                 Ui.Button("Export", async (_, _) => await ImportExportService.ExportDefinitionAsync(value))));
             _content.Children.Add(Ui.Heading("Player Questions"));
             foreach (var question in value.PlayerQuestions.OrderBy(x => x.SortOrder))
                 _content.Children.Add(new Label { Text = $"{question.Question}\nValidation: {question.ValidationInstruction}" });
             _content.Children.Add(Ui.Heading($"Initial Story Bible ({value.InitialStoryBible.Entries.Count})"));
+            var settings = await _application.GetSettingsAsync();
+            if (StoryBibleProcessor.IsApproachingLimits(value.InitialStoryBible, settings.StoryGeneration))
+                _content.Children.Add(new Label { Text = "The Story Bible is approaching one or more configured limits.", TextColor = Colors.DarkOrange });
             _content.Children.Add(StoryBibleView.Create(value.InitialStoryBible));
             _content.Children.Add(Ui.Heading("Bible Maintenance History"));
             foreach (var record in value.StoryBibleMaintenanceHistory.OrderByDescending(x => x.CompletedAtUtc))
             {
-                _content.Children.Add(new Label { Text = $"{record.CompletedAtUtc:g} — {record.Reason}", FontAttributes = FontAttributes.Bold });
+                _content.Children.Add(new Label { Text = $"{record.CompletedAtUtc.ToLocalTime():g} — {record.Reason}", FontAttributes = FontAttributes.Bold });
                 foreach (var change in record.Changes) _content.Children.Add(ChangeLabel(change));
             }
         }

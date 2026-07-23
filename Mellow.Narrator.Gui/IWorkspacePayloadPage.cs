@@ -17,5 +17,6 @@ internal interface ICloseGuardPage
 
 internal interface IInFlightRequestPage
 {
-    void CancelInFlightRequest();
+    bool HasInFlightRequest { get; }
+    Task CancelInFlightRequestAsync(bool preserveInterruptedMarker = false);
 }
