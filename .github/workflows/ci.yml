@@ -34,9 +34,6 @@ jobs:
       - name: Run Core, provider, and persistence tests
         run: dotnet test Mellow.Narrator.Tests/Mellow.Narrator.Tests.csproj --configuration Release --no-build --no-restore --collect:"XPlat Code Coverage"
 
-      - name: Run fast GUI model tests
-        run: dotnet test Mellow.Narrator.Gui.Tests/Mellow.Narrator.Gui.Tests.csproj --configuration Release --no-build --no-restore --collect:"XPlat Code Coverage"
-
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v7

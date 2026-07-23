@@ -13,7 +13,6 @@ Mellow.Narrator: VisualStudio solution
 - Mellow.Narrator.Persistence: C# .Net 10 Class Library
 - Mellow.Narrator.Cli: C# .Net 10 Console Application
 - Mellow.Narrator.Tests: C# .Net 10 Unit and Integration Test project
-- Mellow.Narrator.Gui.Tests: C# .Net 10 MAUI UI Test project
 
 Mellow.Narrator.Gui should contain UI code, the application composition root and MAUI-specific platform adapters only.
 
@@ -27,7 +26,7 @@ Mellow.Narrator.Cli is an unreleased developer tool for manually testing Core an
 
 Mellow.Narrator.Tests contains unit and integration tests for Mellow.Narrator.Core, Mellow.Narrator.OpenAiCompatible and Mellow.Narrator.Persistence.
 
-Mellow.Narrator.Gui.Tests contains target-specific UI automation for the Windows and Android applications.
+Do not create a plain .NET unit-test project for the GUI. Platform-independent presentation and workspace rules belong in Core and are unit tested in Mellow.Narrator.Tests. When target-specific Windows and Android UI automation is introduced, it must use a real MAUI-capable device automation harness and execute the application on those targets.
 
 # OpenAI-Compatible API Contract
 

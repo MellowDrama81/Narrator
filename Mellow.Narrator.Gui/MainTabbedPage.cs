@@ -287,7 +287,11 @@ public sealed class MainTabbedPage : TabbedPage
                 if (restored && CurrentPage is NarratorNavigationPage restoredPage)
                     restoredPages[tab.TabId] = restoredPage;
             }
-            if (restoredPages.TryGetValue(state.ActiveTabId, out var activePage))
+            var activeTabId = WorkspaceRestoration.SelectActiveTabId(
+                state,
+                restoredPages.Keys.ToHashSet());
+            if (activeTabId is { } restoredActiveId &&
+                restoredPages.TryGetValue(restoredActiveId, out var activePage))
                 CurrentPage = activePage;
             else
                 CurrentPage = Children.OfType<NarratorNavigationPage>().First(x => x.TabType == TabType.Settings);
