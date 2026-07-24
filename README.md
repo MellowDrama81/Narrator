@@ -27,6 +27,34 @@ dotnet build Mellow.Narrator.Gui/Mellow.Narrator.Gui.csproj -f net10.0-windows10
 dotnet build Mellow.Narrator.Gui/Mellow.Narrator.Gui.csproj -f net10.0-android
 ```
 
+## Windows distribution
+
+The Windows project pins Windows App SDK `1.8.260508005` and sets
+`WindowsAppSDKSelfContained=true`. This keeps the tested Windows UI/input runtime with the application and avoids
+depending on a different shared Windows App SDK runtime installed on a user's computer.
+
+Publish .NET itself as self-contained as well:
+
+```powershell
+dotnet publish Mellow.Narrator.Gui/Mellow.Narrator.Gui.csproj `
+  -c Release `
+  -f net10.0-windows10.0.19041.0 `
+  -r win-x64 `
+  --self-contained true
+```
+
+Distribute the complete publish directory through an installer, MSIX, or ZIP; distributing only the executable will
+omit required native DLLs. Produce and test a separate `win-arm64` publish when native Windows on ARM support is
+required.
+
+Keep the Windows App SDK version explicitly pinned and update it deliberately after testing newer servicing releases.
+Before releasing, smoke-test the published artifact on clean supported Windows 10 and Windows 11 machines, including
+mouse, touch, scrolling, tab reordering, and story interaction.
+
+See Microsoft's documentation for
+[self-contained Windows App SDK deployment](https://learn.microsoft.com/windows/apps/package-and-deploy/self-contained-deploy/deploy-self-contained-apps)
+and [deployment-model trade-offs](https://learn.microsoft.com/windows/apps/package-and-deploy/deploy-overview).
+
 The CLI never opens the GUI data directory:
 
 ```powershell
