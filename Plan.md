@@ -133,7 +133,9 @@ because the validated turn number and player action are already part of the dura
 
 Every existing Story Bible entry has a stable ID, an LLM-assigned importance from 1 through 5 and the sequence number of the turn when it was last relevant. Supply all of this metadata to the LLM.
 Every opening-scene and story-turn response contains `relevantStoryBibleEntryIds`, listing the existing entries which were relevant to that turn.
-An `add` update supplies an entry without an ID; the application assigns its stable ID.
+An `add` update supplies an entry with a null ID; the application assigns its stable ID. Explicitly tell the LLM never
+to invent IDs. If it nevertheless supplies an ID for an `add`, normalize that ID to null and continue validating the
+response rather than spending the corrective retry on a value which the application does not use.
 A `replace` update references an existing entry ID and supplies the complete replacement entry.
 A `remove` update references an existing entry ID and does not supply an entry.
 A response must not update the same existing entry more than once. Unknown IDs, duplicate updates, unknown relevant-entry IDs and invalid entries cause validation failure and one corrective retry.

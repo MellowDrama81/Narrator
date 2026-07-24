@@ -313,6 +313,36 @@ public sealed class ProviderTests
     }
 
     [Fact]
+    public async Task GenerateTurn_IgnoresModelCreatedIdForAddUpdate()
+    {
+        var modelCreatedId = Guid.NewGuid();
+        var requests = 0;
+        string? requestBody = null;
+        var handler = new StubHandler(async request =>
+        {
+            requests++;
+            requestBody = await request.Content!.ReadAsStringAsync();
+            return Response($$$"""
+                {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"A new place appears.","suggestedActions":[],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[{"operation":"add","entryId":"{{{modelCreatedId}}}","entry":{"category":"location","name":"New Place","content":"A newly discovered place.","importance":3}}]}
+                """);
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", [], new([])),
+            [],
+            new([]),
+            [],
+            "Continue",
+            1);
+
+        var result = await provider.GenerateTurnAsync(Settings(), null, context);
+
+        Assert.Equal(1, requests);
+        Assert.Null(Assert.Single(result.StoryBibleUpdates).EntryId);
+        Assert.Contains("never invent one", requestBody);
+    }
+
+    [Fact]
     public async Task ConnectionTest_NegotiatesLegacyTokenFieldAndSystemRole()
     {
         var acceptedProbe = false;

@@ -441,7 +441,13 @@ public sealed class OpenAiCompatibleProvider(
             contextType = "storyContext",
             storyPrompt = context.Definition.StoryPrompt,
             playerResponses = context.PlayerResponses.Select(x => new { x.Question, x.Answer }),
-            storyBible = context.StoryBible.Entries
+            storyBible = context.StoryBible.Entries,
+            storyBibleUpdateRules = new
+            {
+                add = "Set entryId to null. The application assigns the new ID; never invent one.",
+                replace = "Use only the ID of an existing Story Bible entry supplied above.",
+                remove = "Use only the ID of an existing Story Bible entry supplied above."
+            }
         }, Json)));
         foreach (var turn in context.RecentTurns)
         {
@@ -555,8 +561,8 @@ public sealed class OpenAiCompatibleProvider(
             var operation = RequiredString(update, "operation");
             if (operation is not ("add" or "replace" or "remove"))
                 throw new JsonException("A Story Bible update has an invalid operation.");
-            if (operation == "add" && update["entryId"] is not null)
-                throw new JsonException("An add update cannot contain an entry ID.");
+            if (operation == "add")
+                update["entryId"] = null;
             if (operation != "add" && (update["entryId"] is null || !Guid.TryParse(StringValue(update["entryId"], "An entry ID"), out _)))
                 throw new JsonException("A replace or remove update requires an entry ID.");
             if (operation == "remove")
