@@ -438,6 +438,7 @@ public sealed class OpenAiCompatibleProvider(
         var messages = new List<JsonObject> { Message("system", templates.StoryNarrationInstruction) };
         messages.Add(Message("user", JsonSerializer.Serialize(new
         {
+            contextType = "storyContext",
             storyPrompt = context.Definition.StoryPrompt,
             playerResponses = context.PlayerResponses.Select(x => new { x.Question, x.Answer }),
             storyBible = context.StoryBible.Entries
@@ -447,9 +448,17 @@ public sealed class OpenAiCompatibleProvider(
             if (turn.PlayerAction is not null) messages.Add(Message("user", turn.PlayerAction));
             messages.Add(Message("assistant", turn.Narration));
         }
-        messages.Add(Message(
-            "user",
-            opening ? templates.OpeningSceneInstruction : context.PlayerAction ?? templates.ContinueStoryInstruction));
+        messages.Add(Message("user", JsonSerializer.Serialize(new
+        {
+            requestType = opening ? "openingScene" : "storyTurn",
+            turnNumber = context.NextTurnNumber,
+            currentPlayerAction = opening ? null : context.PlayerAction,
+            instruction = opening
+                ? $"{templates.OpeningSceneInstruction} Copy turnNumber exactly into the response and set acknowledgedPlayerAction to null."
+                : $"{templates.ContinueStoryInstruction} Resolve currentPlayerAction now. " +
+                  "Do not answer an action from the preceding history and do not repeat an earlier scene. " +
+                  "Advance beyond the last assistant narration. Copy turnNumber and currentPlayerAction exactly into the response fields."
+        }, Json)));
         return messages;
     }
 
@@ -489,10 +498,37 @@ public sealed class OpenAiCompatibleProvider(
     {
         var meta = node["_transport"] as JsonObject;
         node.Remove("_transport");
-        RequireProperties(node, "narration", "suggestedActions", "relevantStoryBibleEntryIds", "storyBibleUpdates");
+        RequireProperties(
+            node,
+            "turnNumber",
+            "acknowledgedPlayerAction",
+            "narration",
+            "suggestedActions",
+            "relevantStoryBibleEntryIds",
+            "storyBibleUpdates");
+        var turnNumber = RequiredInteger(node, "turnNumber");
+        if (turnNumber != context.NextTurnNumber)
+            throw new JsonException(
+                $"The response acknowledged turn {turnNumber}, but the current turn is {context.NextTurnNumber}.");
+        var acknowledgedAction = node["acknowledgedPlayerAction"] is null
+            ? null
+            : RequiredString(node, "acknowledgedPlayerAction");
+        if (opening)
+        {
+            if (acknowledgedAction is not null)
+                throw new JsonException("An opening-scene response must acknowledge a null player action.");
+        }
+        else if (!string.Equals(acknowledgedAction, context.PlayerAction, StringComparison.Ordinal))
+        {
+            throw new JsonException(
+                "The response acknowledged a different player action. Respond to currentPlayerAction and copy it exactly.");
+        }
         var narration = RequiredString(node, "narration");
         if (string.IsNullOrWhiteSpace(narration) || narration.Length > settings.ContentLimits.MaxNarrationCharacters)
             throw new JsonException("Narration is empty or exceeds the configured limit.");
+        if (!opening && context.RecentTurns.Any(turn => IsSubstantiallyDuplicate(narration, turn.Narration)))
+            throw new JsonException(
+                "The narration duplicates a recent scene. Advance the story by resolving currentPlayerAction instead.");
         var suggestions = RequiredArray(node, "suggestedActions");
         if (suggestions.Count > settings.ContentLimits.MaxSuggestedActions)
             throw new JsonException("Too many suggested actions.");
@@ -623,6 +659,12 @@ public sealed class OpenAiCompatibleProvider(
 
     private static JsonObject TurnSchema(ApiConnectionSettings settings) => ObjectSchema(new Dictionary<string, JsonNode?>
     {
+        ["turnNumber"] = new JsonObject { ["type"] = "integer", ["minimum"] = 0 },
+        ["acknowledgedPlayerAction"] = new JsonObject
+        {
+            ["type"] = new JsonArray("string", "null"),
+            ["maxLength"] = settings.ContentLimits.MaxPlayerActionCharacters
+        },
         ["narration"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxNarrationCharacters },
         ["suggestedActions"] = new JsonObject { ["type"] = "array", ["maxItems"] = settings.ContentLimits.MaxSuggestedActions, ["items"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxSuggestedActionCharacters } },
         ["relevantStoryBibleEntryIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } },
@@ -637,7 +679,48 @@ public sealed class OpenAiCompatibleProvider(
                 ["entry"] = new JsonObject { ["anyOf"] = new JsonArray(ProposedEntrySchema(settings), new JsonObject { ["type"] = "null" }) }
             }, ["operation", "entryId", "entry"])
         }
-    }, ["narration", "suggestedActions", "relevantStoryBibleEntryIds", "storyBibleUpdates"]);
+    }, ["turnNumber", "acknowledgedPlayerAction", "narration", "suggestedActions", "relevantStoryBibleEntryIds", "storyBibleUpdates"]);
+
+    private static bool IsSubstantiallyDuplicate(string candidate, string previous)
+    {
+        var candidateWords = NormalizedWords(candidate);
+        var previousWords = NormalizedWords(previous);
+        if (candidateWords.SequenceEqual(previousWords)) return true;
+        if (candidateWords.Length < 20 || previousWords.Length < 20) return false;
+
+        var candidateShingles = Shingles(candidateWords);
+        var previousShingles = Shingles(previousWords);
+        var intersection = candidateShingles.Count(previousShingles.Contains);
+        var smaller = Math.Min(candidateShingles.Count, previousShingles.Count);
+        var union = candidateShingles.Count + previousShingles.Count - intersection;
+        return smaller > 0 &&
+               intersection / (double)smaller >= 0.90 &&
+               intersection / (double)union >= 0.80;
+    }
+
+    private static string[] NormalizedWords(string value) =>
+        value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .Take(4096)
+            .Select(word => new string(word
+                .Where(char.IsLetterOrDigit)
+                .Select(char.ToLowerInvariant)
+                .ToArray()))
+            .Where(word => word.Length > 0)
+            .ToArray();
+
+    private static HashSet<int> Shingles(IReadOnlyList<string> words)
+    {
+        const int shingleSize = 5;
+        var result = new HashSet<int>();
+        for (var start = 0; start <= words.Count - shingleSize; start++)
+        {
+            var hash = new HashCode();
+            for (var offset = 0; offset < shingleSize; offset++)
+                hash.Add(words[start + offset], StringComparer.Ordinal);
+            result.Add(hash.ToHashCode());
+        }
+        return result;
+    }
 
     private static JsonObject ProposedEntrySchema(ApiConnectionSettings settings) => ObjectSchema(new Dictionary<string, JsonNode?>
     {

@@ -190,7 +190,7 @@ public sealed class ProviderTests
             body = await request.Content!.ReadAsStringAsync();
             var relevant = requests == 1 ? Guid.NewGuid() : entry.Id;
             return Response($$"""
-                {"narration":"Scene","suggestedActions":["Continue"],"relevantStoryBibleEntryIds":["{{relevant}}"],"storyBibleUpdates":[]}
+                {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["Continue"],"relevantStoryBibleEntryIds":["{{relevant}}"],"storyBibleUpdates":[]}
                 """);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
@@ -214,6 +214,102 @@ public sealed class ProviderTests
         Assert.Equal(2, requests);
         Assert.Equal(entry.Id, Assert.Single(result.RelevantStoryBibleEntryIds));
         Assert.Contains("CUSTOM NARRATION INSTRUCTION", body);
+        Assert.Contains("currentPlayerAction", body);
+        Assert.Contains("Continue", body);
+        Assert.Contains("turnNumber", body);
+    }
+
+    [Fact]
+    public async Task GenerateTurn_RetriesResponseForPreviousAction()
+    {
+        var requests = 0;
+        var handler = new StubHandler(_ =>
+        {
+            requests++;
+            var acknowledged = requests == 1 ? "Previous action" : "Current action";
+            return Task.FromResult(Response($$"""
+                {"turnNumber":2,"acknowledgedPlayerAction":"{{acknowledged}}","narration":"A new scene unfolds.","suggestedActions":[],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+                """));
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", [], new([])),
+            [],
+            new([]),
+            [],
+            "Current action",
+            2);
+
+        var result = await provider.GenerateTurnAsync(Settings(), null, context);
+
+        Assert.Equal(2, requests);
+        Assert.Equal("A new scene unfolds.", result.Narration);
+    }
+
+    [Fact]
+    public async Task GenerateTurn_RetriesDuplicatedRecentNarration()
+    {
+        const string previousNarration =
+            "The silent corridor stretches ahead beneath cold emergency lights while dust drifts through the air. " +
+            "A sealed door waits at the far end beside a damaged console and a motionless security camera. " +
+            "Nothing else moves as you listen for danger, study the scattered footprints, and consider how to cross " +
+            "the exposed floor without alerting whoever controls the facility.";
+        var requests = 0;
+        var handler = new StubHandler(_ =>
+        {
+            requests++;
+            var narration = requests == 1
+                ? previousNarration.Replace("silent corridor", "quiet corridor", StringComparison.Ordinal)
+                : "Your new decision changes the situation and opens an entirely different path.";
+            return Task.FromResult(Response($$"""
+                {"turnNumber":2,"acknowledgedPlayerAction":"Choose another path","narration":"{{narration}}","suggestedActions":[],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+                """));
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var stateId = Guid.NewGuid();
+        var recent = new StoryTurn(
+            Guid.NewGuid(),
+            stateId,
+            1,
+            "Wait",
+            previousNarration,
+            [],
+            [],
+            [],
+            DateTimeOffset.UtcNow,
+            new("model", null, null, null));
+        var context = new GenerationContext(
+            new("Story", "Prompt", [], new([])),
+            [],
+            new([]),
+            [recent],
+            "Choose another path",
+            2);
+
+        var result = await provider.GenerateTurnAsync(Settings(), null, context);
+
+        Assert.Equal(2, requests);
+        Assert.NotEqual(previousNarration, result.Narration);
+    }
+
+    [Fact]
+    public async Task GenerateOpening_RequiresTurnZeroAndNullAcknowledgedAction()
+    {
+        var handler = new StubHandler(_ => Task.FromResult(Response("""
+            {"turnNumber":0,"acknowledgedPlayerAction":null,"narration":"The story begins.","suggestedActions":[],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+            """)));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", [], new([])),
+            [],
+            new([]),
+            [],
+            null,
+            0);
+
+        var result = await provider.GenerateOpeningAsync(Settings(), null, context);
+
+        Assert.Equal("The story begins.", result.Narration);
     }
 
     [Fact]

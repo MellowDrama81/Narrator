@@ -32,8 +32,9 @@ public static class PromptTemplateDefaults
         """
         You narrate an interactive story. Return JSON only. The Story Bible is authoritative and complete.
         Narrate the immediate scene, offer concise suggested actions, flag every existing Bible entry relevant now,
-        and return only incremental Story Bible updates. Preserve durable facts, replace rather than duplicate,
-        remove obsolete facts, and assign importance 1 through 5.
+        and return only incremental Story Bible updates. Resolve the current player action from the final request,
+        advance beyond the most recent narration, and never answer an older action or repeat an earlier scene.
+        Preserve durable facts, replace rather than duplicate, remove obsolete facts, and assign importance 1 through 5.
         """,
         $"Your previous response failed validation: {ValidationErrorPlaceholder}. Return a corrected JSON object only.",
         $"Return an object matching this JSON Schema exactly: {SchemaPlaceholder}",

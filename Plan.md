@@ -85,6 +85,8 @@ A story-turn response contains narration, suggested player actions, the IDs of e
 
 ```json
 {
+  "turnNumber": 12,
+  "acknowledgedPlayerAction": "Examine the telescope",
   "narration": "You enter the abandoned observatory...",
   "suggestedActions": [
     "Examine the telescope",
@@ -123,6 +125,12 @@ A story-turn response contains narration, suggested player actions, the IDs of e
 }
 ```
 
+For a normal turn, require `turnNumber` to equal the requested next turn and require
+`acknowledgedPlayerAction` to reproduce the current player action exactly. An opening response uses turn zero and a
+null acknowledged action. Reject and correctively retry a response which acknowledges a stale turn/action or which
+duplicates a recent narration. These transport fields are validation guards and do not need to be persisted separately
+because the validated turn number and player action are already part of the durable `StoryTurn`.
+
 Every existing Story Bible entry has a stable ID, an LLM-assigned importance from 1 through 5 and the sequence number of the turn when it was last relevant. Supply all of this metadata to the LLM.
 Every opening-scene and story-turn response contains `relevantStoryBibleEntryIds`, listing the existing entries which were relevant to that turn.
 An `add` update supplies an entry without an ID; the application assigns its stable ID.
@@ -138,6 +146,7 @@ Retain the applied update list with the story turn as an audit history while kee
 
 Every story-generation request contains the Story Prompt, the player's final setup responses, the complete current Story Bible with each entry's importance and last-relevant turn number, the configured number of most recent completed turns and the current player action.
 For recent turns, include the player action and narration. The opening turn may be included when it falls within the configured recent-turn count; suggested actions from previous turns do not need to be sent.
+Send the current turn number and current player action in a distinct final structured user-message envelope. Explicitly identify it as the action to resolve now and distinguish it from historical player actions.
 The recent-turn count is a non-negative setting. Treat it as the maximum number of completed turns to include, since a new story may contain fewer turns.
 Do not summarize older turns. Retain the complete turn history in local persistence, but omit turns older than the configured recent-turn window from generation requests.
 Always send the complete Story Bible. Never truncate it, select only some entries or replace it with a summary.
@@ -425,12 +434,16 @@ public sealed record StoryDefinitionGenerationResponse(
     IReadOnlyList<ProposedStoryBibleEntry> InitialStoryBibleEntries);
 
 public sealed record InitialStoryResponse(
+    int TurnNumber,
+    string? AcknowledgedPlayerAction,
     string Narration,
     IReadOnlyList<string> SuggestedActions,
     IReadOnlyList<Guid> RelevantStoryBibleEntryIds,
     IReadOnlyList<ProposedStoryBibleUpdate> StoryBibleUpdates);
 
 public sealed record StoryTurnResponse(
+    int TurnNumber,
+    string AcknowledgedPlayerAction,
     string Narration,
     IReadOnlyList<string> SuggestedActions,
     IReadOnlyList<Guid> RelevantStoryBibleEntryIds,
