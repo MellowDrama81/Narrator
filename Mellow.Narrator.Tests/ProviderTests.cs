@@ -179,18 +179,18 @@ public sealed class ProviderTests
     }
 
     [Fact]
-    public async Task GenerateTurn_RetriesUnknownBibleReferenceThenSucceeds()
+    public async Task GenerateTurn_RemovesBadRelevantEntryIdsWithoutRetry()
     {
         var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Fact", "Content", 3, 0);
+        var unknown = Guid.NewGuid();
         var requests = 0;
         string? body = null;
         var handler = new StubHandler(async request =>
         {
             requests++;
             body = await request.Content!.ReadAsStringAsync();
-            var relevant = requests == 1 ? Guid.NewGuid() : entry.Id;
-            return Response($$"""
-                {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["Continue"],"relevantStoryBibleEntryIds":["{{relevant}}"],"storyBibleUpdates":[]}
+            return Response($$$"""
+                {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["Continue"],"relevantStoryBibleEntryIds":["{{{entry.Id}}}","{{{entry.Id}}}","{{{unknown}}}","not-a-uuid",42,null],"storyBibleUpdates":[]}
                 """);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
@@ -211,9 +211,10 @@ public sealed class ProviderTests
         };
         var result = await provider.GenerateTurnAsync(settings, null, context);
 
-        Assert.Equal(2, requests);
+        Assert.Equal(1, requests);
         Assert.Equal(entry.Id, Assert.Single(result.RelevantStoryBibleEntryIds));
         Assert.Contains("CUSTOM NARRATION INSTRUCTION", body);
+        Assert.Contains("Never invent or return any other ID", body);
         Assert.Contains("currentPlayerAction", body);
         Assert.Contains("Continue", body);
         Assert.Contains("turnNumber", body);

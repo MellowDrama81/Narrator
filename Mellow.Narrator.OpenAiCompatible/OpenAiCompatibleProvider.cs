@@ -447,7 +447,9 @@ public sealed class OpenAiCompatibleProvider(
                 add = "Set entryId to null. The application assigns the new ID; never invent one.",
                 replace = "Use only the ID of an existing Story Bible entry supplied above.",
                 remove = "Use only the ID of an existing Story Bible entry supplied above."
-            }
+            },
+            relevantStoryBibleEntryRules =
+                "Include only IDs copied exactly from the current Story Bible supplied above. Never invent or return any other ID."
         }, Json)));
         foreach (var turn in context.RecentTurns)
         {
@@ -545,11 +547,20 @@ public sealed class OpenAiCompatibleProvider(
                 throw new JsonException("A suggested action is empty or exceeds the configured limit.");
         }
         var relevantNodes = RequiredArray(node, "relevantStoryBibleEntryIds");
-        var relevantText = relevantNodes.Select(x => StringValue(x, "A relevant entry ID")).ToArray();
-        if (relevantText.Distinct(StringComparer.OrdinalIgnoreCase).Count() != relevantText.Length)
-            throw new JsonException("The relevant-entry list contains duplicates.");
-        if (relevantText.Any(x => !Guid.TryParse(x, out _)))
-            throw new JsonException("A relevant entry ID is not a UUID.");
+        var currentEntryIds = context.StoryBible.Entries.Select(entry => entry.Id).ToHashSet();
+        var seenRelevantIds = new HashSet<Guid>();
+        var normalizedRelevantIds = new List<Guid>();
+        foreach (var relevantNode in relevantNodes)
+        {
+            if (relevantNode is JsonValue value &&
+                value.TryGetValue<string>(out var text) &&
+                Guid.TryParse(text, out var id) &&
+                currentEntryIds.Contains(id) &&
+                seenRelevantIds.Add(id))
+                normalizedRelevantIds.Add(id);
+        }
+        node["relevantStoryBibleEntryIds"] = new JsonArray(
+            normalizedRelevantIds.Select(id => (JsonNode)id.ToString("D")).ToArray());
 
         var updates = RequiredArray(node, "storyBibleUpdates");
         if (updates.Count > settings.ContentLimits.MaxStoryBibleUpdatesPerResponse)
