@@ -13,6 +13,11 @@ Mellow Narrator is a .NET 10 MAUI application for creating and playing durable, 
 
 The complete behavioral and architectural specification is in [Plan.md](Plan.md).
 
+## Example Story Definition
+
+[You are Syknet-definition.json](examples/You%20are%20Syknet-definition.json) is an example exported Story Definition.
+To use it, open the **Story Definitions** page in Mellow Narrator, select **Import**, and choose the downloaded JSON file.
+
 ## Build and test
 
 ```powershell
