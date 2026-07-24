@@ -11,6 +11,7 @@ public sealed class SettingsTests
         Assert.Empty(SettingsValidator.Validate(settings));
         Assert.Equal(8, settings.StoryGeneration.RecentTurnCount);
         Assert.Equal(200, settings.StoryGeneration.MaxStoryBibleEntries);
+        Assert.Equal(NarratorLogLevel.Information, settings.Logging.MinimumLevel);
         Assert.Contains("Story Bible", settings.PromptTemplates.StoryDefinitionInstruction);
         Assert.Contains(
             PromptTemplateDefaults.ValidationErrorPlaceholder,
@@ -18,6 +19,19 @@ public sealed class SettingsTests
         Assert.Contains(
             PromptTemplateDefaults.SchemaPlaceholder,
             settings.PromptTemplates.PromptedJsonInstruction);
+    }
+
+    [Fact]
+    public void Validator_RejectsUnknownLoggingLevel()
+    {
+        var settings = NarratorDefaults.Create() with
+        {
+            Logging = new((NarratorLogLevel)999)
+        };
+
+        Assert.Contains(
+            nameof(LoggingSettings.MinimumLevel),
+            SettingsValidator.Validate(settings).Keys);
     }
 
     [Fact]

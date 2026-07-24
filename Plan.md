@@ -45,7 +45,7 @@ Do not silently fall back to another model when the selected model is unavailabl
 Use the Chat Completions API as the initial compatibility target.
 Send generation requests as JSON to `POST {baseUrl}/chat/completions` using developer or system instructions, plus user and assistant messages. Prefer the modern `developer` role and `max_completion_tokens` field. During connection testing, fall back through the system role and legacy `max_tokens` field when required by the selected compatible provider, and persist the working combination as detected capabilities.
 Use non-streaming responses so a complete structured response can be validated before any state is displayed or persisted.
-Attempt model discovery using `GET {baseUrl}/models`. Model discovery is optional; allow the user to enter a model ID manually when the endpoint is unavailable.
+Load models independently using `GET {baseUrl}/models` before the model-specific connection test. Discovery requires only the base URL and optional credential; it must not require a model ID. Model discovery is optional, so allow the user to enter a model ID manually when the endpoint is unavailable.
 The Responses API may be supported by a separate provider adapter in a future version.
 
 Define the provider abstraction consumed by application services in `Mellow.Narrator.Core`. Implement it in `Mellow.Narrator.OpenAiCompatible` and provide an `AddMellowNarratorOpenAiCompatible(IServiceCollection)` registration extension using a typed `HttpClient`. GUI and CLI use the same adapter; provider HTTP details must not leak into Core use cases.
@@ -173,7 +173,13 @@ When `Retry-After` is supplied and does not exceed `MaxRetryAfter`, wait for tha
 The timeout applies separately to each HTTP attempt. A structured-response corrective retry is a new logical request with its own transport-retry allowance and does not consume the preceding request's retry count.
 Do not automatically retry authentication, invalid-model or unsupported-parameter errors.
 If a request, response validation or Story Bible update fails, preserve the previous Story State and present an actionable error to the user.
-Do not write API credentials or full prompts to ordinary logs.
+Never write API credentials, authorization headers or credential-bearing URL components to logs. Ordinary levels log operation and HTTP metadata only. The explicitly selected `Trace` level logs complete LLM request and response bodies for diagnostics and therefore may contain Story Bibles, player answers, actions and narration.
+
+## Logging
+
+Write structured JSON-lines logs to rolling files under the private application-data `logs` folder. Default to `Information`; support `Off`, `Error`, `Warning`, `Information`, `Debug` and `Trace`, with changes taking effect after Settings is saved. Retain the current file and three rotated files, rotating at 5 MiB per file. Logging failures must never fail an application operation.
+
+At `Information`, log application operation boundaries, selected model IDs, provider endpoint metadata, attempt counts, status codes, durations, persistence recovery and durable commit completion without story or player content. `Debug` adds non-content identifiers and validation outcomes. `Trace` additionally logs every complete OpenAI-compatible request and response body, including failed and retried responses up to the configured response-size limit. Show an explicit privacy warning before enabling `Trace`.
 
 ## Retry, Regeneration, Undo and Branching
 
@@ -561,7 +567,11 @@ public sealed record ApiConnectionSettings(
     ConnectionCapabilities Capabilities)
 {
     public PromptTemplateSettings PromptTemplates { get; init; } = PromptTemplateDefaults.Create();
+    public LoggingSettings Logging { get; init; } = LoggingDefaults.Create();
 }
+
+public enum NarratorLogLevel { Trace, Debug, Information, Warning, Error, Off }
+public sealed record LoggingSettings(NarratorLogLevel MinimumLevel);
 
 public sealed record PromptTemplateSettings(
     string PlayerAnswerValidationInstruction,
@@ -655,6 +665,7 @@ Create the initial configuration from one versioned Core defaults factory. Persi
 | Maximum retry delay | 10 seconds | 1 to 120 seconds |
 | Maximum automatic `Retry-After` wait | 60 seconds | 1 to 600 seconds |
 | Each prompt template | Built-in template | 1 to 20,000 characters |
+| Logging level | Information | Off, Error, Warning, Information, Debug or Trace |
 
 Advanced content limits use these defaults:
 
@@ -701,6 +712,7 @@ public sealed record StoryStateExport(
 ```
 
 Serialize JSON using camel-case property names, string enum values and ISO 8601 UTC timestamps.
+Export through a platform Save As picker with a suggested safe `.json` filename so the user chooses the destination and may rename the file. Cancellation leaves no temporary export file and is not reported as an error.
 Validate the complete document before import. Migrate supported older format versions and reject unsupported newer versions with a clear error.
 Import and copy operations create a deep copy with a new top-level identity, remap nested technical IDs consistently and preserve all internal references.
 Imported and copied records are appended to the end of their corresponding ordered list. A copied Story State preserves the source label and all other domain data; only its identifiers and list position differ.
@@ -723,6 +735,11 @@ Use this logical folder layout:
 Mellow.Narrator/
   settings/
     api-connection.json
+  logs/
+    narrator.log
+    narrator.1.log
+    narrator.2.log
+    narrator.3.log
   workspace/
     workspace.json
   story-definitions/
@@ -839,6 +856,8 @@ builder.Services.AddSingleton<ISecureStorageService, MauiSecureStorageService>()
 ```
 
 Core API-connection services receive `ISecureStorageService` through constructor injection. They use `SecureStorageKeys.ApiCredential` to load the optional credential immediately before making an authenticated provider request and to store or remove it when Settings is saved. Core must never call MAUI static APIs or use a service locator.
+
+The Settings API-key field shows a non-secret masked indicator when Core reports that a credential exists. The stored value is never returned to or displayed by the GUI. Focusing the field permits replacement, leaving the indicator untouched preserves the stored credential, and the explicit clear action removes it only when Settings is saved.
 
 Credentials are not file persistence: `Mellow.Narrator.Persistence` neither references nor implements `ISecureStorageService`, and no credential or secure-storage key is written to JSON. If secure storage is unavailable or fails, show an actionable credential-storage error and do not fall back to JSON, preferences, logs or another plaintext store. Never include a credential value in exceptions, diagnostics or telemetry.
 
@@ -991,6 +1010,7 @@ Test:
 - Invalid, truncated and oversized documents.
 - Path-traversal and untrusted-filename attempts.
 - Confirmation that credentials are never exported.
+- Windows and Android Save As destination selection, filename changes and cancellation.
 
 ## Use-Case Integration Tests
 
@@ -1038,7 +1058,9 @@ Include representative tests for:
 - Startup and list-loading performance without eager history loading.
 - Android pause, resume and process recreation.
 - Cancellation during provider requests.
-- Redaction of credentials and full prompts from logs and exceptions.
+- Redaction of credentials from every log level and exception.
+- Full request/response bodies excluded below Trace and included at Trace.
+- Rolling-file rotation and non-fatal handling of log-write failures.
 - Safe handling of malformed and excessively large imported JSON.
 
 ## Continuous Integration and Release Gates
@@ -1080,10 +1102,10 @@ Always exactly 1 tab. This is locked as the 1st (top/leftmost) tab.
 Allow the user to configure a connection to an OpenAI-compatible API.
 Store API keys and other credentials using `Microsoft.Maui.Storage.SecureStorage`. Credentials must not be stored in ordinary configuration files, written to logs or included in exported Story Definition or story state JSON files.
 Persist non-sensitive connection settings, such as the API endpoint and selected model, separately from credentials.
-With an API connected, attempt to load a list of available models and allow the user to select one. If model discovery is unavailable, allow the user to enter a model ID manually.
+Provide a **Load Models** action after the base URL and optional credential fields. It saves those connection details, calls model discovery without requiring a model ID, and allows the user to select a returned model before running **Test Connection**. If model discovery is unavailable, allow the user to enter a model ID manually.
 Explain that changing the selected model applies to all subsequent LLM operations, including existing stories.
 Show request timeout, maximum output tokens, optional temperature, optional top-p, optional reasoning effort, recent-turn count and maximum Story Bible entry count as normal generation settings. Send optional model parameters only when configured.
-Provide an Advanced section for retry timing, Story Bible warning/per-entry/total limits and all input, structured-response and response-body limits.
+Provide an Advanced section for logging level, retry timing, Story Bible warning/per-entry/total limits and all input, structured-response and response-body limits. Explain the log location and warn that Trace records complete LLM requests and responses before enabling it.
 Provide a Prompt Templates page for editing the application-wide templates, explaining the required `{validationError}` and `{schema}` placeholders, and resetting all templates to their built-in defaults without saving automatically.
 Show each setting's allowed range and default value. Validate fields before saving, preserve the user's invalid text while showing errors, and provide Reset Section to Defaults actions which still require Save before taking effect.
 Before saving lower Story Bible limits, report how many existing Story Definitions and Story States would no longer conform. Saving the settings is allowed after acknowledgement but does not modify those records.

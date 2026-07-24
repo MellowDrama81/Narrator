@@ -34,6 +34,19 @@ public sealed class AdvancedSettingsPage : ContentPage
     };
     private readonly INarratorApplication _app;
     private readonly Dictionary<string, Entry> _fields = [];
+    private readonly Picker _logLevel = new()
+    {
+        Title = "Logging level",
+        ItemsSource = new[]
+        {
+            NarratorLogLevel.Off,
+            NarratorLogLevel.Error,
+            NarratorLogLevel.Warning,
+            NarratorLogLevel.Information,
+            NarratorLogLevel.Debug,
+            NarratorLogLevel.Trace
+        }
+    };
     private ApiConnectionSettings? _settings;
 
     public AdvancedSettingsPage(INarratorApplication app)
@@ -42,6 +55,15 @@ public sealed class AdvancedSettingsPage : ContentPage
         Title = "Advanced Settings";
         var content = new VerticalStackLayout { Padding = 16, Spacing = 6 };
         content.Children.Add(Ui.Heading("Advanced Settings"));
+        content.Children.Add(Ui.Heading("Logging"));
+        content.Children.Add(new Label { Text = "Log level (default Information)" });
+        content.Children.Add(_logLevel);
+        content.Children.Add(new Label
+        {
+            Text = "Logs are rolling JSON-lines files in the app's private data folder. Trace includes complete LLM request and response bodies and may contain private story and player content. API credentials are never logged.",
+            FontSize = 12
+        });
+        content.Children.Add(Ui.Heading("Generation and Limits"));
         Add(content, "Temperature (blank = provider default)", "temperature");
         Add(content, "Top-p (blank = provider default)", "topP");
         Add(content, "Reasoning effort (blank = provider default)", "reasoning");
@@ -85,6 +107,8 @@ public sealed class AdvancedSettingsPage : ContentPage
             double? Optional(string key) => string.IsNullOrWhiteSpace(_fields[key].Text) ? null : Number(key);
             var updated = s with
             {
+                Logging = new((NarratorLogLevel?)_logLevel.SelectedItem
+                    ?? throw new NarratorException("Select a logging level.")),
                 Parameters = new(Optional("temperature"), Optional("topP"), string.IsNullOrWhiteSpace(_fields["reasoning"].Text) ? null : _fields["reasoning"].Text.Trim()),
                 StoryGeneration = s.StoryGeneration with
                 {
@@ -97,6 +121,14 @@ public sealed class AdvancedSettingsPage : ContentPage
                     Int("answer"), Int("action"), Int("narration"), Int("suggestedCount"), Int("suggestedLength"),
                     Int("category"), Int("name"), Int("updates"), Int("responseBytes"))
             };
+            if (updated.Logging.MinimumLevel == NarratorLogLevel.Trace &&
+                s.Logging.MinimumLevel != NarratorLogLevel.Trace &&
+                !await DisplayAlertAsync(
+                    "Enable sensitive Trace logging?",
+                    "Trace records complete LLM requests and responses, including Story Bibles, player answers, actions, and narration. API credentials remain excluded.",
+                    "Enable Trace",
+                    "Cancel"))
+                return;
             var lowered = updated.StoryGeneration.MaxStoryBibleEntryCharacters < s.StoryGeneration.MaxStoryBibleEntryCharacters ||
                 updated.StoryGeneration.MaxStoryBibleCharacters < s.StoryGeneration.MaxStoryBibleCharacters;
             if (lowered)
@@ -130,13 +162,15 @@ public sealed class AdvancedSettingsPage : ContentPage
                 StoryBibleWarningPercent = defaults.StoryGeneration.StoryBibleWarningPercent
             },
             Retry = defaults.Retry,
-            ContentLimits = defaults.ContentLimits
+            ContentLimits = defaults.ContentLimits,
+            Logging = defaults.Logging
         };
         Load(_settings);
     }
 
     private void Load(ApiConnectionSettings s)
     {
+        _logLevel.SelectedItem = s.Logging.MinimumLevel;
         Set("temperature", s.Parameters.Temperature);
         Set("topP", s.Parameters.TopP);
         _fields["reasoning"].Text = s.Parameters.ReasoningEffort ?? "";

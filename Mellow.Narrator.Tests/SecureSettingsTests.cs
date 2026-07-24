@@ -5,6 +5,21 @@ namespace Mellow.Narrator.Tests;
 public sealed class SecureSettingsTests
 {
     [Fact]
+    public async Task CredentialPresence_ReportsSavedKeyWithoutReturningIt()
+    {
+        var secure = new RecordingSecureStorage("stored-secret");
+        var app = CreateApplication(
+            new FailingSettingsStore(ConfiguredSettings("model")),
+            secure,
+            new ApiConnectionCoordinator());
+
+        var result = await app.HasApiCredentialAsync();
+
+        Assert.True(result);
+        Assert.Equal([$"get:{SecureStorageKeys.ApiCredential}"], secure.Operations);
+    }
+
+    [Fact]
     public async Task FailedSettingsSave_RestoresPreviousCredential()
     {
         var original = ConfiguredSettings("old-model");
@@ -112,6 +127,12 @@ public sealed class SecureSettingsTests
     private sealed class RecordingProvider : ILanguageModelProvider
     {
         public int ConnectionTests { get; private set; }
+
+        public Task<IReadOnlyList<string>> DiscoverModelsAsync(
+            ApiConnectionSettings settings,
+            string? credential,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
 
         public Task<ConnectionTestResult> TestConnectionAsync(
             ApiConnectionSettings settings,

@@ -2,6 +2,7 @@ using Mellow.Narrator.Core;
 using Mellow.Narrator.Gui.Services;
 using Mellow.Narrator.OpenAiCompatible;
 using Mellow.Narrator.Persistence;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.Storage;
 
@@ -12,7 +13,8 @@ public static class MauiProgram
     public static MauiApp CreateMauiApp()
     {
         var builder = MauiApp.CreateBuilder();
-        builder.UseMauiApp<App>().ConfigureFonts(fonts =>
+        builder.UseMauiApp<App>()
+            .ConfigureFonts(fonts =>
         {
             fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
             fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
@@ -26,9 +28,10 @@ public static class MauiProgram
         builder.Services.AddSingleton<ISecureStorageService, MauiSecureStorageService>();
         builder.Services.AddSingleton<MainTabbedPage>();
 
-#if DEBUG
-        builder.Logging.AddDebug();
-#endif
-        return builder.Build();
+        var app = builder.Build();
+        Ui.ConfigureLogging(
+            app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Mellow.Narrator.Gui"),
+            app.Services.GetRequiredService<INarratorLogLevelSwitch>());
+        return app;
     }
 }

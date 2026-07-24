@@ -37,6 +37,10 @@
 
 		<!-- To develop, package, and publish an app to the Microsoft Store, see: https://aka.ms/MauiTemplateUnpackaged -->
 		<WindowsPackageType>None</WindowsPackageType>
+		<!-- Keep the Windows UI/input runtime with the app. Using the older resolved
+		     runtime against newer OS input components caused ExpPointerPoint activation
+		     to fail with REGDB_E_CLASSNOTREG during touch/pointer interaction. -->
+		<WindowsAppSDKSelfContained Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">true</WindowsAppSDKSelfContained>
 
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">21.0</SupportedOSPlatformVersion>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
@@ -62,11 +66,16 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<PackageReference Include="CommunityToolkit.Maui.Core" Version="13.0.0" />
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
 		<ProjectReference Include="..\Mellow.Narrator.Core\Mellow.Narrator.Core.csproj" />
 		<ProjectReference Include="..\Mellow.Narrator.OpenAiCompatible\Mellow.Narrator.OpenAiCompatible.csproj" />
 		<ProjectReference Include="..\Mellow.Narrator.Persistence\Mellow.Narrator.Persistence.csproj" />
+	</ItemGroup>
+
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
+		<!-- Explicitly use the serviced release verified against the current Windows input stack. -->
+		<PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260508005" />
 	</ItemGroup>
 
 </Project>

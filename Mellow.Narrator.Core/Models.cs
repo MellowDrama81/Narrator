@@ -119,7 +119,7 @@ public sealed record StartStoryDraft(
 }
 
 public enum TabType { Settings, StoryDefinitionList, PlayStoryList, StoryDefinition, StoryPrompt, StartStory, PlayStory }
-public enum PendingOperationType { GenerateStoryDefinition, ValidatePlayerAnswer, GenerateOpeningScene, GenerateStoryTurn, TestApiConnection }
+public enum PendingOperationType { GenerateStoryDefinition, ValidatePlayerAnswer, GenerateOpeningScene, GenerateStoryTurn, DiscoverModels, TestApiConnection }
 
 public sealed record PendingOperationState(
     Guid OperationId,

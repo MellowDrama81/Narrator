@@ -5,32 +5,50 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Mellow.Narrator.Core;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Mellow.Narrator.OpenAiCompatible;
 
-public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider timeProvider) : ILanguageModelProvider
+public sealed class OpenAiCompatibleProvider(
+    HttpClient httpClient,
+    TimeProvider timeProvider,
+    ILogger<OpenAiCompatibleProvider>? logger = null) : ILanguageModelProvider
 {
+    private readonly ILogger<OpenAiCompatibleProvider> _logger =
+        logger ?? NullLogger<OpenAiCompatibleProvider>.Instance;
+
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
+    public async Task<IReadOnlyList<string>> DiscoverModelsAsync(
+        ApiConnectionSettings settings,
+        string? credential,
+        CancellationToken cancellationToken = default)
+    {
+        RequireBaseUrl(settings);
+        var root = await SendAsync(
+            settings,
+            credential,
+            () => CreateRequest(HttpMethod.Get, settings, "models", credential),
+            cancellationToken);
+        return root["data"]?.AsArray()
+            .Select(x => x?["id"]?.GetValue<string>())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Cast<string>()
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray() ?? [];
+    }
+
     public async Task<ConnectionTestResult> TestConnectionAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default)
     {
         try
         {
             RequireConnection(settings);
-            IReadOnlyList<string> models = [];
-            var discovery = false;
-            try
-            {
-                var root = await SendAsync(settings, credential, () => CreateRequest(HttpMethod.Get, settings, "models", credential), cancellationToken);
-                models = root["data"]?.AsArray().Select(x => x?["id"]?.GetValue<string>()).Where(x => !string.IsNullOrWhiteSpace(x)).Cast<string>().Order().ToArray() ?? [];
-                discovery = true;
-            }
-            catch (ProviderException ex) when (ex.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed) { }
-
             var tier = StructuredOutputTier.Unsupported;
             ProviderRequestContract? supportedContract = null;
             foreach (var contract in RequestContractCandidates())
@@ -53,14 +71,18 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
                 }
                 if (supportedContract is not null) break;
             }
-            var capabilities = new ConnectionCapabilities(discovery, tier, settings.ModelId, timeProvider.GetUtcNow())
+            var capabilities = new ConnectionCapabilities(
+                settings.Capabilities.SupportsModelDiscovery,
+                tier,
+                settings.ModelId,
+                timeProvider.GetUtcNow())
             {
                 OutputTokenParameter = supportedContract?.OutputTokenParameter ?? OutputTokenParameter.MaxCompletionTokens,
                 InstructionMessageRole = supportedContract?.InstructionMessageRole ?? InstructionMessageRole.Developer
             };
             return tier == StructuredOutputTier.Unsupported
-                ? new(false, models, capabilities, "The model could not produce a valid structured response.")
-                : new(true, models, capabilities, null);
+                ? new(false, [], capabilities, "The model could not produce a valid structured response.")
+                : new(true, [], capabilities, null);
         }
         catch (Exception ex) when (ex is ProviderException or JsonException or HttpRequestException or TaskCanceledException)
         {
@@ -233,6 +255,7 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
         CancellationToken cancellationToken)
     {
         Exception? last = null;
+        var requestId = Guid.NewGuid();
         for (var attempt = 0; attempt <= settings.Retry.MaxAutomaticRetries; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -241,29 +264,79 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
                 using var request = requestFactory();
                 using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 attemptCts.CancelAfter(settings.RequestTimeout);
+                var endpoint = SafeEndpoint(request.RequestUri);
+                _logger.LogInformation(
+                    "LLM HTTP request {RequestId}: {Method} {Endpoint}; attempt {Attempt} of {AttemptCount}.",
+                    requestId,
+                    request.Method,
+                    endpoint,
+                    attempt + 1,
+                    settings.Retry.MaxAutomaticRetries + 1);
+                if (TraceBodiesEnabled(settings) && request.Content is not null)
+                {
+                    var requestBody = await request.Content.ReadAsStringAsync(attemptCts.Token);
+                    _logger.LogTrace(
+                        "LLM request body for {RequestId}, {Method} {Endpoint}: {RequestBody}",
+                        requestId,
+                        request.Method,
+                        endpoint,
+                        RedactCredential(requestBody, credential));
+                }
+                var started = timeProvider.GetTimestamp();
                 using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, attemptCts.Token);
+                var bytes = await ReadLimitedAsync(response.Content, settings.ContentLimits.MaxResponseBodyBytes, attemptCts.Token);
+                _logger.LogInformation(
+                    "LLM HTTP response for {RequestId}: {StatusCode} from {Method} {Endpoint} after {ElapsedMilliseconds:F0} ms.",
+                    requestId,
+                    (int)response.StatusCode,
+                    request.Method,
+                    endpoint,
+                    timeProvider.GetElapsedTime(started).TotalMilliseconds);
+                if (TraceBodiesEnabled(settings))
+                {
+                    _logger.LogTrace(
+                        "LLM response body for {RequestId}, {Method} {Endpoint}: {ResponseBody}",
+                        requestId,
+                        request.Method,
+                        endpoint,
+                        RedactCredential(Encoding.UTF8.GetString(bytes), credential));
+                }
                 if (!response.IsSuccessStatusCode)
                 {
                     var retryable = response.StatusCode == HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500;
+                    var error = Error(response, bytes, credential);
                     if (retryable && attempt < settings.Retry.MaxAutomaticRetries)
                     {
                         var delay = RetryDelay(settings, response, attempt);
-                        if (delay is null) throw await ErrorAsync(response, settings.ContentLimits.MaxResponseBodyBytes, attemptCts.Token);
+                        if (delay is null) throw error;
+                        _logger.LogWarning(
+                            "Retrying LLM HTTP request {RequestId} after status {StatusCode}; delay {DelayMilliseconds:F0} ms.",
+                            requestId,
+                            (int)response.StatusCode,
+                            delay.Value.TotalMilliseconds);
                         await Task.Delay(delay.Value, timeProvider, cancellationToken);
                         continue;
                     }
-                    throw await ErrorAsync(response, settings.ContentLimits.MaxResponseBodyBytes, attemptCts.Token);
+                    throw error;
                 }
-                var bytes = await ReadLimitedAsync(response.Content, settings.ContentLimits.MaxResponseBodyBytes, attemptCts.Token);
                 return JsonNode.Parse(bytes) as JsonObject ?? throw new JsonException("Provider response is not a JSON object.");
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
             {
                 last = ex;
+                _logger.LogWarning(
+                    "LLM HTTP request {RequestId}, attempt {Attempt} failed with {ErrorType}.",
+                    requestId,
+                    attempt + 1,
+                    ex.GetType().Name);
                 if (attempt >= settings.Retry.MaxAutomaticRetries) break;
                 await Task.Delay(Backoff(settings, attempt), timeProvider, cancellationToken);
             }
         }
+        _logger.LogError(
+            "LLM HTTP request {RequestId} failed after all attempts; final error type: {ErrorType}.",
+            requestId,
+            last?.GetType().Name ?? "Unknown");
         throw new ProviderException(last is TaskCanceledException ? "The provider request timed out." : "The provider request failed.", null, last);
     }
 
@@ -298,17 +371,16 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
         return output.ToArray();
     }
 
-    private static async Task<ProviderException> ErrorAsync(HttpResponseMessage response, int maxBytes, CancellationToken cancellationToken)
+    private static ProviderException Error(HttpResponseMessage response, byte[] bytes, string? credential)
     {
         string detail;
         try
         {
-            var bytes = await ReadLimitedAsync(response.Content, maxBytes, cancellationToken);
             var json = JsonNode.Parse(bytes);
             detail = json?["error"]?["message"]?.GetValue<string>() ?? response.ReasonPhrase ?? "Provider error";
         }
-        catch (OperationCanceledException) { throw; }
         catch { detail = response.ReasonPhrase ?? "Provider error"; }
+        detail = RedactCredential(detail, credential);
         var message = response.StatusCode switch
         {
             HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
@@ -324,6 +396,27 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
             _ => $"{(int)response.StatusCode} {detail}"
         };
         return new ProviderException(message, response.StatusCode);
+    }
+
+    private static bool TraceBodiesEnabled(ApiConnectionSettings settings) =>
+        settings.Logging.MinimumLevel == NarratorLogLevel.Trace;
+
+    private static string RedactCredential(string value, string? credential) =>
+        string.IsNullOrEmpty(credential)
+            ? value
+            : value.Replace(credential, "[REDACTED CREDENTIAL]", StringComparison.Ordinal);
+
+    private static string SafeEndpoint(Uri? uri)
+    {
+        if (uri is null) return "(unknown endpoint)";
+        var safe = new UriBuilder(uri)
+        {
+            UserName = "",
+            Password = "",
+            Query = "",
+            Fragment = ""
+        };
+        return safe.Uri.ToString();
     }
 
     private static bool ContainsAny(string value, params string[] terms) =>
@@ -564,8 +657,15 @@ public sealed class OpenAiCompatibleProvider(HttpClient httpClient, TimeProvider
 
     private static void RequireConnection(ApiConnectionSettings settings)
     {
-        if (settings.BaseUrl is null || string.IsNullOrWhiteSpace(settings.ModelId))
-            throw new ProviderException("Base URL and model ID are required.", null);
+        RequireBaseUrl(settings);
+        if (string.IsNullOrWhiteSpace(settings.ModelId))
+            throw new ProviderException("A model ID is required.", null);
+    }
+
+    private static void RequireBaseUrl(ApiConnectionSettings settings)
+    {
+        if (settings.BaseUrl is null)
+            throw new ProviderException("A base URL is required.", null);
     }
 
     private static IReadOnlyList<ProviderRequestContract> RequestContractCandidates() =>

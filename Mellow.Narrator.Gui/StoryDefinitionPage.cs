@@ -39,7 +39,7 @@ public sealed class StoryDefinitionPage : ContentPage
             _content.Children.Add(Ui.Buttons(
                 Ui.Button("Edit", async (_, _) => await _tabs.ReplaceCurrentWithPromptAsync(_id)),
                 Ui.Button("Start Story", async (_, _) => await _tabs.ReplaceCurrentWithStartAsync(_id)),
-                Ui.Button("Export", async (_, _) => await ImportExportService.ExportDefinitionAsync(value))));
+                Ui.Button("Export", async (_, _) => await ExportAsync(value))));
             _content.Children.Add(Ui.Heading("Player Questions"));
             foreach (var question in value.PlayerQuestions.OrderBy(x => x.SortOrder))
                 _content.Children.Add(new Label { Text = $"{question.Question}\nValidation: {question.ValidationInstruction}" });
@@ -55,6 +55,12 @@ public sealed class StoryDefinitionPage : ContentPage
                 foreach (var change in record.Changes) _content.Children.Add(ChangeLabel(change));
             }
         }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private async Task ExportAsync(StoryDefinition definition)
+    {
+        try { await ImportExportService.ExportDefinitionAsync(definition); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 

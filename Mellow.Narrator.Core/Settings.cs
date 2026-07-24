@@ -2,6 +2,15 @@ namespace Mellow.Narrator.Core;
 
 public sealed record ModelParameters(double? Temperature, double? TopP, string? ReasoningEffort);
 
+public enum NarratorLogLevel { Trace, Debug, Information, Warning, Error, Off }
+
+public sealed record LoggingSettings(NarratorLogLevel MinimumLevel);
+
+public static class LoggingDefaults
+{
+    public static LoggingSettings Create() => new(NarratorLogLevel.Information);
+}
+
 public sealed record PromptTemplateSettings(
     string PlayerAnswerValidationInstruction,
     string StoryDefinitionInstruction,
@@ -83,6 +92,7 @@ public sealed record ApiConnectionSettings(
     ConnectionCapabilities Capabilities)
 {
     public PromptTemplateSettings PromptTemplates { get; init; } = PromptTemplateDefaults.Create();
+    public LoggingSettings Logging { get; init; } = LoggingDefaults.Create();
 }
 
 public static class NarratorDefaults
@@ -119,6 +129,10 @@ public static class SettingsValidator
         Range(errors, "MaxRetryAfter", value.Retry.MaxRetryAfter.TotalSeconds, 1, 600);
         if (value.Retry.MaxDelay < value.Retry.InitialDelay)
             errors["MaxDelay"] = "Maximum retry delay must be at least the initial delay.";
+        if (value.Logging is null)
+            errors[nameof(value.Logging)] = "Logging settings are required.";
+        else if (!Enum.IsDefined(value.Logging.MinimumLevel))
+            errors[nameof(value.Logging.MinimumLevel)] = "Select a valid logging level.";
         ValidatePromptTemplates(errors, value.PromptTemplates);
 
         var c = value.ContentLimits;

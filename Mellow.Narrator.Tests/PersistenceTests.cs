@@ -53,13 +53,14 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
-    public async Task ConnectionSettingsWithoutPromptTemplates_LoadDefaults()
+    public async Task ConnectionSettingsWithoutNewOptionalSections_LoadDefaults()
     {
         var repository = (IApiConnectionSettingsStore)_store;
         await repository.SaveAsync(NarratorDefaults.Create());
         var path = Path.Combine(_root, "Mellow.Narrator", "settings", "api-connection.json");
         var document = JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
         document["data"]!.AsObject().Remove("promptTemplates");
+        document["data"]!.AsObject().Remove("logging");
         await File.WriteAllTextAsync(path, document.ToJsonString());
 
         var loaded = await repository.LoadAsync();
@@ -67,6 +68,7 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(
             PromptTemplateDefaults.Create().StoryNarrationInstruction,
             loaded.PromptTemplates.StoryNarrationInstruction);
+        Assert.Equal(NarratorLogLevel.Information, loaded.Logging.MinimumLevel);
     }
 
     [Fact]

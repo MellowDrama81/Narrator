@@ -1,11 +1,22 @@
 using System.Globalization;
 using Mellow.Narrator.Core;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Maui.Layouts;
 
 namespace Mellow.Narrator.Gui;
 
 internal static class Ui
 {
+    private static ILogger _logger = NullLogger.Instance;
+    private static INarratorLogLevelSwitch? _logLevelSwitch;
+
+    public static void ConfigureLogging(ILogger logger, INarratorLogLevelSwitch logLevelSwitch)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _logLevelSwitch = logLevelSwitch ?? throw new ArgumentNullException(nameof(logLevelSwitch));
+    }
+
     public static Label Heading(string text) => new()
     {
         Text = text,
@@ -34,7 +45,13 @@ internal static class Ui
         return layout;
     }
 
-    public static Task Error(Page page, Exception ex) => page.DisplayAlertAsync("Mellow Narrator", ex.Message, "OK");
+    public static Task Error(Page page, Exception ex)
+    {
+        _logger.LogError("A GUI operation failed with {ErrorType}.", ex.GetType().FullName);
+        if (_logLevelSwitch?.MinimumLevel == NarratorLogLevel.Trace)
+            _logger.LogTrace(ex, "GUI failure details.");
+        return page.DisplayAlertAsync("Mellow Narrator", ex.Message, "OK");
+    }
 }
 
 public sealed class NarratorNavigationPage : NavigationPage

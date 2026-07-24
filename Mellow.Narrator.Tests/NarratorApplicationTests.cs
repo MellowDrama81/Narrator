@@ -75,6 +75,33 @@ public sealed class NarratorApplicationTests
     }
 
     [Fact]
+    public async Task DiscoverModels_DoesNotRequireConfiguredModel()
+    {
+        var provider = new FakeProvider();
+        var settings = ConfiguredSettings() with { ModelId = null };
+        var store = new MemorySettings(settings);
+        var app = new NarratorApplication(
+            new MemoryDefinitions(),
+            new MemoryStates(),
+            store,
+            new MemorySecureStorage(),
+            provider,
+            TimeProvider.System,
+            new(),
+            new(),
+            new SystemIdGenerator());
+
+        var models = await app.DiscoverModelsAsync();
+        await app.SaveSettingsAsync(settings with { ModelId = "model-a" }, null);
+
+        Assert.Equal(["model-a", "model-b"], models);
+        Assert.Null(provider.DiscoverySettings!.ModelId);
+        var saved = await store.LoadAsync();
+        Assert.True(saved.Capabilities.SupportsModelDiscovery);
+        Assert.Equal(StructuredOutputTier.Untested, saved.Capabilities.StructuredOutputTier);
+    }
+
+    [Fact]
     public async Task PlayTurn_UsesConfiguredRecentWindowAndCurrentModel()
     {
         var stateId = Guid.NewGuid();
@@ -236,6 +263,12 @@ public sealed class NarratorApplicationTests
         public int OpeningCalls { get; private set; }
         public int ValidationCalls { get; private set; }
         public GenerationContext? LastContext { get; private set; }
+        public ApiConnectionSettings? DiscoverySettings { get; private set; }
+        public Task<IReadOnlyList<string>> DiscoverModelsAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default)
+        {
+            DiscoverySettings = settings;
+            return Task.FromResult<IReadOnlyList<string>>(["model-a", "model-b"]);
+        }
         public Task<ConnectionTestResult> TestConnectionAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public Task<PlayerAnswerValidationResponse> ValidatePlayerAnswerAsync(ApiConnectionSettings settings, string? credential, PlayerQuestion question, string answer, IReadOnlyList<PlayerResponse> previousAnswers, CancellationToken cancellationToken = default)

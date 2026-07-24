@@ -49,6 +49,11 @@ public interface IRecoveryNoticeStore
     Task<IReadOnlyList<RecoveryNotice>> ConsumeAsync(CancellationToken cancellationToken = default);
 }
 
+public interface INarratorLogLevelSwitch
+{
+    NarratorLogLevel MinimumLevel { get; set; }
+}
+
 public interface ISecureStorageService
 {
     Task<string?> GetAsync(string key, CancellationToken cancellationToken = default);
@@ -86,6 +91,7 @@ public sealed record GenerationContext(
 
 public interface ILanguageModelProvider
 {
+    Task<IReadOnlyList<string>> DiscoverModelsAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default);
     Task<ConnectionTestResult> TestConnectionAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default);
     Task<PlayerAnswerValidationResponse> ValidatePlayerAnswerAsync(ApiConnectionSettings settings, string? credential, PlayerQuestion question, string answer, IReadOnlyList<PlayerResponse> previousAnswers, CancellationToken cancellationToken = default);
     Task<StoryDefinitionGenerationResponse> GenerateStoryDefinitionAsync(ApiConnectionSettings settings, string? credential, string storyPrompt, CancellationToken cancellationToken = default);
@@ -96,7 +102,9 @@ public interface ILanguageModelProvider
 public interface INarratorApplication
 {
     Task<ApiConnectionSettings> GetSettingsAsync(CancellationToken cancellationToken = default);
+    Task<bool> HasApiCredentialAsync(CancellationToken cancellationToken = default);
     Task SaveSettingsAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<string>> DiscoverModelsAsync(CancellationToken cancellationToken = default);
     Task<ConnectionTestResult> TestConnectionAsync(CancellationToken cancellationToken = default);
     Task<BibleLimitImpact> GetBibleLimitImpactAsync(StoryGenerationSettings proposed, CancellationToken cancellationToken = default);
     Task<StoryDefinition> GenerateDefinitionAsync(StoryPromptDraft draft, bool overwrite, Guid targetId, CancellationToken cancellationToken = default);

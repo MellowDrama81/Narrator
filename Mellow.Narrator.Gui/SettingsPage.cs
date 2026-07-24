@@ -5,13 +5,14 @@ namespace Mellow.Narrator.Gui;
 
 public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlightRequestPage
 {
+    private const string StoredCredentialIndicator = "stored-api-key";
     private readonly INarratorApplication _app;
     private readonly ITrashStore _trash;
     private readonly MainTabbedPage _tabs;
     private readonly Entry _baseUrl = new() { Placeholder = "https://provider.example/v1" };
     private readonly Entry _model = new() { Placeholder = "Model ID" };
     private readonly Picker _discoveredModels = new() { Title = "Discovered models" };
-    private readonly Entry _apiKey = new() { Placeholder = "Leave blank to keep stored key", IsPassword = true };
+    private readonly Entry _apiKey = new() { Placeholder = "API key (optional)", IsPassword = true };
     private readonly Entry _timeout = Numeric();
     private readonly Entry _maxOutput = Numeric();
     private readonly Entry _recentTurns = Numeric();
@@ -20,6 +21,9 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
     private readonly Entry _topP = Numeric();
     private readonly Entry _reasoning = new();
     private readonly Label _status = new();
+    private bool _hasStoredCredential;
+    private bool _credentialEdited;
+    private bool _updatingCredentialDisplay;
     private bool _clearCredential;
     private CancellationTokenSource? _request;
     private PendingOperationState? _pendingOperation;
@@ -34,7 +38,29 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
         {
             if (_discoveredModels.SelectedItem is string model) _model.Text = model;
         };
-        var clear = Ui.Button("Clear stored API key", (_, _) => { _clearCredential = true; _apiKey.Text = ""; _status.Text = "The key will be removed when you save."; });
+        _apiKey.Focused += (_, _) =>
+        {
+            if (_hasStoredCredential && !_credentialEdited && !_clearCredential)
+                SetCredentialText("");
+        };
+        _apiKey.Unfocused += (_, _) =>
+        {
+            if (_hasStoredCredential && !_credentialEdited && !_clearCredential)
+                SetCredentialText(StoredCredentialIndicator);
+        };
+        _apiKey.TextChanged += (_, _) =>
+        {
+            if (_updatingCredentialDisplay) return;
+            _credentialEdited = true;
+            _clearCredential = false;
+        };
+        var clear = Ui.Button("Clear stored API key", (_, _) =>
+        {
+            _clearCredential = true;
+            _credentialEdited = false;
+            SetCredentialText("");
+            _status.Text = "The key will be removed when you save.";
+        });
         Content = new ScrollView
         {
             Content = new VerticalStackLayout
@@ -46,7 +72,9 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
                     Ui.Heading("API Connection"),
                     Field("Base URL", _baseUrl), Field("Model ID", _model), _discoveredModels,
                     new Label { Text = "Changing the model applies to every subsequent LLM request, including existing stories.", FontSize = 12 },
-                    Field("API key", _apiKey), clear,
+                    Field("API key", _apiKey),
+                    new Label { Text = "A masked value means an API key is saved securely. Focus the field to replace it.", FontSize = 12 },
+                    clear,
                     Ui.Heading("Generation"),
                     Field("Timeout seconds (default 120; range 10–900)", _timeout),
                     Field("Maximum output tokens (default 4096; range 256–131072)", _maxOutput),
@@ -55,7 +83,11 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
                     Field("Reasoning effort (blank = provider default)", _reasoning),
                     Field("Recent turns (default 8; range 0–100)", _recentTurns),
                     Field("Maximum Story Bible entries (default 200; range 1–2000)", _maxEntries),
-                    Ui.Buttons(Ui.Button("Save", Save), Ui.Button("Test Connection", Test), Ui.Button("Reset defaults", Reset)),
+                    Ui.Buttons(
+                        Ui.Button("Save", Save),
+                        Ui.Button("Load Models", DiscoverModels),
+                        Ui.Button("Test Connection", Test),
+                        Ui.Button("Reset defaults", Reset)),
                     Ui.Buttons(
                         Ui.Button("Advanced Settings", async (_, _) => await Navigation.PushModalAsync(new NavigationPage(new AdvancedSettingsPage(_app)))),
                         Ui.Button("Manage Trash", async (_, _) => await Navigation.PushModalAsync(new NavigationPage(new TrashPage(_trash))))),
@@ -78,15 +110,22 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
 
     internal void RestoreInterruptedOperation(PendingOperationState? operation)
     {
-        if (operation?.Type != PendingOperationType.TestApiConnection) return;
+        if (operation?.Type is not (PendingOperationType.DiscoverModels or PendingOperationType.TestApiConnection)) return;
         _pendingOperation = null;
-        _status.Text = "The previous connection test was interrupted. Settings were preserved; choose Test Connection to retry.";
+        _status.Text = operation.Type == PendingOperationType.DiscoverModels
+            ? "The previous model discovery was interrupted. Settings were preserved; choose Load Models to retry."
+            : "The previous connection test was interrupted. Settings were preserved; choose Test Connection to retry.";
     }
 
     protected override async void OnAppearing()
     {
         base.OnAppearing();
-        try { Load(await _app.GetSettingsAsync()); } catch (Exception ex) { await Ui.Error(this, ex); }
+        try
+        {
+            Load(await _app.GetSettingsAsync());
+            ShowCredentialPresence(await _app.HasApiCredentialAsync());
+        }
+        catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
     private async void Save(object? sender, EventArgs e)
@@ -95,10 +134,9 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
         {
             var settings = await BuildAsync();
             if (!await ConfirmBibleLimitImpactAsync(settings)) return;
-            var credential = _clearCredential ? "" : string.IsNullOrEmpty(_apiKey.Text) ? null : _apiKey.Text;
+            var credential = CredentialChange();
             await _app.SaveSettingsAsync(settings, credential);
-            _apiKey.Text = "";
-            _clearCredential = false;
+            CredentialSaved(credential);
             _status.Text = "Settings saved.";
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
@@ -111,20 +149,55 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
         {
             _request = new();
             var settings = await BuildAsync();
+            if (string.IsNullOrWhiteSpace(settings.ModelId))
+                throw new NarratorException("Load models and select one, or enter a model ID before testing the connection.");
             if (!await ConfirmBibleLimitImpactAsync(settings)) return;
-            var credential = _clearCredential ? "" : string.IsNullOrEmpty(_apiKey.Text) ? null : _apiKey.Text;
+            var credential = CredentialChange();
             await _app.SaveSettingsAsync(settings, credential, _request.Token);
-            _apiKey.Text = "";
-            _clearCredential = false;
+            CredentialSaved(credential);
             _pendingOperation = new(Guid.NewGuid(), PendingOperationType.TestApiConnection, null, null, DateTimeOffset.UtcNow);
             await _tabs.SaveWorkspaceNowAsync();
             var result = await _app.TestConnectionAsync(_request.Token);
-            _discoveredModels.ItemsSource = result.Models.ToArray();
             _status.Text = result.Success
-                ? $"Connected. Structured output: {result.Capabilities.StructuredOutputTier}. Models found: {result.Models.Count}."
+                ? $"Connected. Structured output: {result.Capabilities.StructuredOutputTier}."
                 : result.Error;
         }
         catch (OperationCanceledException) { _status.Text = "Connection test cancelled."; }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+        finally
+        {
+            _pendingOperation = null;
+            _request?.Dispose();
+            _request = null;
+            await _tabs.SaveWorkspaceNowAsync();
+        }
+    }
+
+    private async void DiscoverModels(object? sender, EventArgs e)
+    {
+        if (_request is not null) return;
+        try
+        {
+            _request = new();
+            var settings = await BuildAsync();
+            if (settings.BaseUrl is null)
+                throw new NarratorException("Enter an API base URL before loading models.");
+            if (!await ConfirmBibleLimitImpactAsync(settings)) return;
+            var credential = CredentialChange();
+            await _app.SaveSettingsAsync(settings, credential, _request.Token);
+            CredentialSaved(credential);
+            _pendingOperation = new(Guid.NewGuid(), PendingOperationType.DiscoverModels, null, null, DateTimeOffset.UtcNow);
+            await _tabs.SaveWorkspaceNowAsync();
+            var models = await _app.DiscoverModelsAsync(_request.Token);
+            _discoveredModels.ItemsSource = models.ToArray();
+            var selectedModel = models.FirstOrDefault(x =>
+                string.Equals(x, _model.Text?.Trim(), StringComparison.Ordinal));
+            if (selectedModel is not null) _discoveredModels.SelectedItem = selectedModel;
+            _status.Text = models.Count == 0
+                ? "The provider returned no models. Enter a model ID manually."
+                : $"Loaded {models.Count} model{(models.Count == 1 ? "" : "s")}. Select one before testing the connection.";
+        }
+        catch (OperationCanceledException) { _status.Text = "Model discovery cancelled."; }
         catch (Exception ex) { await Ui.Error(this, ex); }
         finally
         {
@@ -155,8 +228,11 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
                 RecentTurnCount = (int)Parse(_recentTurns, "recent turns"),
                 MaxStoryBibleEntries = (int)Parse(_maxEntries, "maximum Story Bible entries")
             },
-            Capabilities = current.BaseUrl?.ToString() == _baseUrl.Text?.Trim() && current.ModelId == _model.Text?.Trim()
-                ? current.Capabilities : new(false, StructuredOutputTier.Untested, null, null)
+            Capabilities = current.BaseUrl?.ToString() != _baseUrl.Text?.Trim()
+                ? new(false, StructuredOutputTier.Untested, null, null)
+                : current.ModelId != _model.Text?.Trim()
+                    ? new(current.Capabilities.SupportsModelDiscovery, StructuredOutputTier.Untested, null, null)
+                    : current.Capabilities
         };
     }
 
@@ -171,6 +247,35 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
         _reasoning.Text = settings.Parameters.ReasoningEffort ?? "";
         _recentTurns.Text = settings.StoryGeneration.RecentTurnCount.ToString(CultureInfo.InvariantCulture);
         _maxEntries.Text = settings.StoryGeneration.MaxStoryBibleEntries.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private string? CredentialChange()
+    {
+        if (_clearCredential) return "";
+        return _credentialEdited ? _apiKey.Text ?? "" : null;
+    }
+
+    private void CredentialSaved(string? credential)
+    {
+        if (credential is not null) _hasStoredCredential = credential.Length > 0;
+        _credentialEdited = false;
+        _clearCredential = false;
+        SetCredentialText(_hasStoredCredential ? StoredCredentialIndicator : "");
+    }
+
+    private void ShowCredentialPresence(bool hasStoredCredential)
+    {
+        _hasStoredCredential = hasStoredCredential;
+        _credentialEdited = false;
+        _clearCredential = false;
+        SetCredentialText(hasStoredCredential ? StoredCredentialIndicator : "");
+    }
+
+    private void SetCredentialText(string text)
+    {
+        _updatingCredentialDisplay = true;
+        try { _apiKey.Text = text; }
+        finally { _updatingCredentialDisplay = false; }
     }
 
     private static double Parse(Entry entry, string name) =>

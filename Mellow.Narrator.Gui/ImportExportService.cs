@@ -1,8 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CommunityToolkit.Maui.Storage;
 using Mellow.Narrator.Core;
-using Microsoft.Maui.ApplicationModel.DataTransfer;
-using Microsoft.Maui.Storage;
 
 namespace Mellow.Narrator.Gui;
 
@@ -20,7 +19,7 @@ internal static class ImportExportService
     public static async Task ExportDefinitionAsync(StoryDefinition definition)
     {
         var document = new StoryDefinitionExport(ImportExportProcessor.CurrentFormatVersion, DateTimeOffset.UtcNow, definition);
-        await ShareJsonAsync($"{Safe(definition.Title)}-definition.json", document);
+        await SaveJsonAsync($"{Safe(definition.Title)}-definition.json", document);
     }
 
     public static async Task<StoryDefinition?> ImportDefinitionAsync(
@@ -46,7 +45,7 @@ internal static class ImportExportService
     public static async Task ExportStateAsync(StoryState state, IReadOnlyList<StoryTurn> turns)
     {
         var document = new StoryStateExport(ImportExportProcessor.CurrentFormatVersion, DateTimeOffset.UtcNow, state, turns);
-        await ShareJsonAsync($"{Safe(state.Label)}-story.json", document);
+        await SaveJsonAsync($"{Safe(state.Label)}-story.json", document);
     }
 
     public static async Task<StoryState?> ImportStateAsync(
@@ -70,11 +69,31 @@ internal static class ImportExportService
         return imported.State;
     }
 
-    private static async Task ShareJsonAsync<T>(string fileName, T value)
+    private static async Task SaveJsonAsync<T>(string fileName, T value)
     {
-        var path = Path.Combine(FileSystem.CacheDirectory, fileName);
-        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(value, Json));
-        await Share.Default.RequestAsync(new ShareFileRequest("Export from Mellow Narrator", new ShareFile(path)));
+        await EnsureStoragePermissionAsync();
+        await using var stream = new MemoryStream();
+        await JsonSerializer.SerializeAsync(stream, value, Json);
+        stream.Position = 0;
+        FileSaverResult result;
+        try { result = await FileSaver.Default.SaveAsync(fileName, stream); }
+        catch (OperationCanceledException) { return; }
+        if (result.IsSuccessful) return;
+        if (result.Exception is null or OperationCanceledException) return;
+        throw new IOException("The export could not be saved.", result.Exception);
+    }
+
+    private static async Task EnsureStoragePermissionAsync()
+    {
+#if ANDROID
+        if (!OperatingSystem.IsAndroidVersionAtLeast(33))
+        {
+            var read = await Permissions.RequestAsync<Permissions.StorageRead>();
+            var write = await Permissions.RequestAsync<Permissions.StorageWrite>();
+            if (read != PermissionStatus.Granted || write != PermissionStatus.Granted)
+                throw new NarratorException("Storage permission is required to save an export.");
+        }
+#endif
     }
 
     private static void CheckVersion(int version)

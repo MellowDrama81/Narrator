@@ -2,11 +2,76 @@ using System.Net;
 using System.Text;
 using Mellow.Narrator.Core;
 using Mellow.Narrator.OpenAiCompatible;
+using Microsoft.Extensions.Logging;
 
 namespace Mellow.Narrator.Tests;
 
 public sealed class ProviderTests
 {
+    [Fact]
+    public async Task TraceLogging_IncludesBodiesButNeverCredential()
+    {
+        var handler = new StubHandler(_ => Task.FromResult(Response(
+            """{"initialStoryBibleEntries":[{"category":"private","name":"Fact","content":"PRIVATE RESPONSE TOP-SECRET-KEY","importance":4}]}""")));
+        var informationLogger = new CaptureLogger<OpenAiCompatibleProvider>();
+        var informationProvider = new OpenAiCompatibleProvider(
+            new HttpClient(handler),
+            TimeProvider.System,
+            informationLogger);
+
+        await informationProvider.GenerateStoryDefinitionAsync(
+            Settings(),
+            "TOP-SECRET-KEY",
+            "PRIVATE REQUEST");
+
+        var informationLog = string.Join(Environment.NewLine, informationLogger.Messages);
+        Assert.DoesNotContain("PRIVATE REQUEST", informationLog);
+        Assert.DoesNotContain("PRIVATE RESPONSE", informationLog);
+        Assert.DoesNotContain("TOP-SECRET-KEY", informationLog);
+
+        var traceLogger = new CaptureLogger<OpenAiCompatibleProvider>();
+        var traceProvider = new OpenAiCompatibleProvider(
+            new HttpClient(handler),
+            TimeProvider.System,
+            traceLogger);
+        await traceProvider.GenerateStoryDefinitionAsync(
+            Settings() with { Logging = new(NarratorLogLevel.Trace) },
+            "TOP-SECRET-KEY",
+            "PRIVATE REQUEST");
+
+        var traceLog = string.Join(Environment.NewLine, traceLogger.Messages);
+        Assert.Contains("PRIVATE REQUEST", traceLog);
+        Assert.Contains("PRIVATE RESPONSE", traceLog);
+        Assert.Contains("[REDACTED CREDENTIAL]", traceLog);
+        Assert.DoesNotContain("TOP-SECRET-KEY", traceLog);
+    }
+
+    [Fact]
+    public async Task DiscoverModels_DoesNotRequireModelAndReturnsSortedUniqueIds()
+    {
+        HttpRequestMessage? captured = null;
+        var handler = new StubHandler(request =>
+        {
+            captured = request;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"data":[{"id":"model-b"},{"id":"model-a"},{"id":"model-b"}]}""",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var settings = Settings() with { ModelId = null };
+
+        var models = await provider.DiscoverModelsAsync(settings, "secret");
+
+        Assert.Equal(["model-a", "model-b"], models);
+        Assert.Equal(HttpMethod.Get, captured!.Method);
+        Assert.Equal("https://example.test/v1/models", captured.RequestUri!.ToString());
+        Assert.Equal("secret", captured.Headers.Authorization!.Parameter);
+    }
+
     [Fact]
     public async Task GenerateDefinition_SendsBearerModelAndPrompt()
     {
@@ -235,6 +300,20 @@ public sealed class ProviderTests
     private sealed class StubHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> callback) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => callback(request);
+    }
+
+    private sealed class CaptureLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Messages.Add(formatter(state, exception));
     }
 
     private sealed class CancellationOnlyStream : Stream

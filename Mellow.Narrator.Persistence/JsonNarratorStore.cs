@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using Mellow.Narrator.Core;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Mellow.Narrator.Persistence;
 
@@ -14,10 +16,17 @@ public sealed class JsonNarratorStore :
     private readonly string _root;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentQueue<RecoveryNotice> _recoveryNotices = new();
+    private readonly INarratorLogLevelSwitch? _logLevelSwitch;
+    private readonly ILogger<JsonNarratorStore> _logger;
 
-    public JsonNarratorStore(PersistenceOptions options)
+    public JsonNarratorStore(
+        PersistenceOptions options,
+        INarratorLogLevelSwitch? logLevelSwitch = null,
+        ILogger<JsonNarratorStore>? logger = null)
     {
         _root = Path.Combine(options.GetValidatedRoot(), "Mellow.Narrator");
+        _logLevelSwitch = logLevelSwitch;
+        _logger = logger ?? NullLogger<JsonNarratorStore>.Instance;
         Directory.CreateDirectory(_root);
         Directory.CreateDirectory(DefinitionsPath);
         Directory.CreateDirectory(StatesPath);
@@ -273,14 +282,20 @@ public sealed class JsonNarratorStore :
     async Task<ApiConnectionSettings> IApiConnectionSettingsStore.LoadAsync(CancellationToken cancellationToken)
     {
         var loaded = await JsonFileStore.ReadAsync<ApiConnectionSettings>(SettingsPath, cancellationToken, ReportRecovery);
-        if (loaded is null) return NarratorDefaults.Create();
-        return loaded.PromptTemplates is null
-            ? loaded with { PromptTemplates = PromptTemplateDefaults.Create() }
-            : loaded;
+        var normalized = loaded ?? NarratorDefaults.Create();
+        if (normalized.PromptTemplates is null)
+            normalized = normalized with { PromptTemplates = PromptTemplateDefaults.Create() };
+        if (normalized.Logging is null)
+            normalized = normalized with { Logging = LoggingDefaults.Create() };
+        if (_logLevelSwitch is not null) _logLevelSwitch.MinimumLevel = normalized.Logging.MinimumLevel;
+        return normalized;
     }
 
-    Task IApiConnectionSettingsStore.SaveAsync(ApiConnectionSettings settings, CancellationToken cancellationToken) =>
-        LockedAsync("settings", () => JsonFileStore.WriteAsync(SettingsPath, settings, cancellationToken), cancellationToken);
+    async Task IApiConnectionSettingsStore.SaveAsync(ApiConnectionSettings settings, CancellationToken cancellationToken)
+    {
+        await LockedAsync("settings", () => JsonFileStore.WriteAsync(SettingsPath, settings, cancellationToken), cancellationToken);
+        if (_logLevelSwitch is not null) _logLevelSwitch.MinimumLevel = settings.Logging.MinimumLevel;
+    }
 
     Task<IReadOnlyList<RecoveryNotice>> IRecoveryNoticeStore.ConsumeAsync(CancellationToken cancellationToken)
     {
@@ -624,8 +639,11 @@ public sealed class JsonNarratorStore :
     private static int NextStateSortOrder(IReadOnlyList<StoryStateSummary> values) =>
         values.Count == 0 ? 0 : values.Max(x => x.SortOrder) + 1;
 
-    private void ReportRecovery(string message) =>
+    private void ReportRecovery(string message)
+    {
         _recoveryNotices.Enqueue(new(message, DateTimeOffset.UtcNow));
+        _logger.LogWarning("{RecoveryMessage}", message);
+    }
 
     private async Task LockedAsync(string key, Func<Task> action, CancellationToken cancellationToken)
     {

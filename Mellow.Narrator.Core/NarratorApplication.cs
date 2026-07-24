@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Mellow.Narrator.Core;
 
@@ -11,10 +13,22 @@ public sealed class NarratorApplication(
     TimeProvider timeProvider,
     ApiConnectionCoordinator connectionCoordinator,
     StoryRequestCoordinator storyRequests,
-    IIdGenerator idGenerator) : INarratorApplication
+    IIdGenerator idGenerator,
+    ILogger<NarratorApplication>? logger = null) : INarratorApplication
 {
+    private readonly ILogger<NarratorApplication> _logger =
+        logger ?? NullLogger<NarratorApplication>.Instance;
+
     public Task<ApiConnectionSettings> GetSettingsAsync(CancellationToken cancellationToken = default) =>
         settingsStore.LoadAsync(cancellationToken);
+
+    public Task<bool> HasApiCredentialAsync(CancellationToken cancellationToken = default) =>
+        connectionCoordinator.RunExclusiveAsync(async () =>
+        {
+            if (connectionCoordinator.RequiresCredentialReentry) return false;
+            return !string.IsNullOrEmpty(
+                await secureStorage.GetAsync(SecureStorageKeys.ApiCredential, cancellationToken));
+        }, cancellationToken);
 
     public async Task SaveSettingsAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default)
     {
@@ -23,8 +37,17 @@ public sealed class NarratorApplication(
         await connectionCoordinator.RunExclusiveAsync(async () =>
         {
             var previousSettings = await settingsStore.LoadAsync(cancellationToken);
-            if (previousSettings.BaseUrl != settings.BaseUrl || previousSettings.ModelId != settings.ModelId)
+            if (previousSettings.BaseUrl != settings.BaseUrl)
                 settings = settings with { Capabilities = new(false, StructuredOutputTier.Untested, null, null) };
+            else if (previousSettings.ModelId != settings.ModelId)
+                settings = settings with
+                {
+                    Capabilities = new(
+                        previousSettings.Capabilities.SupportsModelDiscovery,
+                        StructuredOutputTier.Untested,
+                        null,
+                        null)
+                };
             var previous = await secureStorage.GetAsync(SecureStorageKeys.ApiCredential, cancellationToken);
             try
             {
@@ -55,11 +78,17 @@ public sealed class NarratorApplication(
                 throw;
             }
         }, cancellationToken);
+        _logger.LogInformation(
+            "API settings saved for model {ModelId}; credential action: {CredentialAction}; log level: {LogLevel}.",
+            settings.ModelId,
+            credential is null ? "unchanged" : credential.Length == 0 ? "removed" : "replaced",
+            settings.Logging.MinimumLevel);
     }
 
     public async Task<ConnectionTestResult> TestConnectionAsync(CancellationToken cancellationToken = default)
     {
         var (settings, credential) = await ConnectionAsync(cancellationToken);
+        _logger.LogInformation("Testing API connection for model {ModelId}.", settings.ModelId);
         var result = await provider.TestConnectionAsync(settings, credential, cancellationToken);
         if (result.Success)
         {
@@ -70,7 +99,30 @@ public sealed class NarratorApplication(
                     await settingsStore.SaveAsync(current with { Capabilities = result.Capabilities }, cancellationToken);
             }, cancellationToken);
         }
+        _logger.LogInformation(
+            "API connection test completed for model {ModelId}; success: {Success}; structured output: {StructuredOutputTier}.",
+            settings.ModelId,
+            result.Success,
+            result.Capabilities.StructuredOutputTier);
         return result;
+    }
+
+    public async Task<IReadOnlyList<string>> DiscoverModelsAsync(CancellationToken cancellationToken = default)
+    {
+        var (settings, credential) = await DiscoveryConnectionAsync(cancellationToken);
+        _logger.LogInformation("Discovering models from the configured API endpoint.");
+        var models = await provider.DiscoverModelsAsync(settings, credential, cancellationToken);
+        await connectionCoordinator.RunExclusiveAsync(async () =>
+        {
+            var current = await settingsStore.LoadAsync(cancellationToken);
+            if (current.BaseUrl == settings.BaseUrl)
+                await settingsStore.SaveAsync(current with
+                {
+                    Capabilities = current.Capabilities with { SupportsModelDiscovery = true }
+                }, cancellationToken);
+        }, cancellationToken);
+        _logger.LogInformation("Model discovery completed; {ModelCount} models returned.", models.Count);
+        return models;
     }
 
     public async Task<BibleLimitImpact> GetBibleLimitImpactAsync(
@@ -103,6 +155,11 @@ public sealed class NarratorApplication(
         if (targetId == Guid.Empty) throw new ArgumentException("Target ID cannot be empty.", nameof(targetId));
         var (settings, credential) = await ConnectionAsync(cancellationToken);
         ValidateDraft(draft, settings.ContentLimits);
+        _logger.LogInformation(
+            "Generating Story Definition {StoryDefinitionId}; overwrite: {Overwrite}; model: {ModelId}.",
+            targetId,
+            overwrite,
+            settings.ModelId);
         var generated = await provider.GenerateStoryDefinitionAsync(settings, credential, draft.StoryPrompt, cancellationToken);
         if (generated.InitialStoryBibleEntries.Count > 2000)
             throw new NarratorException("The generated initial Story Bible contains too many entries.");
@@ -132,6 +189,10 @@ public sealed class NarratorApplication(
             source?.CreatedAtUtc ?? now,
             now);
         await definitions.SaveAsync(definition, cancellationToken);
+        _logger.LogInformation(
+            "Story Definition {StoryDefinitionId} saved with {BibleEntryCount} initial Story Bible entries.",
+            definition.Id,
+            definition.InitialStoryBible.Entries.Count);
         return definition;
     }
 
@@ -170,7 +231,16 @@ public sealed class NarratorApplication(
         var (settings, credential) = await ConnectionAsync(cancellationToken);
         if (answer.Length > settings.ContentLimits.MaxPlayerAnswerCharacters)
             throw new NarratorException("The answer exceeds the configured limit.");
-        return await provider.ValidatePlayerAnswerAsync(settings, credential, question, answer, previousAnswers, cancellationToken);
+        _logger.LogDebug(
+            "Validating player answer for Story Definition {StoryDefinitionId}, question {QuestionId}.",
+            definitionId,
+            question.Id);
+        var result = await provider.ValidatePlayerAnswerAsync(settings, credential, question, answer, previousAnswers, cancellationToken);
+        _logger.LogDebug(
+            "Player answer validation completed for question {QuestionId}; warning: {HasWarning}.",
+            question.Id,
+            result.HasWarning);
+        return result;
     }
 
     public async Task<(StoryState State, StoryTurn Opening)> StartStoryAsync(
@@ -180,6 +250,10 @@ public sealed class NarratorApplication(
     {
         if (targetStateId == Guid.Empty) throw new ArgumentException("Target ID cannot be empty.", nameof(targetStateId));
         var (settings, credential) = await ConnectionAsync(cancellationToken);
+        _logger.LogInformation(
+            "Generating opening scene for Story State {StoryStateId} with model {ModelId}.",
+            targetStateId,
+            settings.ModelId);
         if (!StoryBibleProcessor.IsWithinLimits(draft.Definition.InitialStoryBible, settings.StoryGeneration))
             throw new NarratorException("The initial Story Bible exceeds current limits. Increase the limits or cull it first.");
         var questions = draft.Definition.PlayerQuestions.OrderBy(x => x.SortOrder).ToArray();
@@ -220,6 +294,7 @@ public sealed class NarratorApplication(
             stateSummaries.Count == 0 ? 0 : stateSummaries.Max(x => x.SortOrder) + 1, now, null, 0);
         var turn = CreateTurn(stateId, 0, null, response, applied, settings.ModelId!, now);
         await states.CreateAsync(state, turn, cancellationToken);
+        _logger.LogInformation("Story State {StoryStateId} created.", state.Id);
         return (state, turn);
     }
 
@@ -239,6 +314,11 @@ public sealed class NarratorApplication(
             recent,
             action,
             state.LastCommittedTurnSequence + 1);
+        _logger.LogInformation(
+            "Generating turn {TurnSequence} for Story State {StoryStateId} with model {ModelId}.",
+            context.NextTurnNumber,
+            stateId,
+            settings.ModelId);
         var response = await provider.GenerateTurnAsync(settings, credential, context, cancellationToken);
         ValidateGenerationResponse(response, settings.ContentLimits);
         var sequence = state.LastCommittedTurnSequence + 1;
@@ -253,10 +333,22 @@ public sealed class NarratorApplication(
         var next = state with { CurrentStoryBible = applied.Bible, LastActionAtUtc = now, LastCommittedTurnSequence = sequence };
         var turn = CreateTurn(stateId, sequence, action, response, applied, settings.ModelId!, now);
         await states.CommitTurnAsync(next, turn, cancellationToken);
+        _logger.LogInformation(
+            "Turn {TurnSequence} committed for Story State {StoryStateId}.",
+            sequence,
+            stateId);
         return (next, turn);
     }
 
     private async Task<(ApiConnectionSettings Settings, string? Credential)> ConnectionAsync(CancellationToken cancellationToken)
+    {
+        var (settings, credential) = await DiscoveryConnectionAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(settings.ModelId))
+            throw new NarratorException("Load models and select one, or enter a model ID first.");
+        return (settings, credential);
+    }
+
+    private async Task<(ApiConnectionSettings Settings, string? Credential)> DiscoveryConnectionAsync(CancellationToken cancellationToken)
     {
         return await connectionCoordinator.RunExclusiveAsync(async () =>
         {
@@ -265,8 +357,6 @@ public sealed class NarratorApplication(
             var settings = await settingsStore.LoadAsync(cancellationToken);
             if (settings.BaseUrl is null)
                 throw new NarratorException("Configure an API base URL first.");
-            if (string.IsNullOrWhiteSpace(settings.ModelId))
-                throw new NarratorException("Select or enter a model ID first.");
             return (settings, await secureStorage.GetAsync(SecureStorageKeys.ApiCredential, cancellationToken));
         }, cancellationToken);
     }
