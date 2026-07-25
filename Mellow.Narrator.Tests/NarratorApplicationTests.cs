@@ -5,6 +5,35 @@ namespace Mellow.Narrator.Tests;
 public sealed class NarratorApplicationTests
 {
     [Fact]
+    public async Task GenerateDefinition_UsesRefinedStoryPromptInsteadOfDraftPrompt()
+    {
+        var draft = new StoryPromptDraft(null, "Title", "Raw prompt mentioning today's mutable state", []);
+        var provider = new FakeProvider
+        {
+            DefinitionResponse = new("Refined immutable prompt", [new("fact", "Fact", "Content", 3)])
+        };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
+
+        var definition = await app.GenerateDefinitionAsync(draft, false, Guid.NewGuid());
+
+        Assert.Equal("Refined immutable prompt", definition.StoryPrompt);
+        Assert.Single(definition.InitialStoryBible.Entries);
+    }
+
+    [Fact]
+    public async Task GenerateDefinition_RejectsEmptyRefinedStoryPrompt()
+    {
+        var draft = new StoryPromptDraft(null, "Title", "Raw prompt", []);
+        var provider = new FakeProvider
+        {
+            DefinitionResponse = new("   ", [])
+        };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.GenerateDefinitionAsync(draft, false, Guid.NewGuid()));
+    }
+
+    [Fact]
     public async Task StartStory_UsesTemporarySnapshotAndCarriesMaintenance()
     {
         var question = new PlayerQuestion(Guid.NewGuid(), "Name?", "Required", 0);
@@ -26,7 +55,7 @@ public sealed class NarratorApplicationTests
         };
         var provider = new FakeProvider
         {
-            StoryResponse = new("Opening", ["Continue"], [], [], "provider-id", 10, 20)
+            StoryResponse = new("Opening", ["Continue", "Wait"], [], [], "provider-id", 10, 20)
         };
         var states = new MemoryStates();
         var app = CreateApplication(new MemoryDefinitions(), states, provider);
@@ -122,7 +151,7 @@ public sealed class NarratorApplicationTests
         var states = new MemoryStates(state, turns);
         var provider = new FakeProvider
         {
-            StoryResponse = new("Next", [], [], [], null, null, null)
+            StoryResponse = new("Next", ["Continue", "Wait"], [], [], null, null, null)
         };
         var settings = ConfiguredSettings() with
         {
@@ -136,6 +165,44 @@ public sealed class NarratorApplicationTests
         Assert.Equal(2, provider.LastContext!.RecentTurns.Count);
         Assert.Equal([1, 2], provider.LastContext.RecentTurns.Select(x => x.SequenceNumber));
         Assert.Equal("new-model", result.Turn.Generation.ModelId);
+    }
+
+    [Fact]
+    public async Task PlayTurn_AllowsFewerSuggestedActionsThanConfiguredMinimum()
+    {
+        var stateId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", [], StoryBible.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot, []), StoryBible.Empty, [], 0, now, now, 0);
+        var states = new MemoryStates(state, []);
+        var provider = new FakeProvider
+        {
+            StoryResponse = new("Next", ["Only one"], [], [], null, null, null)
+        };
+        var app = CreateApplication(new MemoryDefinitions(), states, provider);
+
+        var result = await app.PlayTurnAsync(stateId, "Continue");
+
+        Assert.Equal(["Only one"], result.Turn.SuggestedActions);
+    }
+
+    [Fact]
+    public async Task PlayTurn_TruncatesSuggestedActionsToConfiguredMaximum()
+    {
+        var stateId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", [], StoryBible.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot, []), StoryBible.Empty, [], 0, now, now, 0);
+        var states = new MemoryStates(state, []);
+        var provider = new FakeProvider
+        {
+            StoryResponse = new("Next", ["A", "B", "C", "D", "E"], [], [], null, null, null)
+        };
+        var app = CreateApplication(new MemoryDefinitions(), states, provider);
+
+        var result = await app.PlayTurnAsync(stateId, "Continue");
+
+        Assert.Equal(["A", "B", "C"], result.Turn.SuggestedActions);
     }
 
     [Fact]
@@ -344,6 +411,7 @@ public sealed class NarratorApplicationTests
     private sealed class FakeProvider : ILanguageModelProvider
     {
         public StoryGenerationResponse StoryResponse { get; init; } = new("", [], [], [], null, null, null);
+        public StoryDefinitionGenerationResponse DefinitionResponse { get; init; } = new("", []);
         public int OpeningCalls { get; private set; }
         public int ValidationCalls { get; private set; }
         public GenerationContext? LastContext { get; private set; }
@@ -361,7 +429,7 @@ public sealed class NarratorApplicationTests
             return Task.FromResult(new PlayerAnswerValidationResponse(false, null));
         }
         public Task<StoryDefinitionGenerationResponse> GenerateStoryDefinitionAsync(ApiConnectionSettings settings, string? credential, string storyPrompt, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            Task.FromResult(DefinitionResponse);
         public Task<StoryGenerationResponse> GenerateOpeningAsync(ApiConnectionSettings settings, string? credential, GenerationContext context, CancellationToken cancellationToken = default)
         {
             OpeningCalls++;

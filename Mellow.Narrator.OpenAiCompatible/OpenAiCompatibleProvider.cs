@@ -143,7 +143,7 @@ public sealed class OpenAiCompatibleProvider(
     private async Task<StoryGenerationResponse> GenerateStoryAsync(
         ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
     {
-        var messages = BuildStoryMessages(settings.PromptTemplates, context, opening);
+        var messages = BuildStoryMessages(settings.PromptTemplates, settings.ContentLimits, context, opening);
         return await CompleteWithCorrectionAsync(
             settings,
             credential,
@@ -432,10 +432,14 @@ public sealed class OpenAiCompatibleProvider(
 
     private static IReadOnlyList<JsonObject> BuildStoryMessages(
         PromptTemplateSettings templates,
+        ContentLimitSettings limits,
         GenerationContext context,
         bool opening)
     {
-        var messages = new List<JsonObject> { Message("system", templates.StoryNarrationInstruction) };
+        var narrationInstruction = templates.StoryNarrationInstruction
+            .Replace(PromptTemplateDefaults.MinSuggestedActionsPlaceholder, limits.MinSuggestedActions.ToString(), StringComparison.Ordinal)
+            .Replace(PromptTemplateDefaults.MaxSuggestedActionsPlaceholder, limits.MaxSuggestedActions.ToString(), StringComparison.Ordinal);
+        var messages = new List<JsonObject> { Message("system", narrationInstruction) };
         messages.Add(Message("user", JsonSerializer.Serialize(new
         {
             contextType = "storyContext",
@@ -488,7 +492,10 @@ public sealed class OpenAiCompatibleProvider(
         ApiConnectionSettings settings)
     {
         node.Remove("_transport");
-        RequireProperties(node, "initialStoryBibleEntries");
+        RequireProperties(node, "refinedStoryPrompt", "initialStoryBibleEntries");
+        var refinedStoryPrompt = RequiredString(node, "refinedStoryPrompt");
+        if (string.IsNullOrWhiteSpace(refinedStoryPrompt) || refinedStoryPrompt.Length > settings.ContentLimits.MaxStoryPromptCharacters)
+            throw new JsonException("The refined Story Prompt is empty or exceeds the configured limit.");
         var entries = RequiredArray(node, "initialStoryBibleEntries");
         if (entries.Count > 2000) throw new JsonException("The initial Story Bible contains too many entries.");
         foreach (var item in entries)
@@ -538,8 +545,6 @@ public sealed class OpenAiCompatibleProvider(
             throw new JsonException(
                 "The narration duplicates a recent scene. Advance the story by resolving currentPlayerAction instead.");
         var suggestions = RequiredArray(node, "suggestedActions");
-        if (suggestions.Count > settings.ContentLimits.MaxSuggestedActions)
-            throw new JsonException("Too many suggested actions.");
         foreach (var suggestion in suggestions)
         {
             var text = StringValue(suggestion, "A suggested action");
@@ -666,13 +671,14 @@ public sealed class OpenAiCompatibleProvider(
 
     private static JsonObject DefinitionSchema(ApiConnectionSettings settings) => ObjectSchema(new Dictionary<string, JsonNode?>
     {
+        ["refinedStoryPrompt"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxStoryPromptCharacters },
         ["initialStoryBibleEntries"] = new JsonObject
         {
             ["type"] = "array",
             ["maxItems"] = 2000,
             ["items"] = ProposedEntrySchema(settings)
         }
-    }, ["initialStoryBibleEntries"]);
+    }, ["refinedStoryPrompt", "initialStoryBibleEntries"]);
 
     private static JsonObject TurnSchema(ApiConnectionSettings settings) => ObjectSchema(new Dictionary<string, JsonNode?>
     {
@@ -683,7 +689,13 @@ public sealed class OpenAiCompatibleProvider(
             ["maxLength"] = settings.ContentLimits.MaxPlayerActionCharacters
         },
         ["narration"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxNarrationCharacters },
-        ["suggestedActions"] = new JsonObject { ["type"] = "array", ["maxItems"] = settings.ContentLimits.MaxSuggestedActions, ["items"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxSuggestedActionCharacters } },
+        ["suggestedActions"] = new JsonObject
+        {
+            ["type"] = "array",
+            ["minItems"] = settings.ContentLimits.MinSuggestedActions,
+            ["maxItems"] = settings.ContentLimits.MaxSuggestedActions,
+            ["items"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxSuggestedActionCharacters }
+        },
         ["relevantStoryBibleEntryIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } },
         ["storyBibleUpdates"] = new JsonObject
         {

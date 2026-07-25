@@ -161,6 +161,8 @@ public sealed class NarratorApplication(
             overwrite,
             settings.ModelId);
         var generated = await provider.GenerateStoryDefinitionAsync(settings, credential, draft.StoryPrompt, cancellationToken);
+        if (string.IsNullOrWhiteSpace(generated.RefinedStoryPrompt) || generated.RefinedStoryPrompt.Length > settings.ContentLimits.MaxStoryPromptCharacters)
+            throw new NarratorException("The refined Story Prompt is empty or exceeds the configured limit.");
         if (generated.InitialStoryBibleEntries.Count > 2000)
             throw new NarratorException("The generated initial Story Bible contains too many entries.");
         foreach (var entry in generated.InitialStoryBibleEntries)
@@ -180,7 +182,7 @@ public sealed class NarratorApplication(
         var definition = new StoryDefinition(
             source?.Id ?? targetId,
             draft.Title,
-            draft.StoryPrompt,
+            generated.RefinedStoryPrompt.Trim(),
             draft.PlayerQuestions.OrderBy(x => x.SortOrder).Select(x =>
                 new PlayerQuestion(x.Id == Guid.Empty ? idGenerator.NewId() : x.Id, x.Question, x.ValidationInstruction, x.SortOrder)).ToArray(),
             bible,
@@ -320,7 +322,7 @@ public sealed class NarratorApplication(
         var snapshot = draft.Definition with { InitialStoryBible = initial };
         var context = new GenerationContext(snapshot, answers, initial, [], null, 0);
         var response = await provider.GenerateOpeningAsync(settings, credential, context, cancellationToken);
-        ValidateGenerationResponse(response, settings.ContentLimits);
+        response = ValidateGenerationResponse(response, settings.ContentLimits);
         var mappedRelevant = response.RelevantStoryBibleEntryIds
             .Select(x => idMap.GetValueOrDefault(x, x))
             .Concat(initial.Entries.Select(x => x.Id))
@@ -363,7 +365,7 @@ public sealed class NarratorApplication(
             stateId,
             settings.ModelId);
         var response = await provider.GenerateTurnAsync(settings, credential, context, cancellationToken);
-        ValidateGenerationResponse(response, settings.ContentLimits);
+        response = ValidateGenerationResponse(response, settings.ContentLimits);
         var sequence = state.LastCommittedTurnSequence + 1;
         var applied = StoryBibleProcessor.Apply(
             state.CurrentStoryBible,
@@ -430,17 +432,19 @@ public sealed class NarratorApplication(
             throw new NarratorException("Player question IDs must be unique.");
     }
 
-    private static void ValidateGenerationResponse(StoryGenerationResponse response, ContentLimitSettings limits)
+    private static StoryGenerationResponse ValidateGenerationResponse(StoryGenerationResponse response, ContentLimitSettings limits)
     {
         if (string.IsNullOrWhiteSpace(response.Narration) || response.Narration.Length > limits.MaxNarrationCharacters)
             throw new NarratorException("The returned narration is empty or exceeds the configured limit.");
-        if (response.SuggestedActions.Count > limits.MaxSuggestedActions ||
-            response.SuggestedActions.Any(x => string.IsNullOrWhiteSpace(x) || x.Length > limits.MaxSuggestedActionCharacters))
-            throw new NarratorException("The returned suggested actions exceed configured limits.");
+        if (response.SuggestedActions.Any(x => string.IsNullOrWhiteSpace(x) || x.Length > limits.MaxSuggestedActionCharacters))
+            throw new NarratorException("A returned suggested action is empty or exceeds the configured limit.");
+        if (response.SuggestedActions.Count > limits.MaxSuggestedActions)
+            response = response with { SuggestedActions = response.SuggestedActions.Take(limits.MaxSuggestedActions).ToArray() };
         if (response.StoryBibleUpdates.Count > limits.MaxStoryBibleUpdatesPerResponse)
             throw new NarratorException("The response contains too many Story Bible updates.");
         foreach (var update in response.StoryBibleUpdates.Where(x => x.Entry is not null))
             ValidateGeneratedEntry(update.Entry!, limits);
+        return response;
     }
 
     private static void ValidateGeneratedEntry(ProposedStoryBibleEntry entry, ContentLimitSettings limits) =>

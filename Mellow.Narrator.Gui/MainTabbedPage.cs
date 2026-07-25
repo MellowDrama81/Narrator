@@ -136,14 +136,6 @@ public sealed class MainTabbedPage : TabbedPage
         await SaveWorkspaceAsync();
     }
 
-    public async Task ReplaceCurrentWithPromptAsync(Guid id)
-    {
-        var previous = CurrentPage;
-        if (previous is NarratorNavigationPage page && !page.IsFixed) Children.Remove(previous);
-        OpenPrompt(id);
-        await SaveWorkspaceAsync();
-    }
-
     public async Task ReplaceCurrentWithStartAsync(Guid id)
     {
         var previous = CurrentPage;

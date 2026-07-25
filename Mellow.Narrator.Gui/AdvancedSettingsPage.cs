@@ -25,7 +25,8 @@ public sealed class AdvancedSettingsPage : ContentPage
         ["answer"] = "default 4000; range 1–50000",
         ["action"] = "default 4000; range 1–50000",
         ["narration"] = "default 20000; range 100–200000",
-        ["suggestedCount"] = "default 6; range 1–20",
+        ["suggestedMin"] = "default 2; range 1–20; must not exceed the maximum",
+        ["suggestedCount"] = "default 3; range 1–20",
         ["suggestedLength"] = "default 500; range 1–5000",
         ["category"] = "default 100; range 1–1000",
         ["name"] = "default 200; range 1–2000",
@@ -82,7 +83,8 @@ public sealed class AdvancedSettingsPage : ContentPage
         Add(content, "Answer characters", "answer");
         Add(content, "Player action characters", "action");
         Add(content, "Narration characters", "narration");
-        Add(content, "Suggested actions", "suggestedCount");
+        Add(content, "Minimum suggested actions", "suggestedMin");
+        Add(content, "Maximum suggested actions", "suggestedCount");
         Add(content, "Suggested action characters", "suggestedLength");
         Add(content, "Bible category characters", "category");
         Add(content, "Bible name characters", "name");
@@ -120,6 +122,9 @@ public sealed class AdvancedSettingsPage : ContentPage
                 ContentLimits = new(Int("title"), Int("label"), Int("prompt"), Int("question"), Int("validation"),
                     Int("answer"), Int("action"), Int("narration"), Int("suggestedCount"), Int("suggestedLength"),
                     Int("category"), Int("name"), Int("updates"), Int("responseBytes"))
+                {
+                    MinSuggestedActions = Int("suggestedMin")
+                }
             };
             if (updated.Logging.MinimumLevel == NarratorLogLevel.Trace &&
                 s.Logging.MinimumLevel != NarratorLogLevel.Trace &&
@@ -179,7 +184,8 @@ public sealed class AdvancedSettingsPage : ContentPage
         var c = s.ContentLimits;
         Set("title", c.MaxStoryTitleCharacters); Set("label", c.MaxStoryLabelCharacters); Set("prompt", c.MaxStoryPromptCharacters);
         Set("question", c.MaxPlayerQuestionCharacters); Set("validation", c.MaxValidationInstructionCharacters); Set("answer", c.MaxPlayerAnswerCharacters);
-        Set("action", c.MaxPlayerActionCharacters); Set("narration", c.MaxNarrationCharacters); Set("suggestedCount", c.MaxSuggestedActions);
+        Set("action", c.MaxPlayerActionCharacters); Set("narration", c.MaxNarrationCharacters);
+        Set("suggestedMin", c.MinSuggestedActions); Set("suggestedCount", c.MaxSuggestedActions);
         Set("suggestedLength", c.MaxSuggestedActionCharacters); Set("category", c.MaxStoryBibleCategoryCharacters); Set("name", c.MaxStoryBibleNameCharacters);
         Set("updates", c.MaxStoryBibleUpdatesPerResponse); Set("responseBytes", c.MaxResponseBodyBytes);
     }

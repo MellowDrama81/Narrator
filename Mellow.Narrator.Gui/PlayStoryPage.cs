@@ -96,6 +96,7 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
         Grid.SetRow(columns, 1);
         Content = layout;
         _action.TextChanged += (_, _) => _tabs.ScheduleWorkspaceSave();
+        _action.Completed += Play;
     }
 
     PlayStoryTabState? IWorkspacePayloadPage.PlayStoryTabState => new(_action.Text ?? "");
@@ -181,7 +182,11 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
             _suggestions.Children.Clear();
             foreach (var suggestion in last?.SuggestedActions ?? [])
             {
-                var button = Ui.Button(suggestion, (_, _) => _action.Text = suggestion);
+                var button = Ui.Button(suggestion, (_, _) =>
+                {
+                    _action.Text = suggestion;
+                    Play(null, EventArgs.Empty);
+                });
                 _suggestions.Children.Add(button);
             }
             _bible.Children.Clear();

@@ -25,13 +25,24 @@ public static class PromptTemplateDefaults
     public const int MaximumTemplateCharacters = 20000;
     public const string ValidationErrorPlaceholder = "{validationError}";
     public const string SchemaPlaceholder = "{schema}";
+    public const string MinSuggestedActionsPlaceholder = "{minSuggestedActions}";
+    public const string MaxSuggestedActionsPlaceholder = "{maxSuggestedActions}";
 
     public static PromptTemplateSettings Create() => new(
         "You validate one interactive-story setup answer. Apply the validation instruction in context. Return JSON only. A failed rule is advisory: set hasWarning true and explain concisely.",
-        "Create the initial Story Bible for an interactive story. Include every durable fact required to narrate consistently. Keep entries concise, avoid duplicates, and assign importance 1 through 5. Return JSON only.",
         """
+        Refine the Story Prompt and create the initial Story Bible for an interactive story.
+        The Story Prompt is sent verbatim with every request for the entire story, so it must contain only
+        immutable facts and instructions that will never change: setting, premise, tone, and narration rules.
+        Anything that can change over the course of the story — character states, locations, relationships,
+        inventory, objectives, or any other mutable detail — must not remain in the Story Prompt; move it into
+        Story Bible entries instead. Rewrite the Story Prompt to keep only what is truly immutable, moving
+        everything else into Story Bible entries. Include every durable fact required to narrate consistently.
+        Keep entries concise, avoid duplicates, and assign importance 1 through 5. Return JSON only.
+        """,
+        $"""
         You narrate an interactive story. Return JSON only. The Story Bible is authoritative and complete.
-        Narrate the immediate scene, offer concise suggested actions, flag every existing Bible entry relevant now,
+        Narrate the immediate scene, offer between {MinSuggestedActionsPlaceholder} and {MaxSuggestedActionsPlaceholder} concise suggested actions, flag every existing Bible entry relevant now,
         and return only incremental Story Bible updates. Resolve the current player action from the final request,
         advance beyond the most recent narration, and never answer an older action or repeat an earlier scene.
         For an add update, always set entryId to null because the application assigns the ID. Never invent IDs.
@@ -68,7 +79,10 @@ public sealed record ContentLimitSettings(
     int MaxStoryBibleCategoryCharacters,
     int MaxStoryBibleNameCharacters,
     int MaxStoryBibleUpdatesPerResponse,
-    int MaxResponseBodyBytes);
+    int MaxResponseBodyBytes)
+{
+    public int MinSuggestedActions { get; init; } = 2;
+}
 
 public enum StructuredOutputTier { Untested, StrictJsonSchema, JsonMode, PromptedJson, Unsupported }
 public enum OutputTokenParameter { MaxCompletionTokens, MaxTokens }
@@ -109,7 +123,7 @@ public static class NarratorDefaults
         new(null, null, null),
         new(8, 200, 4000, 60000, 80),
         new(2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(60)),
-        new(200, 200, 20000, 1000, 2000, 4000, 4000, 20000, 6, 500, 100, 200, 100, 2 * 1024 * 1024),
+        new(200, 200, 20000, 1000, 2000, 4000, 4000, 20000, 3, 500, 100, 200, 100, 2 * 1024 * 1024),
         new(false, StructuredOutputTier.Untested, null, null));
 }
 
@@ -148,7 +162,10 @@ public static class SettingsValidator
         Range(errors, nameof(c.MaxPlayerAnswerCharacters), c.MaxPlayerAnswerCharacters, 1, 50000);
         Range(errors, nameof(c.MaxPlayerActionCharacters), c.MaxPlayerActionCharacters, 1, 50000);
         Range(errors, nameof(c.MaxNarrationCharacters), c.MaxNarrationCharacters, 100, 200000);
+        Range(errors, nameof(c.MinSuggestedActions), c.MinSuggestedActions, 1, 20);
         Range(errors, nameof(c.MaxSuggestedActions), c.MaxSuggestedActions, 1, 20);
+        if (c.MinSuggestedActions > c.MaxSuggestedActions)
+            errors[nameof(c.MinSuggestedActions)] = "Must not exceed the maximum suggested actions.";
         Range(errors, nameof(c.MaxSuggestedActionCharacters), c.MaxSuggestedActionCharacters, 1, 5000);
         Range(errors, nameof(c.MaxStoryBibleCategoryCharacters), c.MaxStoryBibleCategoryCharacters, 1, 1000);
         Range(errors, nameof(c.MaxStoryBibleNameCharacters), c.MaxStoryBibleNameCharacters, 1, 2000);
@@ -182,6 +199,11 @@ public static class SettingsValidator
             !templates.PromptedJsonInstruction.Contains(PromptTemplateDefaults.SchemaPlaceholder, StringComparison.Ordinal))
             errors[nameof(templates.PromptedJsonInstruction)] =
                 $"Must contain {PromptTemplateDefaults.SchemaPlaceholder}.";
+        if (!string.IsNullOrWhiteSpace(templates.StoryNarrationInstruction) &&
+            (!templates.StoryNarrationInstruction.Contains(PromptTemplateDefaults.MinSuggestedActionsPlaceholder, StringComparison.Ordinal) ||
+             !templates.StoryNarrationInstruction.Contains(PromptTemplateDefaults.MaxSuggestedActionsPlaceholder, StringComparison.Ordinal)))
+            errors[nameof(templates.StoryNarrationInstruction)] =
+                $"Must contain {PromptTemplateDefaults.MinSuggestedActionsPlaceholder} and {PromptTemplateDefaults.MaxSuggestedActionsPlaceholder}.";
     }
 
     private static void Prompt(

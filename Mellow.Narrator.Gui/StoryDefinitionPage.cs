@@ -36,20 +36,28 @@ public sealed class StoryDefinitionPage : ContentPage
         try
         {
             var value = await _repository.GetAsync(_id) ?? throw new NarratorException("Story Definition not found.");
+            var settings = await _application.GetSettingsAsync();
             Title = value.Title;
             if (Parent is NavigationPage navigation) navigation.Title = Title;
             _content.Children.Clear();
-            _content.Children.Add(Ui.Heading(value.Title));
-            _content.Children.Add(new Label { Text = value.StoryPrompt });
+            var titleEntry = new Entry { Text = value.Title, MaxLength = settings.ContentLimits.MaxStoryTitleCharacters, FontSize = 24, FontAttributes = FontAttributes.Bold };
+            _content.Children.Add(titleEntry);
+            _content.Children.Add(Ui.Button("Save Title", async (_, _) => await SaveTitleAsync(value, titleEntry.Text)));
+            var promptEditor = new Editor
+            {
+                Text = value.StoryPrompt,
+                AutoSize = EditorAutoSizeOption.TextChanges,
+                MinimumHeightRequest = 160
+            };
+            _content.Children.Add(promptEditor);
+            _content.Children.Add(Ui.Button("Save Story Prompt", async (_, _) => await SavePromptAsync(value, promptEditor.Text)));
             _content.Children.Add(Ui.Buttons(
-                Ui.Button("Edit", async (_, _) => await _tabs.ReplaceCurrentWithPromptAsync(_id)),
                 Ui.Button("Start Story", async (_, _) => await _tabs.ReplaceCurrentWithStartAsync(_id)),
                 Ui.Button("Export", async (_, _) => await ExportAsync(value))));
             _content.Children.Add(Ui.Heading("Player Questions"));
             foreach (var question in value.PlayerQuestions.OrderBy(x => x.SortOrder))
                 _content.Children.Add(new Label { Text = $"{question.Question}\nValidation: {question.ValidationInstruction}" });
             _content.Children.Add(Ui.Heading($"Initial Story Bible ({value.InitialStoryBible.Entries.Count})"));
-            var settings = await _application.GetSettingsAsync();
             if (StoryBibleProcessor.IsApproachingLimits(value.InitialStoryBible, settings.StoryGeneration))
                 _content.Children.Add(new Label { Text = "The Story Bible is approaching one or more configured limits.", TextColor = Colors.DarkOrange });
             _content.Children.Add(StoryBibleView.Create(this, value.InitialStoryBible, settings.ContentLimits, 0, SaveBibleAsync));
@@ -59,6 +67,28 @@ public sealed class StoryDefinitionPage : ContentPage
                 _content.Children.Add(new Label { Text = $"{record.CompletedAtUtc.ToLocalTime():g} — {record.Reason}", FontAttributes = FontAttributes.Bold });
                 foreach (var change in record.Changes) _content.Children.Add(ChangeLabel(change));
             }
+        }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private async Task SaveTitleAsync(StoryDefinition value, string? title)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(title)) throw new NarratorException("Enter a title.");
+            await _repository.SaveAsync(value with { Title = title, UpdatedAtUtc = DateTimeOffset.UtcNow });
+            await RefreshAsync();
+        }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private async Task SavePromptAsync(StoryDefinition value, string? prompt)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(prompt)) throw new NarratorException("Enter a Story Prompt.");
+            await _repository.SaveAsync(value with { StoryPrompt = prompt, UpdatedAtUtc = DateTimeOffset.UtcNow });
+            await RefreshAsync();
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }

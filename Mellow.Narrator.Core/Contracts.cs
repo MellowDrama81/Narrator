@@ -62,7 +62,9 @@ public interface ISecureStorageService
 }
 
 public sealed record PlayerAnswerValidationResponse(bool HasWarning, string? Warning);
-public sealed record StoryDefinitionGenerationResponse(IReadOnlyList<ProposedStoryBibleEntry> InitialStoryBibleEntries);
+public sealed record StoryDefinitionGenerationResponse(
+    string RefinedStoryPrompt,
+    IReadOnlyList<ProposedStoryBibleEntry> InitialStoryBibleEntries);
 
 public sealed record StoryGenerationResponse(
     string Narration,

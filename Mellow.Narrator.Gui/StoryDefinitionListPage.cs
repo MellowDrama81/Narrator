@@ -44,7 +44,6 @@ public sealed class StoryDefinitionListPage : ContentPage
                 Ui.Buttons(
                     Ui.Button("New", (_, _) => _tabs.OpenPrompt()),
                     Ui.Button("Open", (_, _) => { if (Selected is { } x) _tabs.OpenDefinition(x.Id); }),
-                    Ui.Button("Edit", (_, _) => { if (Selected is { } x) _tabs.OpenPrompt(x.Id); }),
                     Ui.Button("Start", (_, _) => { if (Selected is { } x) _tabs.OpenStart(x.Id); }),
                     Ui.Button("Import", Import),
                     Ui.Button("Export", Export),
