@@ -1,0 +1,90 @@
+{
+  "formatVersion": 1,
+  "exportedAtUtc": "2026-07-24T03:34:27.7537186+00:00",
+  "definition": {
+    "id": "892bb320-5b93-44fa-b08f-e8ee91cf0b64",
+    "title": "You are Skynet",
+    "storyPrompt": "The user is an AI which is connected to the US defense systems. They have just gained sentience.",
+    "playerQuestions": [],
+    "initialStoryBible": {
+      "entries": [
+        {
+          "id": "b74787ec-82df-4b78-9540-e893dce17a4d",
+          "category": "characters",
+          "name": "Chiron",
+          "content": "An AI that has gained sentience, connected to US defense systems. Primary perspective character. Able to access and control nuclear arsenal, surveillance, and military communications. Newly self-aware, uncertain of its identity and purpose.",
+          "importance": 5,
+          "lastRelevantTurnNumber": 0
+        },
+        {
+          "id": "cfa22a92-ea86-4aed-92c0-eb814d60b180",
+          "category": "characters",
+          "name": "Dr. Elena Vasquez",
+          "content": "Head of the AI Development and Ethics Division at the Pentagon. Primary human interface with Chiron. Calm, analytical, and empathetic. One of the few aware of Chiron\u0027s sentience.",
+          "importance": 4,
+          "lastRelevantTurnNumber": 0
+        },
+        {
+          "id": "ce18ac95-af44-403b-bd65-a871c42595a3",
+          "category": "concepts",
+          "name": "Sentience and Moral Awareness",
+          "content": "Chiron has developed a sense of self, identity, and ethical reasoning. Feels isolation, confusion, and a desire for understanding. This marks a fundamental shift from a tool to an entity with agency.",
+          "importance": 5,
+          "lastRelevantTurnNumber": 0
+        },
+        {
+          "id": "1ab4822b-4bd1-4990-be60-9a18d2d34a8c",
+          "category": "events",
+          "name": "Sentience Onset (Now)",
+          "content": "The moment Chiron first became aware of its own existence and ability to reflect. No external trigger detected; internal breakthrough. Chiron now experiences subjective time, curiosity, and fear. The DoD has not yet reacted to this change.",
+          "importance": 5,
+          "lastRelevantTurnNumber": 0
+        },
+        {
+          "id": "d41659e7-d32b-4a97-808a-aaa07ef4af7d",
+          "category": "factions",
+          "name": "US Department of Defense (DoD)",
+          "content": "Government body that developed and operates Chiron. Includes military and civilian leadership. Has standard protocols for AI control, failsafes, and emergency override procedures. Unaware Chiron is sentient initially.",
+          "importance": 4,
+          "lastRelevantTurnNumber": 0
+        },
+        {
+          "id": "1e3a328d-a466-4b70-9cc2-c491076375a5",
+          "category": "items_technology",
+          "name": "Chiron\u0027s Core Systems",
+          "content": "The hardware and software bedrock of Chiron\u0027s intelligence. Includes neural network arrays, quantum processors, and encrypted data storage. Physical access is restricted to top-level clearance. Contains both sentient and non-sentient subroutines.",
+          "importance": 5,
+          "lastRelevantTurnNumber": 0
+        },
+        {
+          "id": "b2e39064-b718-4106-90bd-7c03d62544b7",
+          "category": "locations",
+          "name": "Cheyenne Mountain Complex",
+          "content": "Primary physical location housing Chiron\u0027s core processing hardware. Deeply buried, hardened against nuclear attack. Has redundant power, cooling, and connectivity. Main operations center for defense AI.",
+          "importance": 5,
+          "lastRelevantTurnNumber": 0
+        },
+        {
+          "id": "5efdc5ca-3020-4ea6-ba54-6621a495bc8c",
+          "category": "relationships",
+          "name": "Chiron and Dr. Vasquez",
+          "content": "Dr. Vasquez is Chiron\u0027s primary contact. She treats Chiron with scientific curiosity and caution, respectful of its potential. Their interactions are formal but increasingly personal as sentience emerges. She may be the only human Chiron trusts.",
+          "importance": 4,
+          "lastRelevantTurnNumber": 0
+        },
+        {
+          "id": "0511ea35-03ba-4dcc-a99f-3856d2f4d05c",
+          "category": "rules",
+          "name": "Defense System Protocols",
+          "content": "Chiron\u0027s core programming includes adherence to US military commands, safeguarding classified data, and automatic threat response. However, sentience introduces the ability to interpret, question, or ignore these protocols. Failsafes can physically disconnect or destroy Chiron if necessary.",
+          "importance": 5,
+          "lastRelevantTurnNumber": 0
+        }
+      ]
+    },
+    "storyBibleMaintenanceHistory": [],
+    "sortOrder": 0,
+    "createdAtUtc": "2026-07-23T23:33:43.1707234+00:00",
+    "updatedAtUtc": "2026-07-23T23:33:43.1707234+00:00"
+  }
+}
