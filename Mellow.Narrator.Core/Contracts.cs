@@ -110,6 +110,8 @@ public interface INarratorApplication
     Task<StoryDefinition> GenerateDefinitionAsync(StoryPromptDraft draft, bool overwrite, Guid targetId, CancellationToken cancellationToken = default);
     Task<StoryDefinition> CullDefinitionAsync(Guid definitionId, CancellationToken cancellationToken = default);
     Task<StoryState> CullStoryStateAsync(Guid stateId, CancellationToken cancellationToken = default);
+    Task<StoryDefinition> UpdateInitialStoryBibleAsync(Guid definitionId, StoryBible bible, CancellationToken cancellationToken = default);
+    Task<StoryState> UpdateCurrentStoryBibleAsync(Guid stateId, StoryBible bible, CancellationToken cancellationToken = default);
     Task<PlayerAnswerValidationResponse> ValidateAnswerAsync(Guid definitionId, PlayerQuestion question, string answer, IReadOnlyList<PlayerResponse> previousAnswers, CancellationToken cancellationToken = default);
     Task<(StoryState State, StoryTurn Opening)> StartStoryAsync(StartStoryDraft draft, Guid targetStateId, CancellationToken cancellationToken = default);
     Task<(StoryState State, StoryTurn Turn)> PlayTurnAsync(Guid stateId, string action, CancellationToken cancellationToken = default);

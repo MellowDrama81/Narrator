@@ -139,6 +139,87 @@ public sealed class NarratorApplicationTests
     }
 
     [Fact]
+    public async Task UpdateInitialStoryBible_AddsEditsAndRemovesEntries()
+    {
+        var keep = new StoryBibleEntry(Guid.NewGuid(), "fact", "Keep", "Original content", 3, 0);
+        var remove = new StoryBibleEntry(Guid.NewGuid(), "fact", "Remove me", "Content", 2, 0);
+        var definitions = new MemoryDefinitions();
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "Prompt", [], new([keep, remove]), [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        await definitions.SaveAsync(definition);
+        var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
+
+        var edited = keep with { Content = "Updated content" };
+        var added = new StoryBibleEntry(Guid.Empty, "fact", "New entry", "New content", 4, 0);
+        var updated = await app.UpdateInitialStoryBibleAsync(definition.Id, new([edited, added]));
+
+        Assert.Equal(2, updated.InitialStoryBible.Entries.Count);
+        var keptEntry = Assert.Single(updated.InitialStoryBible.Entries, x => x.Id == keep.Id);
+        Assert.Equal("Updated content", keptEntry.Content);
+        var newEntry = Assert.Single(updated.InitialStoryBible.Entries, x => x.Id != keep.Id);
+        Assert.NotEqual(Guid.Empty, newEntry.Id);
+        Assert.Equal("New entry", newEntry.Name);
+        var history = Assert.Single(updated.StoryBibleMaintenanceHistory);
+        Assert.Equal(StoryBibleMaintenanceReason.ManualEdit, history.Reason);
+        Assert.Equal(3, history.Changes.Count);
+        Assert.Contains(history.Changes, x => x.Operation == StoryBibleOperation.Replace && x.EntryId == keep.Id);
+        Assert.Contains(history.Changes, x => x.Operation == StoryBibleOperation.Remove && x.EntryId == remove.Id);
+        Assert.Contains(history.Changes, x => x.Operation == StoryBibleOperation.Add && x.EntryId == newEntry.Id);
+    }
+
+    [Fact]
+    public async Task UpdateInitialStoryBible_RejectsEntryExceedingLimits()
+    {
+        var definitions = new MemoryDefinitions();
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "Prompt", [], StoryBible.Empty, [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        await definitions.SaveAsync(definition);
+        var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
+
+        var invalid = new StoryBibleEntry(Guid.NewGuid(), "fact", "Name", "", 3, 0);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.UpdateInitialStoryBibleAsync(definition.Id, new([invalid])));
+    }
+
+    [Fact]
+    public async Task UpdateInitialStoryBible_RejectsDuplicateEntryIds()
+    {
+        var id = Guid.NewGuid();
+        var definitions = new MemoryDefinitions();
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "Prompt", [], StoryBible.Empty, [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        await definitions.SaveAsync(definition);
+        var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
+
+        var first = new StoryBibleEntry(id, "fact", "First", "Content", 3, 0);
+        var duplicate = new StoryBibleEntry(id, "fact", "Duplicate", "Content", 3, 0);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.UpdateInitialStoryBibleAsync(definition.Id, new([first, duplicate])));
+    }
+
+    [Fact]
+    public async Task UpdateCurrentStoryBible_PersistsManualEditForStoryState()
+    {
+        var stateId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", [], StoryBible.Empty);
+        var existing = new StoryBibleEntry(Guid.NewGuid(), "fact", "Existing", "Content", 3, 2);
+        var state = new StoryState(stateId, "Story", null, new(snapshot, []), new([existing]), [], 0, now, now, 2);
+        var states = new MemoryStates(state, []);
+        var app = CreateApplication(new MemoryDefinitions(), states, new FakeProvider());
+
+        var added = new StoryBibleEntry(Guid.Empty, "fact", "Added mid-play", "Content", 4, 2);
+        var updated = await app.UpdateCurrentStoryBibleAsync(stateId, new([existing, added]));
+
+        Assert.Equal(2, updated.CurrentStoryBible.Entries.Count);
+        var history = Assert.Single(updated.StoryBibleMaintenanceHistory);
+        Assert.Equal(StoryBibleMaintenanceReason.ManualEdit, history.Reason);
+        var addedChange = Assert.Single(history.Changes);
+        Assert.Equal(StoryBibleOperation.Add, addedChange.Operation);
+        Assert.Equal("Added mid-play", addedChange.After!.Name);
+    }
+
+    [Fact]
     public void StoryRequestCoordinator_RejectsConcurrentRequestForSameState()
     {
         var coordinator = new StoryRequestCoordinator();
@@ -227,8 +308,11 @@ public sealed class NarratorApplicationTests
             _turns[state.Id].Add(turn);
             return Task.CompletedTask;
         }
-        public Task SaveAsync(StoryState state, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+        public Task SaveAsync(StoryState state, CancellationToken cancellationToken = default)
+        {
+            _states[state.Id] = state;
+            return Task.CompletedTask;
+        }
         public Task UpdateLabelAsync(Guid id, string label, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public Task SwapSortOrderAsync(Guid firstId, Guid secondId, CancellationToken cancellationToken = default) =>

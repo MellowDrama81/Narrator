@@ -222,6 +222,49 @@ public sealed class NarratorApplication(
         return updated;
     }
 
+    public async Task<StoryDefinition> UpdateInitialStoryBibleAsync(Guid definitionId, StoryBible bible, CancellationToken cancellationToken = default)
+    {
+        var definition = await definitions.GetAsync(definitionId, cancellationToken) ?? throw new NarratorException("Story Definition not found.");
+        var settings = await settingsStore.LoadAsync(cancellationToken);
+        var normalized = NormalizeManualBible(bible, settings.ContentLimits);
+        if (!StoryBibleProcessor.IsWithinLimits(normalized, settings.StoryGeneration))
+            throw new NarratorException("The Story Bible exceeds current limits. Increase the limits or cull it first.");
+        var now = timeProvider.GetUtcNow();
+        var changes = DiffManualEdit(definition.InitialStoryBible, normalized);
+        var history = changes.Count == 0
+            ? definition.StoryBibleMaintenanceHistory
+            : definition.StoryBibleMaintenanceHistory.Append(new StoryBibleMaintenanceRecord(
+                idGenerator.NewId(), StoryBibleMaintenanceReason.ManualEdit, Limits(settings), changes, now)).ToArray();
+        var updated = definition with { InitialStoryBible = normalized, StoryBibleMaintenanceHistory = history, UpdatedAtUtc = now };
+        await definitions.SaveAsync(updated, cancellationToken);
+        _logger.LogInformation(
+            "Story Definition {StoryDefinitionId} Story Bible manually updated with {ChangeCount} changes.",
+            definitionId,
+            changes.Count);
+        return updated;
+    }
+
+    public async Task<StoryState> UpdateCurrentStoryBibleAsync(Guid stateId, StoryBible bible, CancellationToken cancellationToken = default)
+    {
+        var state = await states.GetAsync(stateId, cancellationToken) ?? throw new NarratorException("Story State not found.");
+        var settings = await settingsStore.LoadAsync(cancellationToken);
+        var normalized = NormalizeManualBible(bible, settings.ContentLimits);
+        if (!StoryBibleProcessor.IsWithinLimits(normalized, settings.StoryGeneration))
+            throw new NarratorException("The Story Bible exceeds current limits. Increase the limits or cull it first.");
+        var changes = DiffManualEdit(state.CurrentStoryBible, normalized);
+        var history = changes.Count == 0
+            ? state.StoryBibleMaintenanceHistory
+            : state.StoryBibleMaintenanceHistory.Append(new StoryBibleMaintenanceRecord(
+                idGenerator.NewId(), StoryBibleMaintenanceReason.ManualEdit, Limits(settings), changes, timeProvider.GetUtcNow())).ToArray();
+        var updated = state with { CurrentStoryBible = normalized, StoryBibleMaintenanceHistory = history };
+        await states.SaveAsync(updated, cancellationToken);
+        _logger.LogInformation(
+            "Story State {StoryStateId} Story Bible manually updated with {ChangeCount} changes.",
+            stateId,
+            changes.Count);
+        return updated;
+    }
+
     public async Task<PlayerAnswerValidationResponse> ValidateAnswerAsync(
         Guid definitionId, PlayerQuestion question, string answer, IReadOnlyList<PlayerResponse> previousAnswers,
         CancellationToken cancellationToken = default)
@@ -400,16 +443,54 @@ public sealed class NarratorApplication(
             ValidateGeneratedEntry(update.Entry!, limits);
     }
 
-    private static void ValidateGeneratedEntry(ProposedStoryBibleEntry entry, ContentLimitSettings limits)
+    private static void ValidateGeneratedEntry(ProposedStoryBibleEntry entry, ContentLimitSettings limits) =>
+        ValidateEntryFields(entry.Category, entry.Name, entry.Content, entry.Importance, limits);
+
+    private static void ValidateEntryFields(string category, string name, string content, int importance, ContentLimitSettings limits)
     {
-        if (string.IsNullOrWhiteSpace(entry.Category) || entry.Category.Length > limits.MaxStoryBibleCategoryCharacters)
+        if (string.IsNullOrWhiteSpace(category) || category.Length > limits.MaxStoryBibleCategoryCharacters)
             throw new NarratorException("A Story Bible category is empty or exceeds the configured limit.");
-        if (string.IsNullOrWhiteSpace(entry.Name) || entry.Name.Length > limits.MaxStoryBibleNameCharacters)
+        if (string.IsNullOrWhiteSpace(name) || name.Length > limits.MaxStoryBibleNameCharacters)
             throw new NarratorException("A Story Bible entry name is empty or exceeds the configured limit.");
-        if (string.IsNullOrWhiteSpace(entry.Content))
+        if (string.IsNullOrWhiteSpace(content))
             throw new NarratorException("A Story Bible entry has empty content.");
-        if (entry.Importance is < 1 or > 5)
+        if (importance is < 1 or > 5)
             throw new NarratorException("Story Bible importance must be from 1 to 5.");
+    }
+
+    private StoryBible NormalizeManualBible(StoryBible bible, ContentLimitSettings limits)
+    {
+        var seenIds = new HashSet<Guid>();
+        var entries = new List<StoryBibleEntry>(bible.Entries.Count);
+        foreach (var entry in bible.Entries)
+        {
+            var id = entry.Id == Guid.Empty ? idGenerator.NewId() : entry.Id;
+            if (!seenIds.Add(id)) throw new NarratorException("Story Bible entry IDs must be unique.");
+            var category = entry.Category.Trim();
+            var name = entry.Name.Trim();
+            var content = entry.Content.Trim();
+            ValidateEntryFields(category, name, content, entry.Importance, limits);
+            entries.Add(entry with { Id = id, Category = category, Name = name, Content = content });
+        }
+        return new StoryBible(entries);
+    }
+
+    private static IReadOnlyList<AppliedStoryBibleChange> DiffManualEdit(StoryBible before, StoryBible after)
+    {
+        var beforeById = before.Entries.ToDictionary(x => x.Id);
+        var afterById = after.Entries.ToDictionary(x => x.Id);
+        var changes = new List<AppliedStoryBibleChange>();
+        foreach (var entry in after.Entries)
+        {
+            if (!beforeById.TryGetValue(entry.Id, out var previous))
+                changes.Add(new(StoryBibleOperation.Add, entry.Id, null, entry, StoryBibleChangeSource.ManualEdit));
+            else if (previous != entry)
+                changes.Add(new(StoryBibleOperation.Replace, entry.Id, previous, entry, StoryBibleChangeSource.ManualEdit));
+        }
+        foreach (var entry in before.Entries)
+            if (!afterById.ContainsKey(entry.Id))
+                changes.Add(new(StoryBibleOperation.Remove, entry.Id, entry, null, StoryBibleChangeSource.ManualEdit));
+        return changes;
     }
 }
 

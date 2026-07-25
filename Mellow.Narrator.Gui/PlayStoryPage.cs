@@ -17,6 +17,7 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
     private readonly VerticalStackLayout _history = new() { IsVisible = false, Spacing = 8 };
     private readonly Label _limitWarning = new() { TextColor = Colors.DarkOrange };
     private readonly Button _loadAllTurns;
+    private readonly ScrollView _story;
     private CancellationTokenSource? _request;
     private PendingOperationState? _pendingOperation;
     private bool _historyLoaded;
@@ -43,22 +44,57 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
             await Refresh();
         });
         Title = "Play Story";
-        var bibleBody = new VerticalStackLayout { IsVisible = false, Children = { _bible } };
-        Content = new ScrollView
+        _story = new ScrollView
         {
             Content = new VerticalStackLayout
             {
-                Padding = 16,
                 Spacing = 8,
                 Children =
                 {
                     _limitWarning, _narration, _loadAllTurns, Ui.Heading("Suggested Actions"), _suggestions, _action,
                     Ui.Buttons(Ui.Button("Continue", Play), _copy, Ui.Button("Export", Export)),
-                    _busy, Ui.Button("Show / hide Story Bible", (_, _) => bibleBody.IsVisible = !bibleBody.IsVisible), bibleBody,
+                    _busy
+                }
+            }
+        };
+        var sidePanel = new ScrollView
+        {
+            IsVisible = false,
+            Content = new VerticalStackLayout
+            {
+                Spacing = 8,
+                Children =
+                {
+                    Ui.Heading("Story Bible"), _bible,
                     Ui.Button("Show / hide Bible change history", async (_, _) => await ToggleHistoryAsync()), _history
                 }
             }
         };
+        var storyColumn = new ColumnDefinition(new GridLength(2, GridUnitType.Star));
+        var sidePanelColumn = new ColumnDefinition(new GridLength(0, GridUnitType.Absolute));
+        var columns = new Grid
+        {
+            ColumnSpacing = 0,
+            ColumnDefinitions = { storyColumn, sidePanelColumn },
+            Children = { _story, sidePanel }
+        };
+        Grid.SetColumn(sidePanel, 1);
+        var sidePanelToggle = Ui.Button("Show / hide Story Bible", (_, _) =>
+        {
+            var show = !sidePanel.IsVisible;
+            sidePanel.IsVisible = show;
+            sidePanelColumn.Width = show ? new GridLength(1, GridUnitType.Star) : new GridLength(0, GridUnitType.Absolute);
+            columns.ColumnSpacing = show ? 16 : 0;
+        });
+        var layout = new Grid
+        {
+            Padding = 16,
+            RowSpacing = 8,
+            RowDefinitions = { new(GridLength.Auto), new(GridLength.Star) },
+            Children = { sidePanelToggle, columns }
+        };
+        Grid.SetRow(columns, 1);
+        Content = layout;
         _action.TextChanged += (_, _) => _tabs.ScheduleWorkspaceSave();
     }
 
@@ -98,10 +134,10 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
                     "Retry") == "Retry")
                 Play(null, EventArgs.Empty);
         }
-        await Refresh();
+        await Refresh(scrollToLatestTurn: true);
     }
 
-    private async Task Refresh()
+    private async Task Refresh(bool scrollToLatestTurn = false)
     {
         try
         {
@@ -127,10 +163,19 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
                 _stateId,
                 _allTurnsLoaded ? null : Math.Max(1, settings.StoryGeneration.RecentTurnCount));
             _loadAllTurns.IsVisible = !_allTurnsLoaded && state.LastCommittedTurnSequence + 1 > turns.Count;
+            View? latestTurnAnchor = null;
             foreach (var turn in turns)
             {
-                if (turn.PlayerAction is not null) _narration.Children.Add(new Label { Text = $"> {turn.PlayerAction}", FontAttributes = FontAttributes.Italic });
-                _narration.Children.Add(new Label { Text = turn.Narration, FontSize = 17 });
+                View? anchor = null;
+                if (turn.PlayerAction is not null)
+                {
+                    var actionLabel = new Label { Text = $"> {turn.PlayerAction}", FontAttributes = FontAttributes.Italic };
+                    _narration.Children.Add(actionLabel);
+                    anchor = actionLabel;
+                }
+                var narrationLabel = new Label { Text = turn.Narration, FontSize = 17 };
+                _narration.Children.Add(narrationLabel);
+                latestTurnAnchor = anchor ?? narrationLabel;
             }
             var last = turns.LastOrDefault();
             _suggestions.Children.Clear();
@@ -140,9 +185,33 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
                 _suggestions.Children.Add(button);
             }
             _bible.Children.Clear();
-            _bible.Children.Add(StoryBibleView.Create(state.CurrentStoryBible));
+            _bible.Children.Add(StoryBibleView.Create(this, state.CurrentStoryBible, settings.ContentLimits, state.LastCommittedTurnSequence, SaveBibleAsync));
             if (_historyLoaded) await LoadHistoryAsync(state);
+            if (scrollToLatestTurn && latestTurnAnchor is not null)
+                await ScrollToTopAsync(latestTurnAnchor);
         }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private async Task ScrollToTopAsync(VisualElement anchor)
+    {
+        // Height stays 0 until the platform has actually arranged this element with the newly
+        // added siblings above it; IsLoaded/Loaded fire on attachment, before that arrange pass runs.
+        for (var attempt = 0; attempt < 20 && anchor.Height <= 0; attempt++)
+            await Task.Delay(15);
+        var y = 0.0;
+        Element? current = anchor;
+        while (current is VisualElement element && current != _story)
+        {
+            y += element.Y;
+            current = current.Parent;
+        }
+        await _story.ScrollToAsync(0, Math.Max(0, y), true);
+    }
+
+    private async Task SaveBibleAsync(StoryBible next)
+    {
+        try { await _app.UpdateCurrentStoryBibleAsync(_stateId, next); await Refresh(); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
@@ -195,7 +264,7 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
             await _tabs.SaveWorkspaceNowAsync();
             await _app.PlayTurnAsync(_stateId, action, _request.Token);
             _action.Text = "";
-            await Refresh();
+            await Refresh(scrollToLatestTurn: true);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

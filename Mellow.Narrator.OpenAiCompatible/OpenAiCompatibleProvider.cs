@@ -526,7 +526,7 @@ public sealed class OpenAiCompatibleProvider(
             if (acknowledgedAction is not null)
                 throw new JsonException("An opening-scene response must acknowledge a null player action.");
         }
-        else if (!string.Equals(acknowledgedAction, context.PlayerAction, StringComparison.Ordinal))
+        else if (acknowledgedAction is null || !NormalizedWords(acknowledgedAction).SequenceEqual(NormalizedWords(context.PlayerAction!)))
         {
             throw new JsonException(
                 "The response acknowledged a different player action. Respond to currentPlayerAction and copy it exactly.");

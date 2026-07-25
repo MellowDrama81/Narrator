@@ -248,6 +248,32 @@ public sealed class ProviderTests
     }
 
     [Fact]
+    public async Task GenerateTurn_AcceptsAcknowledgedActionWithBenignFormattingDifferences()
+    {
+        var requests = 0;
+        var handler = new StubHandler(_ =>
+        {
+            requests++;
+            return Task.FromResult(Response("""
+                {"turnNumber":2,"acknowledgedPlayerAction":"  Current   action.  ","narration":"A new scene unfolds.","suggestedActions":[],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+                """));
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", [], new([])),
+            [],
+            new([]),
+            [],
+            "Current action",
+            2);
+
+        var result = await provider.GenerateTurnAsync(Settings(), null, context);
+
+        Assert.Equal(1, requests);
+        Assert.Equal("A new scene unfolds.", result.Narration);
+    }
+
+    [Fact]
     public async Task GenerateTurn_RetriesDuplicatedRecentNarration()
     {
         const string previousNarration =

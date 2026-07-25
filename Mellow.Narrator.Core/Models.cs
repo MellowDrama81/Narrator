@@ -18,8 +18,8 @@ public sealed record StoryBibleEntry(
 public sealed record StoryBibleLimitSnapshot(int MaxEntries, int MaxEntryCharacters, int MaxTotalCharacters);
 
 public enum StoryBibleOperation { Add, Replace, Remove }
-public enum StoryBibleChangeSource { LlmUpdate, AutomaticCull }
-public enum StoryBibleMaintenanceReason { GeneratedBibleLimitCull, UserApprovedLimitCull }
+public enum StoryBibleChangeSource { LlmUpdate, AutomaticCull, ManualEdit }
+public enum StoryBibleMaintenanceReason { GeneratedBibleLimitCull, UserApprovedLimitCull, ManualEdit }
 
 public sealed record ProposedStoryBibleEntry(string Category, string Name, string Content, int Importance);
 
