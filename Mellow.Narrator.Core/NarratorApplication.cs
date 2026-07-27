@@ -163,6 +163,15 @@ public sealed class NarratorApplication(
         var generated = await provider.GenerateStoryDefinitionAsync(settings, credential, draft.StoryPrompt, cancellationToken);
         if (string.IsNullOrWhiteSpace(generated.RefinedStoryPrompt) || generated.RefinedStoryPrompt.Length > settings.ContentLimits.MaxStoryPromptCharacters)
             throw new NarratorException("The refined Story Prompt is empty or exceeds the configured limit.");
+        var title = draft.Title;
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            if (string.IsNullOrWhiteSpace(generated.SuggestedTitle) || generated.SuggestedTitle.Length > settings.ContentLimits.MaxStoryTitleCharacters)
+                throw new NarratorException("The suggested title is empty or exceeds the configured limit.");
+            title = generated.SuggestedTitle.Trim();
+        }
+        if (generated.InitialEventsPrompt.Length > settings.ContentLimits.MaxStoryPromptCharacters)
+            throw new NarratorException("The Initial Events prompt exceeds the configured limit.");
         if (generated.InitialStoryBibleEntries.Count > 2000)
             throw new NarratorException("The generated initial Story Bible contains too many entries.");
         foreach (var entry in generated.InitialStoryBibleEntries)
@@ -181,15 +190,16 @@ public sealed class NarratorApplication(
         var definitionSummaries = source is null ? await definitions.ListAsync(cancellationToken) : [];
         var definition = new StoryDefinition(
             source?.Id ?? targetId,
-            draft.Title,
+            title,
             generated.RefinedStoryPrompt.Trim(),
-            draft.PlayerQuestions.OrderBy(x => x.SortOrder).Select(x =>
-                new PlayerQuestion(x.Id == Guid.Empty ? idGenerator.NewId() : x.Id, x.Question, x.ValidationInstruction, x.SortOrder)).ToArray(),
             bible,
             maintenance,
             source?.SortOrder ?? (definitionSummaries.Count == 0 ? 0 : definitionSummaries.Max(x => x.SortOrder) + 1),
             source?.CreatedAtUtc ?? now,
-            now);
+            now)
+        {
+            InitialEventsPrompt = generated.InitialEventsPrompt.Trim()
+        };
         await definitions.SaveAsync(definition, cancellationToken);
         _logger.LogInformation(
             "Story Definition {StoryDefinitionId} saved with {BibleEntryCount} initial Story Bible entries.",
@@ -267,27 +277,6 @@ public sealed class NarratorApplication(
         return updated;
     }
 
-    public async Task<PlayerAnswerValidationResponse> ValidateAnswerAsync(
-        Guid definitionId, PlayerQuestion question, string answer, IReadOnlyList<PlayerResponse> previousAnswers,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(answer))
-            throw new NarratorException("Enter an answer before validating it.");
-        var (settings, credential) = await ConnectionAsync(cancellationToken);
-        if (answer.Length > settings.ContentLimits.MaxPlayerAnswerCharacters)
-            throw new NarratorException("The answer exceeds the configured limit.");
-        _logger.LogDebug(
-            "Validating player answer for Story Definition {StoryDefinitionId}, question {QuestionId}.",
-            definitionId,
-            question.Id);
-        var result = await provider.ValidatePlayerAnswerAsync(settings, credential, question, answer, previousAnswers, cancellationToken);
-        _logger.LogDebug(
-            "Player answer validation completed for question {QuestionId}; warning: {HasWarning}.",
-            question.Id,
-            result.HasWarning);
-        return result;
-    }
-
     public async Task<(StoryState State, StoryTurn Opening)> StartStoryAsync(
         StartStoryDraft draft,
         Guid targetStateId,
@@ -301,26 +290,12 @@ public sealed class NarratorApplication(
             settings.ModelId);
         if (!StoryBibleProcessor.IsWithinLimits(draft.Definition.InitialStoryBible, settings.StoryGeneration))
             throw new NarratorException("The initial Story Bible exceeds current limits. Increase the limits or cull it first.");
-        var questions = draft.Definition.PlayerQuestions.OrderBy(x => x.SortOrder).ToArray();
-        if (draft.PlayerAnswers.Count != questions.Length)
-            throw new NarratorException("Every player question must be answered.");
-        var answers = new List<PlayerResponse>(questions.Length);
-        foreach (var question in questions)
-        {
-            var answer = draft.PlayerAnswers.SingleOrDefault(x => x.QuestionId == question.Id)
-                ?? throw new NarratorException("A player answer does not match the Story Definition snapshot.");
-            if (answer.ValidationStatus is not (PlayerAnswerValidationStatus.Valid or PlayerAnswerValidationStatus.AcceptedWithWarning))
-                throw new NarratorException("Every player answer must be validated or explicitly accepted with a warning.");
-            if (string.IsNullOrWhiteSpace(answer.Answer) || answer.Answer.Length > settings.ContentLimits.MaxPlayerAnswerCharacters)
-                throw new NarratorException("A player answer is empty or exceeds the configured limit.");
-            answers.Add(new(question.Id, question.Question, question.ValidationInstruction, answer.Answer));
-        }
 
         var idMap = draft.Definition.InitialStoryBible.Entries.ToDictionary(x => x.Id, _ => idGenerator.NewId());
         var initial = new StoryBible(draft.Definition.InitialStoryBible.Entries
             .Select(x => x with { Id = idMap[x.Id], LastRelevantTurnNumber = 0 }).ToArray());
         var snapshot = draft.Definition with { InitialStoryBible = initial };
-        var context = new GenerationContext(snapshot, answers, initial, [], null, 0);
+        var context = new GenerationContext(snapshot, initial, [], null, 0);
         var response = await provider.GenerateOpeningAsync(settings, credential, context, cancellationToken);
         response = ValidateGenerationResponse(response, settings.ContentLimits);
         var mappedRelevant = response.RelevantStoryBibleEntryIds
@@ -335,7 +310,7 @@ public sealed class NarratorApplication(
         var stateId = targetStateId;
         var stateSummaries = await states.ListAsync(cancellationToken);
         var state = new StoryState(stateId, snapshot.Title, draft.SourceStoryDefinitionId,
-            new(snapshot, answers), applied.Bible, draft.StoryBibleMaintenanceHistory,
+            new(snapshot), applied.Bible, draft.StoryBibleMaintenanceHistory,
             stateSummaries.Count == 0 ? 0 : stateSummaries.Max(x => x.SortOrder) + 1, now, null, 0);
         var turn = CreateTurn(stateId, 0, null, response, applied, settings.ModelId!, now);
         await states.CreateAsync(state, turn, cancellationToken);
@@ -354,7 +329,6 @@ public sealed class NarratorApplication(
         var recent = await states.GetTurnsAsync(stateId, settings.StoryGeneration.RecentTurnCount, cancellationToken);
         var context = new GenerationContext(
             state.Setup.Definition,
-            state.Setup.PlayerResponses,
             state.CurrentStoryBible,
             recent,
             action,
@@ -417,19 +391,10 @@ public sealed class NarratorApplication(
 
     private static void ValidateDraft(StoryPromptDraft draft, ContentLimitSettings limits)
     {
-        if (string.IsNullOrWhiteSpace(draft.Title) || draft.Title.Length > limits.MaxStoryTitleCharacters)
-            throw new NarratorException("Enter a valid title.");
+        if (draft.Title.Length > limits.MaxStoryTitleCharacters)
+            throw new NarratorException("The title exceeds the configured limit.");
         if (string.IsNullOrWhiteSpace(draft.StoryPrompt) || draft.StoryPrompt.Length > limits.MaxStoryPromptCharacters)
             throw new NarratorException("Enter a valid Story Prompt.");
-        if (draft.PlayerQuestions.Any(x => string.IsNullOrWhiteSpace(x.Question) || string.IsNullOrWhiteSpace(x.ValidationInstruction)))
-            throw new NarratorException("Every player question requires a question and validation instruction.");
-        if (draft.PlayerQuestions.Any(x => x.Question.Length > limits.MaxPlayerQuestionCharacters))
-            throw new NarratorException("A player question exceeds the configured limit.");
-        if (draft.PlayerQuestions.Any(x => x.ValidationInstruction.Length > limits.MaxValidationInstructionCharacters))
-            throw new NarratorException("A validation instruction exceeds the configured limit.");
-        if (draft.PlayerQuestions.Select(x => x.Id).Where(x => x != Guid.Empty).Distinct().Count() !=
-            draft.PlayerQuestions.Count(x => x.Id != Guid.Empty))
-            throw new NarratorException("Player question IDs must be unique.");
     }
 
     private static StoryGenerationResponse ValidateGenerationResponse(StoryGenerationResponse response, ContentLimitSettings limits)

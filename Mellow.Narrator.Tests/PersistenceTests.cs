@@ -96,8 +96,6 @@ public sealed class PersistenceTests : IDisposable
         Assert.NotEqual(state.Id, copy.Id);
         Assert.Equal(state.Label, copy.Label);
         Assert.NotEqual(state.CurrentStoryBible.Entries[0].Id, copy.CurrentStoryBible.Entries[0].Id);
-        Assert.NotEqual(state.Setup.Definition.PlayerQuestions[0].Id, copy.Setup.Definition.PlayerQuestions[0].Id);
-        Assert.Equal(copy.Setup.Definition.PlayerQuestions[0].Id, copy.Setup.PlayerResponses[0].QuestionId);
         var copiedTurn = Assert.Single(await repository.GetTurnsAsync(copy.Id));
         Assert.Equal(copy.Id, copiedTurn.StoryStateId);
         Assert.Equal(copy.CurrentStoryBible.Entries[0].Id, Assert.Single(copiedTurn.RelevantStoryBibleEntryIds));
@@ -122,7 +120,6 @@ public sealed class PersistenceTests : IDisposable
         var restored = await repository.GetAsync(restoredId);
         Assert.NotNull(restored);
         Assert.NotEqual(state.CurrentStoryBible.Entries[0].Id, restored.CurrentStoryBible.Entries[0].Id);
-        Assert.Equal(restored.Setup.Definition.PlayerQuestions[0].Id, restored.Setup.PlayerResponses[0].QuestionId);
         var restoredTurn = Assert.Single(await repository.GetTurnsAsync(restoredId));
         Assert.Equal(restoredId, restoredTurn.StoryStateId);
         Assert.Equal(restored.CurrentStoryBible.Entries[0].Id, Assert.Single(restoredTurn.RelevantStoryBibleEntryIds));
@@ -346,19 +343,17 @@ public sealed class PersistenceTests : IDisposable
     private static StoryDefinition Definition()
     {
         var now = DateTimeOffset.UtcNow;
-        return new(Guid.NewGuid(), "Definition", "Prompt", [], new([]), [], 0, now, now);
+        return new(Guid.NewGuid(), "Definition", "Prompt", new([]), [], 0, now, now);
     }
 
     private static (StoryState, StoryTurn) State()
     {
         var id = Guid.NewGuid();
-        var question = new PlayerQuestion(Guid.NewGuid(), "Name?", "Required", 0);
         var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Fact", "Content", 3, 0);
         var bible = new StoryBible([entry]);
-        var definition = new StoryDefinitionSnapshot("Story", "Prompt", [question], bible);
+        var definition = new StoryDefinitionSnapshot("Story", "Prompt", bible);
         var now = DateTimeOffset.UtcNow;
-        var response = new PlayerResponse(question.Id, question.Question, question.ValidationInstruction, "Alex");
-        var state = new StoryState(id, "Story", null, new(definition, [response]), bible, [], 0, now, null, 0);
+        var state = new StoryState(id, "Story", null, new(definition), bible, [], 0, now, null, 0);
         var turn = new StoryTurn(Guid.NewGuid(), id, 0, null, "Opening", ["Continue"], [entry.Id], [], now, new("model", null, null, null));
         return (state, turn);
     }

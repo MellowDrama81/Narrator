@@ -1,7 +1,5 @@
 namespace Mellow.Narrator.Core;
 
-public sealed record PlayerQuestion(Guid Id, string Question, string ValidationInstruction, int SortOrder);
-
 public sealed record StoryBible(IReadOnlyList<StoryBibleEntry> Entries)
 {
     public static StoryBible Empty { get; } = new([]);
@@ -46,21 +44,24 @@ public sealed record StoryDefinition(
     Guid Id,
     string Title,
     string StoryPrompt,
-    IReadOnlyList<PlayerQuestion> PlayerQuestions,
     StoryBible InitialStoryBible,
     IReadOnlyList<StoryBibleMaintenanceRecord> StoryBibleMaintenanceHistory,
     int SortOrder,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc)
+{
+    public string InitialEventsPrompt { get; init; } = "";
+}
 
 public sealed record StoryDefinitionSnapshot(
     string Title,
     string StoryPrompt,
-    IReadOnlyList<PlayerQuestion> PlayerQuestions,
-    StoryBible InitialStoryBible);
+    StoryBible InitialStoryBible)
+{
+    public string InitialEventsPrompt { get; init; } = "";
+}
 
-public sealed record PlayerResponse(Guid QuestionId, string Question, string ValidationInstruction, string Answer);
-public sealed record StorySetupSnapshot(StoryDefinitionSnapshot Definition, IReadOnlyList<PlayerResponse> PlayerResponses);
+public sealed record StorySetupSnapshot(StoryDefinitionSnapshot Definition);
 
 public sealed record StoryState(
     Guid Id,
@@ -102,24 +103,17 @@ public sealed record StoryStateSummary(Guid Id, string Label, int SortOrder, Dat
 public sealed record StoryPromptDraft(
     Guid? SourceStoryDefinitionId,
     string Title,
-    string StoryPrompt,
-    IReadOnlyList<PlayerQuestionDraft> PlayerQuestions);
-
-public sealed record PlayerQuestionDraft(Guid Id, string Question, string ValidationInstruction, int SortOrder);
-public enum PlayerAnswerValidationStatus { NotValidated, Valid, Warning, AcceptedWithWarning }
-public sealed record PlayerAnswerDraft(Guid QuestionId, string Answer, PlayerAnswerValidationStatus ValidationStatus, string? ValidationWarning);
+    string StoryPrompt);
 
 public sealed record StartStoryDraft(
     Guid SourceStoryDefinitionId,
-    StoryDefinitionSnapshot Definition,
-    int CurrentQuestionIndex,
-    IReadOnlyList<PlayerAnswerDraft> PlayerAnswers)
+    StoryDefinitionSnapshot Definition)
 {
     public IReadOnlyList<StoryBibleMaintenanceRecord> StoryBibleMaintenanceHistory { get; init; } = [];
 }
 
-public enum TabType { Settings, StoryDefinitionList, PlayStoryList, StoryDefinition, StoryPrompt, StartStory, PlayStory }
-public enum PendingOperationType { GenerateStoryDefinition, ValidatePlayerAnswer, GenerateOpeningScene, GenerateStoryTurn, DiscoverModels, TestApiConnection }
+public enum TabType { Settings, StoryDefinitionList, PlayStoryList, StoryDefinition, StoryPrompt, PlayStory }
+public enum PendingOperationType { GenerateStoryDefinition, GenerateOpeningScene, GenerateStoryTurn, DiscoverModels, TestApiConnection }
 
 public sealed record PendingOperationState(
     Guid OperationId,
@@ -136,7 +130,6 @@ public sealed record OpenTabState(
     int Position,
     Guid? DurableRecordId,
     StoryPromptDraft? StoryPromptDraft,
-    StartStoryDraft? StartStoryDraft,
     PlayStoryTabState? PlayStoryTabState,
     PendingOperationState? PendingOperation);
 

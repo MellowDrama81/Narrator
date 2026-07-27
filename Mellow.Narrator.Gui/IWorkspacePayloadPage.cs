@@ -5,7 +5,6 @@ namespace Mellow.Narrator.Gui;
 internal interface IWorkspacePayloadPage
 {
     StoryPromptDraft? StoryPromptDraft => null;
-    StartStoryDraft? StartStoryDraft => null;
     PlayStoryTabState? PlayStoryTabState => null;
     PendingOperationState? PendingOperation => null;
 }

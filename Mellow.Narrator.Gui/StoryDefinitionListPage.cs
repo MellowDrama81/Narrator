@@ -3,13 +3,17 @@ using Mellow.Narrator.Core;
 
 namespace Mellow.Narrator.Gui;
 
-public sealed class StoryDefinitionListPage : ContentPage
+public sealed class StoryDefinitionListPage : ContentPage, IWorkspacePayloadPage, IInFlightRequestPage
 {
     private readonly IStoryDefinitionRepository _repository;
     private readonly INarratorApplication _application;
     private readonly MainTabbedPage _tabs;
     private readonly ObservableCollection<StoryDefinitionSummary> _items = [];
     private readonly CollectionView _list;
+    private readonly ActivityIndicator _startBusy = new();
+    private readonly Label _status = new() { TextColor = Colors.DarkOrange };
+    private CancellationTokenSource? _request;
+    private PendingOperationState? _pendingOperation;
 
     public StoryDefinitionListPage(
         IStoryDefinitionRepository repository,
@@ -37,25 +41,45 @@ public sealed class StoryDefinitionListPage : ContentPage
         var grid = new Grid
         {
             Padding = 16,
-            RowDefinitions = { new(GridLength.Auto), new(GridLength.Auto), new(GridLength.Star) },
+            RowDefinitions = { new(GridLength.Auto), new(GridLength.Auto), new(GridLength.Auto), new(GridLength.Star) },
             Children =
             {
                 Ui.Heading("Story Definitions"),
                 Ui.Buttons(
                     Ui.Button("New", (_, _) => _tabs.OpenPrompt()),
                     Ui.Button("Open", (_, _) => { if (Selected is { } x) _tabs.OpenDefinition(x.Id); }),
-                    Ui.Button("Start", (_, _) => { if (Selected is { } x) _tabs.OpenStart(x.Id); }),
+                    Ui.Button("Start", async (_, _) => await StartAsync()),
                     Ui.Button("Import", Import),
                     Ui.Button("Export", Export),
                     Ui.Button("Earlier", async (_, _) => await Move(-1)),
                     Ui.Button("Later", async (_, _) => await Move(1)),
-                    Ui.Button("Delete", Delete)),
+                    Ui.Button("Delete", Delete),
+                    _startBusy),
+                _status,
                 _list
             }
         };
         grid.SetRow(grid.Children[1], 1);
-        grid.SetRow(_list, 2);
+        grid.SetRow(_status, 2);
+        grid.SetRow(_list, 3);
         Content = grid;
+    }
+
+    PendingOperationState? IWorkspacePayloadPage.PendingOperation => _pendingOperation;
+    bool IInFlightRequestPage.HasInFlightRequest => _request is not null;
+    async Task IInFlightRequestPage.CancelInFlightRequestAsync(bool preserveInterruptedMarker)
+    {
+        var marker = preserveInterruptedMarker ? _pendingOperation : null;
+        _request?.Cancel();
+        while (_request is not null) await Task.Delay(20);
+        if (marker is not null) _pendingOperation = marker;
+    }
+
+    internal void RestoreInterruptedOperation(PendingOperationState? operation)
+    {
+        if (operation?.Type is not PendingOperationType.GenerateOpeningScene) return;
+        _pendingOperation = null;
+        _status.Text = "The previous story start was interrupted. Select the Story Definition and choose Start to retry.";
     }
 
     private StoryDefinitionSummary? Selected => _list.SelectedItem as StoryDefinitionSummary;
@@ -74,6 +98,40 @@ public sealed class StoryDefinitionListPage : ContentPage
             foreach (var item in await _repository.ListAsync()) _items.Add(item);
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private async Task StartAsync()
+    {
+        if (_request is not null || Selected is not { } selected) return;
+        var retry = false;
+        try
+        {
+            _request = new();
+            _startBusy.IsRunning = true;
+            _status.Text = "";
+            var targetStateId = Guid.NewGuid();
+            _pendingOperation = new(Guid.NewGuid(), PendingOperationType.GenerateOpeningScene, targetStateId, null, DateTimeOffset.UtcNow);
+            await _tabs.SaveWorkspaceNowAsync();
+            await _tabs.StartStoryAsync(selected.Id, targetStateId, replaceCurrent: false, _request.Token);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            retry = await DisplayActionSheetAsync(
+                $"Starting the story failed: {ex.Message}",
+                "Cancel",
+                null,
+                "Retry") == "Retry";
+        }
+        finally
+        {
+            _pendingOperation = null;
+            _startBusy.IsRunning = false;
+            _request?.Dispose();
+            _request = null;
+            await _tabs.SaveWorkspaceNowAsync();
+        }
+        if (retry) await StartAsync();
     }
 
     private async Task Move(int delta)

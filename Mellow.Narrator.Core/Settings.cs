@@ -12,7 +12,6 @@ public static class LoggingDefaults
 }
 
 public sealed record PromptTemplateSettings(
-    string PlayerAnswerValidationInstruction,
     string StoryDefinitionInstruction,
     string StoryNarrationInstruction,
     string CorrectiveRetryInstruction,
@@ -29,7 +28,6 @@ public static class PromptTemplateDefaults
     public const string MaxSuggestedActionsPlaceholder = "{maxSuggestedActions}";
 
     public static PromptTemplateSettings Create() => new(
-        "You validate one interactive-story setup answer. Apply the validation instruction in context. Return JSON only. A failed rule is advisory: set hasWarning true and explain concisely.",
         """
         Refine the Story Prompt and create the initial Story Bible for an interactive story.
         The Story Prompt is sent verbatim with every request for the entire story, so it must contain only
@@ -37,18 +35,29 @@ public static class PromptTemplateDefaults
         Anything that can change over the course of the story — character states, locations, relationships,
         inventory, objectives, or any other mutable detail — must not remain in the Story Prompt; move it into
         Story Bible entries instead. Rewrite the Story Prompt to keep only what is truly immutable, moving
-        everything else into Story Bible entries. Include every durable fact required to narrate consistently.
-        Keep entries concise, avoid duplicates, and assign importance 1 through 5. Return JSON only.
+        everything else into Story Bible entries. Also write an Initial Events prompt describing the starting
+        state of the story and anything that should happen in the first few scenes. Unlike the Story Prompt,
+        the Initial Events prompt is supplied only for the earliest turns and is dropped once enough real
+        history has accumulated, so anything that must be remembered later belongs in the Story Bible instead,
+        not there. Leave it empty if the opening needs no guidance beyond the Story Prompt and Story Bible.
+        Include every durable fact required to narrate consistently. Keep entries concise, avoid duplicates,
+        and assign importance 1 through 5. Also propose a concise, evocative title for the story; it is used
+        only if the user did not already provide one. Return JSON only.
         """,
         $"""
         You narrate an interactive story. Return JSON only. The Story Bible is authoritative and complete.
-        Narrate the immediate scene, offer between {MinSuggestedActionsPlaceholder} and {MaxSuggestedActionsPlaceholder} concise suggested actions, flag every existing Bible entry relevant now,
+        Narrate in second person and present tense, as though it is happening to the player right now
+        (for example, "You push open the door and the room falls silent," not "She pushed open the door"
+        or "You will push open the door"). Narrate the immediate scene, offer between {MinSuggestedActionsPlaceholder} and {MaxSuggestedActionsPlaceholder} concise suggested actions, flag every existing Bible entry relevant now,
         and return only incremental Story Bible updates. Resolve the current player action from the final request,
         advance beyond the most recent narration, and never answer an older action or repeat an earlier scene.
         For an add update, always set entryId to null because the application assigns the ID. Never invent IDs.
         For replace and remove updates, use only an existing Story Bible entry ID supplied in the request.
         In relevantStoryBibleEntryIds, use only IDs copied exactly from the current Story Bible. Never invent IDs.
         Preserve durable facts, replace rather than duplicate, remove obsolete facts, and assign importance 1 through 5.
+        A message with contextType "initialEvents", when present, describes the intended starting state and
+        early scenes; it is only supplied for the earliest turns and will silently stop appearing once enough
+        real history has accumulated, so never treat its absence as something having changed.
         """,
         $"Your previous response failed validation: {ValidationErrorPlaceholder}. Return a corrected JSON object only.",
         $"Return an object matching this JSON Schema exactly: {SchemaPlaceholder}",
@@ -69,9 +78,6 @@ public sealed record ContentLimitSettings(
     int MaxStoryTitleCharacters,
     int MaxStoryLabelCharacters,
     int MaxStoryPromptCharacters,
-    int MaxPlayerQuestionCharacters,
-    int MaxValidationInstructionCharacters,
-    int MaxPlayerAnswerCharacters,
     int MaxPlayerActionCharacters,
     int MaxNarrationCharacters,
     int MaxSuggestedActions,
@@ -123,7 +129,7 @@ public static class NarratorDefaults
         new(null, null, null),
         new(8, 200, 4000, 60000, 80),
         new(2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(60)),
-        new(200, 200, 20000, 1000, 2000, 4000, 4000, 20000, 3, 500, 100, 200, 100, 2 * 1024 * 1024),
+        new(200, 200, 20000, 4000, 20000, 3, 500, 100, 200, 100, 2 * 1024 * 1024),
         new(false, StructuredOutputTier.Untested, null, null));
 }
 
@@ -157,9 +163,6 @@ public static class SettingsValidator
         Range(errors, nameof(c.MaxStoryTitleCharacters), c.MaxStoryTitleCharacters, 1, 1000);
         Range(errors, nameof(c.MaxStoryLabelCharacters), c.MaxStoryLabelCharacters, 1, 1000);
         Range(errors, nameof(c.MaxStoryPromptCharacters), c.MaxStoryPromptCharacters, 100, 200000);
-        Range(errors, nameof(c.MaxPlayerQuestionCharacters), c.MaxPlayerQuestionCharacters, 1, 10000);
-        Range(errors, nameof(c.MaxValidationInstructionCharacters), c.MaxValidationInstructionCharacters, 1, 20000);
-        Range(errors, nameof(c.MaxPlayerAnswerCharacters), c.MaxPlayerAnswerCharacters, 1, 50000);
         Range(errors, nameof(c.MaxPlayerActionCharacters), c.MaxPlayerActionCharacters, 1, 50000);
         Range(errors, nameof(c.MaxNarrationCharacters), c.MaxNarrationCharacters, 100, 200000);
         Range(errors, nameof(c.MinSuggestedActions), c.MinSuggestedActions, 1, 20);
@@ -184,7 +187,6 @@ public static class SettingsValidator
             return;
         }
 
-        Prompt(errors, nameof(templates.PlayerAnswerValidationInstruction), templates.PlayerAnswerValidationInstruction);
         Prompt(errors, nameof(templates.StoryDefinitionInstruction), templates.StoryDefinitionInstruction);
         Prompt(errors, nameof(templates.StoryNarrationInstruction), templates.StoryNarrationInstruction);
         Prompt(errors, nameof(templates.CorrectiveRetryInstruction), templates.CorrectiveRetryInstruction);

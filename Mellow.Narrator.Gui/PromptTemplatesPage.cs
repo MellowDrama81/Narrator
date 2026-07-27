@@ -5,7 +5,6 @@ namespace Mellow.Narrator.Gui;
 public sealed class PromptTemplatesPage : ContentPage
 {
     private readonly INarratorApplication _app;
-    private readonly Editor _answerValidation = TemplateEditor();
     private readonly Editor _storyDefinition = TemplateEditor();
     private readonly Editor _storyNarration = TemplateEditor(180);
     private readonly Editor _correctiveRetry = TemplateEditor();
@@ -22,10 +21,9 @@ public sealed class PromptTemplatesPage : ContentPage
         content.Children.Add(Ui.Heading("Prompt Templates"));
         content.Children.Add(new Label
         {
-            Text = "These instructions apply to every subsequent LLM request. Story Prompts and player-question validation rules remain part of each Story Definition.",
+            Text = "These instructions apply to every subsequent LLM request. Story Prompts remain part of each Story Definition.",
             FontSize = 12
         });
-        Add(content, "Player-answer validation instruction", _answerValidation);
         Add(content, "Initial Story Bible instruction", _storyDefinition);
         Add(content, "Story narration instruction", _storyNarration);
         Add(
@@ -84,7 +82,6 @@ public sealed class PromptTemplatesPage : ContentPage
     private void Reset(object? sender, EventArgs e) => Load(PromptTemplateDefaults.Create());
 
     private PromptTemplateSettings Build() => new(
-        _answerValidation.Text ?? "",
         _storyDefinition.Text ?? "",
         _storyNarration.Text ?? "",
         _correctiveRetry.Text ?? "",
@@ -94,7 +91,6 @@ public sealed class PromptTemplatesPage : ContentPage
 
     private void Load(PromptTemplateSettings templates)
     {
-        _answerValidation.Text = templates.PlayerAnswerValidationInstruction;
         _storyDefinition.Text = templates.StoryDefinitionInstruction;
         _storyNarration.Text = templates.StoryNarrationInstruction;
         _correctiveRetry.Text = templates.CorrectiveRetryInstruction;

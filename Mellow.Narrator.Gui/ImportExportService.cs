@@ -48,6 +48,19 @@ internal static class ImportExportService
         await SaveJsonAsync($"{Safe(state.Label)}-story.json", document);
     }
 
+    public static async Task ExportNarrationHistoryAsync(StoryState state, IReadOnlyList<StoryTurn> turns)
+    {
+        var text = string.Join(
+            Environment.NewLine + Environment.NewLine,
+            turns.OrderBy(x => x.SequenceNumber).Select(FormatTurn));
+        await SaveTextAsync($"{Safe(state.Label)}-history.txt", text);
+    }
+
+    private static string FormatTurn(StoryTurn turn) =>
+        turn.PlayerAction is null
+            ? turn.Narration
+            : $"> {turn.PlayerAction}{Environment.NewLine}{Environment.NewLine}{turn.Narration}";
+
     public static async Task<StoryState?> ImportStateAsync(
         IStoryStateRepository repository,
         INarratorApplication application)
@@ -75,6 +88,18 @@ internal static class ImportExportService
         await using var stream = new MemoryStream();
         await JsonSerializer.SerializeAsync(stream, value, Json);
         stream.Position = 0;
+        FileSaverResult result;
+        try { result = await FileSaver.Default.SaveAsync(fileName, stream); }
+        catch (OperationCanceledException) { return; }
+        if (result.IsSuccessful) return;
+        if (result.Exception is null or OperationCanceledException) return;
+        throw new IOException("The export could not be saved.", result.Exception);
+    }
+
+    private static async Task SaveTextAsync(string fileName, string text)
+    {
+        await EnsureStoragePermissionAsync();
+        await using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(text));
         FileSaverResult result;
         try { result = await FileSaver.Default.SaveAsync(fileName, stream); }
         catch (OperationCanceledException) { return; }

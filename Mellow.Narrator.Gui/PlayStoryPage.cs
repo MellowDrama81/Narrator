@@ -16,12 +16,10 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
     private readonly VerticalStackLayout _bible = new();
     private readonly VerticalStackLayout _history = new() { IsVisible = false, Spacing = 8 };
     private readonly Label _limitWarning = new() { TextColor = Colors.DarkOrange };
-    private readonly Button _loadAllTurns;
     private readonly ScrollView _story;
     private CancellationTokenSource? _request;
     private PendingOperationState? _pendingOperation;
     private bool _historyLoaded;
-    private bool _allTurnsLoaded;
 
     public PlayStoryPage(
         Guid stateId,
@@ -38,11 +36,6 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
         _pendingOperation = restoredOperation;
         _action.Text = restoredState?.PendingPlayerAction ?? "";
         _copy = Ui.Button("Copy Story", Copy);
-        _loadAllTurns = Ui.Button("Load complete narration history", async (_, _) =>
-        {
-            _allTurnsLoaded = true;
-            await Refresh();
-        });
         Title = "Play Story";
         _story = new ScrollView
         {
@@ -51,8 +44,8 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
                 Spacing = 8,
                 Children =
                 {
-                    _limitWarning, _narration, _loadAllTurns, Ui.Heading("Suggested Actions"), _suggestions, _action,
-                    Ui.Buttons(Ui.Button("Continue", Play), _copy, Ui.Button("Export", Export)),
+                    _limitWarning, _narration, Ui.Heading("Suggested Actions"), _suggestions, _action,
+                    Ui.Buttons(Ui.Button("Continue", Play), _copy, Ui.Button("Export", Export), Ui.Button("Export Full History", ExportHistory)),
                     _busy
                 }
             }
@@ -79,13 +72,16 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
             Children = { _story, sidePanel }
         };
         Grid.SetColumn(sidePanel, 1);
-        var sidePanelToggle = Ui.Button("Show / hide Story Bible", (_, _) =>
+        var sidePanelToggle = Ui.Button("Story Bible", (_, _) =>
         {
             var show = !sidePanel.IsVisible;
             sidePanel.IsVisible = show;
             sidePanelColumn.Width = show ? new GridLength(1, GridUnitType.Star) : new GridLength(0, GridUnitType.Absolute);
             columns.ColumnSpacing = show ? 16 : 0;
         });
+        sidePanelToggle.HorizontalOptions = LayoutOptions.End;
+        sidePanelToggle.FontSize = 12;
+        sidePanelToggle.Padding = new Thickness(8, 2);
         var layout = new Grid
         {
             Padding = 16,
@@ -162,8 +158,7 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
             _narration.Children.Clear();
             var turns = await _repository.GetTurnsAsync(
                 _stateId,
-                _allTurnsLoaded ? null : Math.Max(1, settings.StoryGeneration.RecentTurnCount));
-            _loadAllTurns.IsVisible = !_allTurnsLoaded && state.LastCommittedTurnSequence + 1 > turns.Count;
+                Math.Max(1, settings.StoryGeneration.RecentTurnCount));
             View? latestTurnAnchor = null;
             foreach (var turn in turns)
             {
@@ -306,6 +301,17 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
             var snapshot = await _repository.GetSnapshotAsync(_stateId)
                 ?? throw new NarratorException("Story State not found.");
             await ImportExportService.ExportStateAsync(snapshot.State, snapshot.Turns);
+        }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private async void ExportHistory(object? sender, EventArgs e)
+    {
+        try
+        {
+            var snapshot = await _repository.GetSnapshotAsync(_stateId)
+                ?? throw new NarratorException("Story State not found.");
+            await ImportExportService.ExportNarrationHistoryAsync(snapshot.State, snapshot.Turns);
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }

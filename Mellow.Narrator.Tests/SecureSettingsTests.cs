@@ -143,11 +143,6 @@ public sealed class SecureSettingsTests
             return Task.FromResult(new ConnectionTestResult(true, [], settings.Capabilities, null));
         }
 
-        public Task<PlayerAnswerValidationResponse> ValidatePlayerAnswerAsync(
-            ApiConnectionSettings settings, string? credential, PlayerQuestion question, string answer,
-            IReadOnlyList<PlayerResponse> previousAnswers, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
         public Task<StoryDefinitionGenerationResponse> GenerateStoryDefinitionAsync(
             ApiConnectionSettings settings, string? credential, string storyPrompt,
             CancellationToken cancellationToken = default) =>

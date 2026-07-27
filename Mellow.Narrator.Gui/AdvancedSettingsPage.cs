@@ -20,9 +20,6 @@ public sealed class AdvancedSettingsPage : ContentPage
         ["title"] = "default 200; range 1–1000",
         ["label"] = "default 200; range 1–1000",
         ["prompt"] = "default 20000; range 100–200000",
-        ["question"] = "default 1000; range 1–10000",
-        ["validation"] = "default 2000; range 1–20000",
-        ["answer"] = "default 4000; range 1–50000",
         ["action"] = "default 4000; range 1–50000",
         ["narration"] = "default 20000; range 100–200000",
         ["suggestedMin"] = "default 2; range 1–20; must not exceed the maximum",
@@ -78,9 +75,6 @@ public sealed class AdvancedSettingsPage : ContentPage
         Add(content, "Title characters", "title");
         Add(content, "Label characters", "label");
         Add(content, "Story Prompt characters", "prompt");
-        Add(content, "Question characters", "question");
-        Add(content, "Validation instruction characters", "validation");
-        Add(content, "Answer characters", "answer");
         Add(content, "Player action characters", "action");
         Add(content, "Narration characters", "narration");
         Add(content, "Minimum suggested actions", "suggestedMin");
@@ -119,8 +113,8 @@ public sealed class AdvancedSettingsPage : ContentPage
                     StoryBibleWarningPercent = Int("bibleWarning")
                 },
                 Retry = new(Int("retries"), Seconds("retryInitial"), Seconds("retryMax"), Seconds("retryAfter")),
-                ContentLimits = new(Int("title"), Int("label"), Int("prompt"), Int("question"), Int("validation"),
-                    Int("answer"), Int("action"), Int("narration"), Int("suggestedCount"), Int("suggestedLength"),
+                ContentLimits = new(Int("title"), Int("label"), Int("prompt"), Int("action"), Int("narration"),
+                    Int("suggestedCount"), Int("suggestedLength"),
                     Int("category"), Int("name"), Int("updates"), Int("responseBytes"))
                 {
                     MinSuggestedActions = Int("suggestedMin")
@@ -183,7 +177,6 @@ public sealed class AdvancedSettingsPage : ContentPage
         Set("retries", s.Retry.MaxAutomaticRetries); Set("retryInitial", s.Retry.InitialDelay.TotalSeconds); Set("retryMax", s.Retry.MaxDelay.TotalSeconds); Set("retryAfter", s.Retry.MaxRetryAfter.TotalSeconds);
         var c = s.ContentLimits;
         Set("title", c.MaxStoryTitleCharacters); Set("label", c.MaxStoryLabelCharacters); Set("prompt", c.MaxStoryPromptCharacters);
-        Set("question", c.MaxPlayerQuestionCharacters); Set("validation", c.MaxValidationInstructionCharacters); Set("answer", c.MaxPlayerAnswerCharacters);
         Set("action", c.MaxPlayerActionCharacters); Set("narration", c.MaxNarrationCharacters);
         Set("suggestedMin", c.MinSuggestedActions); Set("suggestedCount", c.MaxSuggestedActions);
         Set("suggestedLength", c.MaxSuggestedActionCharacters); Set("category", c.MaxStoryBibleCategoryCharacters); Set("name", c.MaxStoryBibleNameCharacters);

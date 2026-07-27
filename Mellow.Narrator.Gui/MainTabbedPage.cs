@@ -8,6 +8,7 @@ public sealed class MainTabbedPage : TabbedPage
     private readonly IServiceProvider _services;
     private readonly IWorkspaceStateStore _workspace;
     private readonly SettingsPage _settingsPage;
+    private readonly StoryDefinitionListPage _definitionListPage;
     private bool _restored;
     private CancellationTokenSource? _saveDebounce;
 
@@ -21,10 +22,11 @@ public sealed class MainTabbedPage : TabbedPage
             _services.GetRequiredService<ITrashStore>(),
             this);
         AddFixed(_settingsPage, TabType.Settings);
-        AddFixed(new StoryDefinitionListPage(
+        _definitionListPage = new StoryDefinitionListPage(
             _services.GetRequiredService<IStoryDefinitionRepository>(),
             _services.GetRequiredService<INarratorApplication>(),
-            this), TabType.StoryDefinitionList);
+            this);
+        AddFixed(_definitionListPage, TabType.StoryDefinitionList);
         AddFixed(new StoryStateListPage(
             _services.GetRequiredService<IStoryStateRepository>(),
             _services.GetRequiredService<INarratorApplication>(),
@@ -33,7 +35,7 @@ public sealed class MainTabbedPage : TabbedPage
         Loaded += async (_, _) => await RestoreAsync();
     }
 
-    public void OpenDefinition(Guid id)
+    public void OpenDefinition(Guid id, PendingOperationState? restoredOperation = null)
     {
         var existing = Find(TabType.StoryDefinition, id);
         if (existing is not null) { CurrentPage = existing; return; }
@@ -41,7 +43,8 @@ public sealed class MainTabbedPage : TabbedPage
             id,
             _services.GetRequiredService<IStoryDefinitionRepository>(),
             _services.GetRequiredService<INarratorApplication>(),
-            this), TabType.StoryDefinition, id);
+            this,
+            restoredOperation), TabType.StoryDefinition, id);
     }
 
     public void OpenSettings() => CurrentPage = Children.OfType<NarratorNavigationPage>().First(x => x.TabType == TabType.Settings);
@@ -49,9 +52,9 @@ public sealed class MainTabbedPage : TabbedPage
     public async Task<bool> CloseDefinitionTabsForDeletionAsync(Guid definitionId)
     {
         var related = Children.OfType<NarratorNavigationPage>()
-            .Where(x => x.RecordId == definitionId && x.TabType is TabType.StoryDefinition or TabType.StoryPrompt or TabType.StartStory)
+            .Where(x => x.RecordId == definitionId && x.TabType is TabType.StoryDefinition or TabType.StoryPrompt)
             .ToArray();
-        foreach (var temporary in related.Where(x => x.TabType is TabType.StoryPrompt or TabType.StartStory))
+        foreach (var temporary in related.Where(x => x.TabType is TabType.StoryPrompt))
         {
             if (!await DisplayAlertAsync(
                     "Discard temporary progress?",
@@ -94,12 +97,42 @@ public sealed class MainTabbedPage : TabbedPage
             _services.GetRequiredService<INarratorApplication>(), this, restoredDraft, restoredOperation), TabType.StoryPrompt, id);
     }
 
-    public void OpenStart(
-        Guid id,
-        StartStoryDraft? restoredDraft = null,
-        PendingOperationState? restoredOperation = null) =>
-        AddDynamic(new StartStoryPage(id, _services.GetRequiredService<IStoryDefinitionRepository>(),
-            _services.GetRequiredService<INarratorApplication>(), this, restoredDraft, restoredOperation), TabType.StartStory, id);
+    /// <summary>
+    /// Resolves a Story Definition's Story Bible against current limits (offering a cull if needed),
+    /// generates the opening scene, and navigates to the resulting Play Story tab. Returns null if the
+    /// user backed out of a limits/cull prompt; throws on a genuine failure so the caller can offer retry.
+    /// </summary>
+    public async Task<StoryState?> StartStoryAsync(Guid definitionId, Guid targetStateId, bool replaceCurrent, CancellationToken cancellationToken = default)
+    {
+        var definitions = _services.GetRequiredService<IStoryDefinitionRepository>();
+        var app = _services.GetRequiredService<INarratorApplication>();
+        var source = await definitions.GetAsync(definitionId) ?? throw new NarratorException("Story Definition not found.");
+        var settings = await app.GetSettingsAsync();
+        if (!StoryBibleProcessor.IsWithinLimits(source.InitialStoryBible, settings.StoryGeneration))
+        {
+            var choice = await DisplayActionSheetAsync(
+                "The Story Bible exceeds current limits.",
+                "Cancel",
+                null,
+                "Increase Limits",
+                "Automatically Cull");
+            if (choice == "Increase Limits") { OpenSettings(); return null; }
+            if (choice != "Automatically Cull") return null;
+            var preview = StoryBibleProcessor.CullToLimits(source.InitialStoryBible, settings.StoryGeneration);
+            var names = string.Join(Environment.NewLine, preview.Changes.Select(x => $"• {x.Before?.Name}"));
+            if (!await DisplayAlertAsync("Cull Story Bible?", $"These entries will be removed:\n{names}", "Cull", "Cancel")) return null;
+            source = await app.CullDefinitionAsync(definitionId);
+        }
+        var definition = new StoryDefinitionSnapshot(source.Title, source.StoryPrompt, source.InitialStoryBible)
+        {
+            InitialEventsPrompt = source.InitialEventsPrompt
+        };
+        var draft = new StartStoryDraft(definitionId, definition);
+        var result = await app.StartStoryAsync(draft, targetStateId, cancellationToken);
+        if (replaceCurrent) await ReplaceCurrentWithPlayAsync(result.State.Id);
+        else OpenPlay(result.State.Id);
+        return result.State;
+    }
 
     public void OpenPlay(
         Guid id,
@@ -133,14 +166,6 @@ public sealed class MainTabbedPage : TabbedPage
         var previous = CurrentPage;
         if (previous is NarratorNavigationPage page && !page.IsFixed) Children.Remove(previous);
         OpenPlay(id);
-        await SaveWorkspaceAsync();
-    }
-
-    public async Task ReplaceCurrentWithStartAsync(Guid id)
-    {
-        var previous = CurrentPage;
-        if (previous is NarratorNavigationPage page && !page.IsFixed) Children.Remove(previous);
-        OpenStart(id);
         await SaveWorkspaceAsync();
     }
 
@@ -216,9 +241,15 @@ public sealed class MainTabbedPage : TabbedPage
             }
             _settingsPage.RestoreInterruptedOperation(
                 state.Tabs.FirstOrDefault(x => x.Type == TabType.Settings)?.PendingOperation);
+            var listPending = state.Tabs.FirstOrDefault(x => x.Type == TabType.StoryDefinitionList)?.PendingOperation;
+            if (listPending is { Type: PendingOperationType.GenerateOpeningScene, TargetRecordId: { } listStateId } &&
+                await _services.GetRequiredService<IStoryStateRepository>().GetAsync(listStateId) is not null)
+                OpenPlay(listStateId);
+            else
+                _definitionListPage.RestoreInterruptedOperation(listPending);
             foreach (var tab in state.Tabs.OrderBy(x => x.Position).Where(x => x.Position >= 3))
             {
-                if (tab.Type is TabType.StoryDefinition or TabType.StartStory or TabType.StoryPrompt &&
+                if (tab.Type is TabType.StoryDefinition or TabType.StoryPrompt &&
                     tab.DurableRecordId is { } referencedDefinition &&
                     await _services.GetRequiredService<IStoryDefinitionRepository>().GetAsync(referencedDefinition) is null)
                     continue;
@@ -236,12 +267,12 @@ public sealed class MainTabbedPage : TabbedPage
                         restoredPages[tab.TabId] = completedPage;
                     continue;
                 }
-                if (tab.PendingOperation is { Type: PendingOperationType.GenerateOpeningScene, TargetRecordId: { } stateId } &&
-                    await _services.GetRequiredService<IStoryStateRepository>().GetAsync(stateId) is not null)
+                if (tab.PendingOperation is { Type: PendingOperationType.GenerateOpeningScene, TargetRecordId: { } openedStateId } &&
+                    await _services.GetRequiredService<IStoryStateRepository>().GetAsync(openedStateId) is not null)
                 {
-                    OpenPlay(stateId);
-                    if (CurrentPage is NarratorNavigationPage completedPage)
-                        restoredPages[tab.TabId] = completedPage;
+                    OpenPlay(openedStateId);
+                    if (CurrentPage is NarratorNavigationPage completedPlayPage)
+                        restoredPages[tab.TabId] = completedPlayPage;
                     continue;
                 }
                 var playState = tab.PlayStoryTabState;
@@ -263,17 +294,12 @@ public sealed class MainTabbedPage : TabbedPage
                 }
                 else if (tab.DurableRecordId is { } id && tab.Type == TabType.StoryDefinition)
                 {
-                    OpenDefinition(id);
+                    OpenDefinition(id, pending);
                     restored = true;
                 }
                 else if (tab.DurableRecordId is { } playId && tab.Type == TabType.PlayStory)
                 {
                     OpenPlay(playId, playState, pending);
-                    restored = true;
-                }
-                else if (tab.DurableRecordId is { } startId && tab.Type == TabType.StartStory)
-                {
-                    OpenStart(startId, tab.StartStoryDraft, pending);
                     restored = true;
                 }
                 if (restored && CurrentPage is NarratorNavigationPage restoredPage)
@@ -305,7 +331,7 @@ public sealed class MainTabbedPage : TabbedPage
         {
             var payload = x.RootPage as IWorkspacePayloadPage;
             return new OpenTabState(x.TabId, x.TabType, i, x.RecordId,
-                payload?.StoryPromptDraft, payload?.StartStoryDraft, payload?.PlayStoryTabState, payload?.PendingOperation);
+                payload?.StoryPromptDraft, payload?.PlayStoryTabState, payload?.PendingOperation);
         }).ToArray();
         await _workspace.SaveAsync(new((CurrentPage as NarratorNavigationPage)?.TabId ?? Guid.Empty, tabs));
     }

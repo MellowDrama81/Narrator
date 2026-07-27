@@ -5,9 +5,9 @@ namespace Mellow.Narrator.Tests;
 public sealed class WorkspaceRestorationTests
 {
     [Fact]
-    public void WorkspaceSupportsSevenTabTypes()
+    public void WorkspaceSupportsSixTabTypes()
     {
-        Assert.Equal(7, Enum.GetValues<TabType>().Length);
+        Assert.Equal(6, Enum.GetValues<TabType>().Length);
     }
 
     [Fact]
@@ -49,5 +49,5 @@ public sealed class WorkspaceRestorationTests
     }
 
     private static OpenTabState Tab(TabType type, int position) =>
-        new(Guid.NewGuid(), type, position, null, null, null, null, null);
+        new(Guid.NewGuid(), type, position, null, null, null, null);
 }

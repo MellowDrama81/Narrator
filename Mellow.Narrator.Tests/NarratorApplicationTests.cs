@@ -7,10 +7,10 @@ public sealed class NarratorApplicationTests
     [Fact]
     public async Task GenerateDefinition_UsesRefinedStoryPromptInsteadOfDraftPrompt()
     {
-        var draft = new StoryPromptDraft(null, "Title", "Raw prompt mentioning today's mutable state", []);
+        var draft = new StoryPromptDraft(null, "Title", "Raw prompt mentioning today's mutable state");
         var provider = new FakeProvider
         {
-            DefinitionResponse = new("Refined immutable prompt", [new("fact", "Fact", "Content", 3)])
+            DefinitionResponse = new("Refined immutable prompt", "Suggested Title", "Initial events", [new("fact", "Fact", "Content", 3)])
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
 
@@ -23,10 +23,81 @@ public sealed class NarratorApplicationTests
     [Fact]
     public async Task GenerateDefinition_RejectsEmptyRefinedStoryPrompt()
     {
-        var draft = new StoryPromptDraft(null, "Title", "Raw prompt", []);
+        var draft = new StoryPromptDraft(null, "Title", "Raw prompt");
         var provider = new FakeProvider
         {
-            DefinitionResponse = new("   ", [])
+            DefinitionResponse = new("   ", "Suggested Title", "", [])
+        };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.GenerateDefinitionAsync(draft, false, Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task GenerateDefinition_UsesSuggestedTitleWhenDraftTitleIsBlank()
+    {
+        var draft = new StoryPromptDraft(null, "   ", "Raw prompt");
+        var provider = new FakeProvider
+        {
+            DefinitionResponse = new("Refined prompt", "A Generated Title", "", [])
+        };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
+
+        var definition = await app.GenerateDefinitionAsync(draft, false, Guid.NewGuid());
+
+        Assert.Equal("A Generated Title", definition.Title);
+    }
+
+    [Fact]
+    public async Task GenerateDefinition_KeepsDraftTitleWhenProvided()
+    {
+        var draft = new StoryPromptDraft(null, "My Title", "Raw prompt");
+        var provider = new FakeProvider
+        {
+            DefinitionResponse = new("Refined prompt", "A Generated Title", "", [])
+        };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
+
+        var definition = await app.GenerateDefinitionAsync(draft, false, Guid.NewGuid());
+
+        Assert.Equal("My Title", definition.Title);
+    }
+
+    [Fact]
+    public async Task GenerateDefinition_RejectsEmptySuggestedTitleWhenDraftTitleIsBlank()
+    {
+        var draft = new StoryPromptDraft(null, "", "Raw prompt");
+        var provider = new FakeProvider
+        {
+            DefinitionResponse = new("Refined prompt", "   ", "", [])
+        };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.GenerateDefinitionAsync(draft, false, Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task GenerateDefinition_PersistsGeneratedInitialEventsPrompt()
+    {
+        var draft = new StoryPromptDraft(null, "Title", "Raw prompt");
+        var provider = new FakeProvider
+        {
+            DefinitionResponse = new("Refined prompt", "Suggested Title", "The village is under curfew.", [])
+        };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
+
+        var definition = await app.GenerateDefinitionAsync(draft, false, Guid.NewGuid());
+
+        Assert.Equal("The village is under curfew.", definition.InitialEventsPrompt);
+    }
+
+    [Fact]
+    public async Task GenerateDefinition_RejectsOversizedInitialEventsPrompt()
+    {
+        var draft = new StoryPromptDraft(null, "Title", "Raw prompt");
+        var provider = new FakeProvider
+        {
+            DefinitionResponse = new("Refined prompt", "Suggested Title", new string('x', 20001), [])
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
 
@@ -36,20 +107,15 @@ public sealed class NarratorApplicationTests
     [Fact]
     public async Task StartStory_UsesTemporarySnapshotAndCarriesMaintenance()
     {
-        var question = new PlayerQuestion(Guid.NewGuid(), "Name?", "Required", 0);
         var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Fact", "Content", 3, 0);
-        var snapshot = new StoryDefinitionSnapshot("Snapshot title", "Snapshot prompt", [question], new([entry]));
+        var snapshot = new StoryDefinitionSnapshot("Snapshot title", "Snapshot prompt", new([entry]));
         var maintenance = new StoryBibleMaintenanceRecord(
             Guid.NewGuid(),
             StoryBibleMaintenanceReason.UserApprovedLimitCull,
             new(200, 4000, 60000),
             [],
             DateTimeOffset.UtcNow);
-        var draft = new StartStoryDraft(
-            Guid.NewGuid(),
-            snapshot,
-            1,
-            [new(question.Id, "Alex", PlayerAnswerValidationStatus.AcceptedWithWarning, "Unusual")])
+        var draft = new StartStoryDraft(Guid.NewGuid(), snapshot)
         {
             StoryBibleMaintenanceHistory = [maintenance]
         };
@@ -63,44 +129,11 @@ public sealed class NarratorApplicationTests
         var result = await app.StartStoryAsync(draft, Guid.NewGuid());
 
         Assert.Equal("Snapshot title", result.State.Setup.Definition.Title);
-        Assert.Equal("Alex", Assert.Single(result.State.Setup.PlayerResponses).Answer);
         Assert.Equal(maintenance, Assert.Single(result.State.StoryBibleMaintenanceHistory));
         var clonedEntry = Assert.Single(result.State.Setup.Definition.InitialStoryBible.Entries);
         Assert.NotEqual(entry.Id, clonedEntry.Id);
         Assert.Equal(clonedEntry.Id, Assert.Single(result.Opening.RelevantStoryBibleEntryIds));
         Assert.Equal("story-model", result.Opening.Generation.ModelId);
-    }
-
-    [Fact]
-    public async Task StartStory_RejectsUnvalidatedAnswerWithoutCallingProvider()
-    {
-        var question = new PlayerQuestion(Guid.NewGuid(), "Name?", "Required", 0);
-        var draft = new StartStoryDraft(
-            Guid.NewGuid(),
-            new("Story", "Prompt", [question], StoryBible.Empty),
-            0,
-            [new(question.Id, "Alex", PlayerAnswerValidationStatus.NotValidated, null)]);
-        var provider = new FakeProvider();
-        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
-
-        await Assert.ThrowsAsync<NarratorException>(() => app.StartStoryAsync(draft, Guid.NewGuid()));
-
-        Assert.Equal(0, provider.OpeningCalls);
-    }
-
-    [Fact]
-    public async Task ValidateAnswer_RejectsWhitespaceWithoutCallingProvider()
-    {
-        var provider = new FakeProvider();
-        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
-
-        await Assert.ThrowsAsync<NarratorException>(() => app.ValidateAnswerAsync(
-            Guid.NewGuid(),
-            new(Guid.NewGuid(), "Name?", "Required", 0),
-            "   ",
-            []));
-
-        Assert.Equal(0, provider.ValidationCalls);
     }
 
     [Fact]
@@ -135,8 +168,8 @@ public sealed class NarratorApplicationTests
     {
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", [], StoryBible.Empty);
-        var state = new StoryState(stateId, "Story", null, new(snapshot, []), StoryBible.Empty, [], 0, now, now, 2);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", StoryBible.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], 0, now, now, 2);
         var turns = Enumerable.Range(0, 3).Select(sequence => new StoryTurn(
             Guid.NewGuid(),
             stateId,
@@ -172,8 +205,8 @@ public sealed class NarratorApplicationTests
     {
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", [], StoryBible.Empty);
-        var state = new StoryState(stateId, "Story", null, new(snapshot, []), StoryBible.Empty, [], 0, now, now, 0);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", StoryBible.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], 0, now, now, 0);
         var states = new MemoryStates(state, []);
         var provider = new FakeProvider
         {
@@ -191,8 +224,8 @@ public sealed class NarratorApplicationTests
     {
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", [], StoryBible.Empty);
-        var state = new StoryState(stateId, "Story", null, new(snapshot, []), StoryBible.Empty, [], 0, now, now, 0);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", StoryBible.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], 0, now, now, 0);
         var states = new MemoryStates(state, []);
         var provider = new FakeProvider
         {
@@ -212,7 +245,7 @@ public sealed class NarratorApplicationTests
         var remove = new StoryBibleEntry(Guid.NewGuid(), "fact", "Remove me", "Content", 2, 0);
         var definitions = new MemoryDefinitions();
         var definition = new StoryDefinition(
-            Guid.NewGuid(), "Story", "Prompt", [], new([keep, remove]), [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            Guid.NewGuid(), "Story", "Prompt", new([keep, remove]), [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         await definitions.SaveAsync(definition);
         var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
 
@@ -239,7 +272,7 @@ public sealed class NarratorApplicationTests
     {
         var definitions = new MemoryDefinitions();
         var definition = new StoryDefinition(
-            Guid.NewGuid(), "Story", "Prompt", [], StoryBible.Empty, [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            Guid.NewGuid(), "Story", "Prompt", StoryBible.Empty, [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         await definitions.SaveAsync(definition);
         var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
 
@@ -254,7 +287,7 @@ public sealed class NarratorApplicationTests
         var id = Guid.NewGuid();
         var definitions = new MemoryDefinitions();
         var definition = new StoryDefinition(
-            Guid.NewGuid(), "Story", "Prompt", [], StoryBible.Empty, [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            Guid.NewGuid(), "Story", "Prompt", StoryBible.Empty, [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         await definitions.SaveAsync(definition);
         var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
 
@@ -269,9 +302,9 @@ public sealed class NarratorApplicationTests
     {
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", [], StoryBible.Empty);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", StoryBible.Empty);
         var existing = new StoryBibleEntry(Guid.NewGuid(), "fact", "Existing", "Content", 3, 2);
-        var state = new StoryState(stateId, "Story", null, new(snapshot, []), new([existing]), [], 0, now, now, 2);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), new([existing]), [], 0, now, now, 2);
         var states = new MemoryStates(state, []);
         var app = CreateApplication(new MemoryDefinitions(), states, new FakeProvider());
 
@@ -411,9 +444,8 @@ public sealed class NarratorApplicationTests
     private sealed class FakeProvider : ILanguageModelProvider
     {
         public StoryGenerationResponse StoryResponse { get; init; } = new("", [], [], [], null, null, null);
-        public StoryDefinitionGenerationResponse DefinitionResponse { get; init; } = new("", []);
+        public StoryDefinitionGenerationResponse DefinitionResponse { get; init; } = new("", "", "", []);
         public int OpeningCalls { get; private set; }
-        public int ValidationCalls { get; private set; }
         public GenerationContext? LastContext { get; private set; }
         public ApiConnectionSettings? DiscoverySettings { get; private set; }
         public Task<IReadOnlyList<string>> DiscoverModelsAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default)
@@ -423,11 +455,6 @@ public sealed class NarratorApplicationTests
         }
         public Task<ConnectionTestResult> TestConnectionAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
-        public Task<PlayerAnswerValidationResponse> ValidatePlayerAnswerAsync(ApiConnectionSettings settings, string? credential, PlayerQuestion question, string answer, IReadOnlyList<PlayerResponse> previousAnswers, CancellationToken cancellationToken = default)
-        {
-            ValidationCalls++;
-            return Task.FromResult(new PlayerAnswerValidationResponse(false, null));
-        }
         public Task<StoryDefinitionGenerationResponse> GenerateStoryDefinitionAsync(ApiConnectionSettings settings, string? credential, string storyPrompt, CancellationToken cancellationToken = default) =>
             Task.FromResult(DefinitionResponse);
         public Task<StoryGenerationResponse> GenerateOpeningAsync(ApiConnectionSettings settings, string? credential, GenerationContext context, CancellationToken cancellationToken = default)

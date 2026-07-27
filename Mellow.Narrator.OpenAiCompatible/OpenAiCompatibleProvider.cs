@@ -90,31 +90,6 @@ public sealed class OpenAiCompatibleProvider(
         }
     }
 
-    public async Task<PlayerAnswerValidationResponse> ValidatePlayerAnswerAsync(
-        ApiConnectionSettings settings, string? credential, PlayerQuestion question, string answer,
-        IReadOnlyList<PlayerResponse> previousAnswers, CancellationToken cancellationToken = default)
-    {
-        var payload = new
-        {
-            question = question.Question,
-            validationInstruction = question.ValidationInstruction,
-            answer,
-            previousAnswers = previousAnswers.Select(x => new { x.Question, x.Answer })
-        };
-        var messages = new[]
-        {
-            Message("system", settings.PromptTemplates.PlayerAnswerValidationInstruction),
-            Message("user", JsonSerializer.Serialize(payload, Json))
-        };
-        return await CompleteWithCorrectionAsync(
-            settings,
-            credential,
-            messages,
-            ValidationSchema(),
-            ParseValidationResponse,
-            cancellationToken);
-    }
-
     public async Task<StoryDefinitionGenerationResponse> GenerateStoryDefinitionAsync(
         ApiConnectionSettings settings, string? credential, string storyPrompt, CancellationToken cancellationToken = default)
     {
@@ -143,7 +118,7 @@ public sealed class OpenAiCompatibleProvider(
     private async Task<StoryGenerationResponse> GenerateStoryAsync(
         ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
     {
-        var messages = BuildStoryMessages(settings.PromptTemplates, settings.ContentLimits, context, opening);
+        var messages = BuildStoryMessages(settings.PromptTemplates, settings.ContentLimits, settings.StoryGeneration.RecentTurnCount, context, opening);
         return await CompleteWithCorrectionAsync(
             settings,
             credential,
@@ -433,6 +408,7 @@ public sealed class OpenAiCompatibleProvider(
     private static IReadOnlyList<JsonObject> BuildStoryMessages(
         PromptTemplateSettings templates,
         ContentLimitSettings limits,
+        int recentTurnCount,
         GenerationContext context,
         bool opening)
     {
@@ -444,7 +420,6 @@ public sealed class OpenAiCompatibleProvider(
         {
             contextType = "storyContext",
             storyPrompt = context.Definition.StoryPrompt,
-            playerResponses = context.PlayerResponses.Select(x => new { x.Question, x.Answer }),
             storyBible = context.StoryBible.Entries,
             storyBibleUpdateRules = new
             {
@@ -455,6 +430,15 @@ public sealed class OpenAiCompatibleProvider(
             relevantStoryBibleEntryRules =
                 "Include only IDs copied exactly from the current Story Bible supplied above. Never invent or return any other ID."
         }, Json)));
+        if (context.RecentTurns.Count < recentTurnCount && !string.IsNullOrWhiteSpace(context.Definition.InitialEventsPrompt))
+            messages.Add(Message("user", JsonSerializer.Serialize(new
+            {
+                contextType = "initialEvents",
+                content = context.Definition.InitialEventsPrompt,
+                instruction = "Use this only to help narrate the earliest scenes. It stops being supplied once " +
+                    "enough real history has accumulated, so never rely on it being available later; anything " +
+                    "that must be remembered belongs in the Story Bible instead."
+            }, Json)));
         foreach (var turn in context.RecentTurns)
         {
             if (turn.PlayerAction is not null) messages.Add(Message("user", turn.PlayerAction));
@@ -474,28 +458,22 @@ public sealed class OpenAiCompatibleProvider(
         return messages;
     }
 
-    private static PlayerAnswerValidationResponse ParseValidationResponse(JsonObject node)
-    {
-        node.Remove("_transport");
-        RequireProperties(node, "hasWarning", "warning");
-        var hasWarning = RequiredBoolean(node, "hasWarning");
-        var warning = node["warning"] is null ? null : RequiredString(node, "warning");
-        if (hasWarning && string.IsNullOrWhiteSpace(warning))
-            throw new JsonException("A warning response must include warning text.");
-        if (!hasWarning && warning is not null)
-            throw new JsonException("A valid response must set warning to null.");
-        return new(hasWarning, warning);
-    }
 
     private static StoryDefinitionGenerationResponse ParseDefinitionResponse(
         JsonObject node,
         ApiConnectionSettings settings)
     {
         node.Remove("_transport");
-        RequireProperties(node, "refinedStoryPrompt", "initialStoryBibleEntries");
+        RequireProperties(node, "refinedStoryPrompt", "suggestedTitle", "initialEventsPrompt", "initialStoryBibleEntries");
         var refinedStoryPrompt = RequiredString(node, "refinedStoryPrompt");
         if (string.IsNullOrWhiteSpace(refinedStoryPrompt) || refinedStoryPrompt.Length > settings.ContentLimits.MaxStoryPromptCharacters)
             throw new JsonException("The refined Story Prompt is empty or exceeds the configured limit.");
+        var suggestedTitle = RequiredString(node, "suggestedTitle");
+        if (string.IsNullOrWhiteSpace(suggestedTitle) || suggestedTitle.Length > settings.ContentLimits.MaxStoryTitleCharacters)
+            throw new JsonException("The suggested title is empty or exceeds the configured limit.");
+        var initialEventsPrompt = RequiredString(node, "initialEventsPrompt");
+        if (initialEventsPrompt.Length > settings.ContentLimits.MaxStoryPromptCharacters)
+            throw new JsonException("The Initial Events prompt exceeds the configured limit.");
         var entries = RequiredArray(node, "initialStoryBibleEntries");
         if (entries.Count > 2000) throw new JsonException("The initial Story Bible contains too many entries.");
         foreach (var item in entries)
@@ -647,12 +625,6 @@ public sealed class OpenAiCompatibleProvider(
         catch (InvalidOperationException ex) { throw new JsonException($"{description} must be a string.", ex); }
     }
 
-    private static bool RequiredBoolean(JsonObject value, string name)
-    {
-        try { return value[name]?.GetValue<bool>() ?? throw new JsonException($"'{name}' must be a boolean."); }
-        catch (InvalidOperationException ex) { throw new JsonException($"'{name}' must be a boolean.", ex); }
-    }
-
     private static int RequiredInteger(JsonObject value, string name)
     {
         try { return value[name]?.GetValue<int>() ?? throw new JsonException($"'{name}' must be an integer."); }
@@ -663,22 +635,18 @@ public sealed class OpenAiCompatibleProvider(
 
     private static JsonObject SimpleProbeSchema() => ObjectSchema(new Dictionary<string, JsonNode?> { ["ok"] = new JsonObject { ["type"] = "boolean" } }, ["ok"]);
 
-    private static JsonObject ValidationSchema() => ObjectSchema(new Dictionary<string, JsonNode?>
-    {
-        ["hasWarning"] = new JsonObject { ["type"] = "boolean" },
-        ["warning"] = new JsonObject { ["type"] = new JsonArray("string", "null") }
-    }, ["hasWarning", "warning"]);
-
     private static JsonObject DefinitionSchema(ApiConnectionSettings settings) => ObjectSchema(new Dictionary<string, JsonNode?>
     {
         ["refinedStoryPrompt"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxStoryPromptCharacters },
+        ["suggestedTitle"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxStoryTitleCharacters },
+        ["initialEventsPrompt"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxStoryPromptCharacters },
         ["initialStoryBibleEntries"] = new JsonObject
         {
             ["type"] = "array",
             ["maxItems"] = 2000,
             ["items"] = ProposedEntrySchema(settings)
         }
-    }, ["refinedStoryPrompt", "initialStoryBibleEntries"]);
+    }, ["refinedStoryPrompt", "suggestedTitle", "initialEventsPrompt", "initialStoryBibleEntries"]);
 
     private static JsonObject TurnSchema(ApiConnectionSettings settings) => ObjectSchema(new Dictionary<string, JsonNode?>
     {

@@ -12,7 +12,7 @@ public sealed class ProviderTests
     public async Task TraceLogging_IncludesBodiesButNeverCredential()
     {
         var handler = new StubHandler(_ => Task.FromResult(Response(
-            """{"refinedStoryPrompt":"PRIVATE RESPONSE TOP-SECRET-KEY","initialStoryBibleEntries":[{"category":"private","name":"Fact","content":"PRIVATE RESPONSE TOP-SECRET-KEY","importance":4}]}""")));
+            """{"refinedStoryPrompt":"PRIVATE RESPONSE TOP-SECRET-KEY","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"private","name":"Fact","content":"PRIVATE RESPONSE TOP-SECRET-KEY","importance":4}]}""")));
         var informationLogger = new CaptureLogger<OpenAiCompatibleProvider>();
         var informationProvider = new OpenAiCompatibleProvider(
             new HttpClient(handler),
@@ -81,7 +81,7 @@ public sealed class ProviderTests
         {
             captured = request;
             body = request.Content is null ? null : await request.Content.ReadAsStringAsync();
-            var content = """{"refinedStoryPrompt":"A red moon story.","initialStoryBibleEntries":[{"category":"world","name":"Moon","content":"The moon is red.","importance":4}]}""";
+            var content = """{"refinedStoryPrompt":"A red moon story.","suggestedTitle":"Red Moon","initialEventsPrompt":"The moon glows ominously overhead.","initialStoryBibleEntries":[{"category":"world","name":"Moon","content":"The moon is red.","importance":4}]}""";
             var envelope = System.Text.Json.JsonSerializer.Serialize(new
             {
                 id = "response-1",
@@ -125,8 +125,8 @@ public sealed class ProviderTests
             requests++;
             bodies.Add(await request.Content!.ReadAsStringAsync());
             var content = requests == 1
-                ? """{"refinedStoryPrompt":"Story","initialStoryBibleEntries":[{"category":"world","name":"Moon","content":"Red","importance":9}]}"""
-                : """{"refinedStoryPrompt":"Story","initialStoryBibleEntries":[{"category":"world","name":"Moon","content":"Red","importance":4}]}""";
+                ? """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","content":"Red","importance":9}]}"""
+                : """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","content":"Red","importance":4}]}""";
             return Response(content);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
@@ -153,7 +153,7 @@ public sealed class ProviderTests
         var handler = new StubHandler(async request =>
         {
             body = await request.Content!.ReadAsStringAsync();
-            return Response("""{"hasWarning":false,"warning":null}""");
+            return Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[]}""");
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
 
@@ -161,21 +161,16 @@ public sealed class ProviderTests
         {
             PromptTemplates = PromptTemplateDefaults.Create() with
             {
-                PlayerAnswerValidationInstruction = "CUSTOM VALIDATION INSTRUCTION",
+                StoryDefinitionInstruction = "CUSTOM DEFINITION INSTRUCTION",
                 PromptedJsonInstruction = $"CUSTOM SCHEMA {PromptTemplateDefaults.SchemaPlaceholder}"
             }
         };
 
-        await provider.ValidatePlayerAnswerAsync(
-            settings,
-            null,
-            new(Guid.NewGuid(), "Name?", "Required", 0),
-            "Alex",
-            []);
+        await provider.GenerateStoryDefinitionAsync(settings, null, "Story prompt");
 
-        Assert.Contains("CUSTOM VALIDATION INSTRUCTION", body);
+        Assert.Contains("CUSTOM DEFINITION INSTRUCTION", body);
         Assert.Contains("CUSTOM SCHEMA", body);
-        Assert.Contains("hasWarning", body);
+        Assert.Contains("refinedStoryPrompt", body);
     }
 
     [Fact]
@@ -195,8 +190,7 @@ public sealed class ProviderTests
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
-            new("Story", "Prompt", [], new([entry])),
-            [],
+            new("Story", "Prompt", new([entry])),
             new([entry]),
             [],
             "Continue",
@@ -233,8 +227,7 @@ public sealed class ProviderTests
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
-            new("Story", "Prompt", [], new([])),
-            [],
+            new("Story", "Prompt", new([])),
             new([]),
             [],
             "Continue",
@@ -254,6 +247,50 @@ public sealed class ProviderTests
     }
 
     [Fact]
+    public async Task GenerateTurn_IncludesInitialEventsPromptWhileRecentTurnsWindowIsNotFull()
+    {
+        string? body = null;
+        var handler = new StubHandler(async request =>
+        {
+            body = await request.Content!.ReadAsStringAsync();
+            return Response("""
+                {"turnNumber":2,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["A","B"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+                """);
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var definition = new StoryDefinitionSnapshot("Story", "Prompt", new([])) { InitialEventsPrompt = "The village is under curfew." };
+        var recent = new StoryTurn(Guid.NewGuid(), Guid.NewGuid(), 1, "Wait", "Nothing happens.", [], [], [], DateTimeOffset.UtcNow, new("model", null, null, null));
+        var context = new GenerationContext(definition, new([]), [recent], "Continue", 2);
+        var settings = Settings() with { StoryGeneration = Settings().StoryGeneration with { RecentTurnCount = 3 } };
+
+        await provider.GenerateTurnAsync(settings, null, context);
+
+        Assert.Contains("The village is under curfew.", body);
+    }
+
+    [Fact]
+    public async Task GenerateTurn_ExcludesInitialEventsPromptOnceRecentTurnsWindowIsFull()
+    {
+        string? body = null;
+        var handler = new StubHandler(async request =>
+        {
+            body = await request.Content!.ReadAsStringAsync();
+            return Response("""
+                {"turnNumber":2,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["A","B"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+                """);
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var definition = new StoryDefinitionSnapshot("Story", "Prompt", new([])) { InitialEventsPrompt = "The village is under curfew." };
+        var recent = new StoryTurn(Guid.NewGuid(), Guid.NewGuid(), 1, "Wait", "Nothing happens.", [], [], [], DateTimeOffset.UtcNow, new("model", null, null, null));
+        var context = new GenerationContext(definition, new([]), [recent], "Continue", 2);
+        var settings = Settings() with { StoryGeneration = Settings().StoryGeneration with { RecentTurnCount = 1 } };
+
+        await provider.GenerateTurnAsync(settings, null, context);
+
+        Assert.DoesNotContain("The village is under curfew.", body);
+    }
+
+    [Fact]
     public async Task GenerateTurn_DoesNotRejectOrRetryWhenSuggestedActionCountIsOutOfRange()
     {
         var requests = 0;
@@ -266,8 +303,7 @@ public sealed class ProviderTests
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
-            new("Story", "Prompt", [], new([])),
-            [],
+            new("Story", "Prompt", new([])),
             new([]),
             [],
             "Current action",
@@ -293,8 +329,7 @@ public sealed class ProviderTests
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
-            new("Story", "Prompt", [], new([])),
-            [],
+            new("Story", "Prompt", new([])),
             new([]),
             [],
             "Current action",
@@ -319,8 +354,7 @@ public sealed class ProviderTests
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
-            new("Story", "Prompt", [], new([])),
-            [],
+            new("Story", "Prompt", new([])),
             new([]),
             [],
             "Current action",
@@ -365,8 +399,7 @@ public sealed class ProviderTests
             DateTimeOffset.UtcNow,
             new("model", null, null, null));
         var context = new GenerationContext(
-            new("Story", "Prompt", [], new([])),
-            [],
+            new("Story", "Prompt", new([])),
             new([]),
             [recent],
             "Choose another path",
@@ -386,8 +419,7 @@ public sealed class ProviderTests
             """)));
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
-            new("Story", "Prompt", [], new([])),
-            [],
+            new("Story", "Prompt", new([])),
             new([]),
             [],
             null,
@@ -414,8 +446,7 @@ public sealed class ProviderTests
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
-            new("Story", "Prompt", [], new([])),
-            [],
+            new("Story", "Prompt", new([])),
             new([]),
             [],
             "Continue",
@@ -453,7 +484,7 @@ public sealed class ProviderTests
                 return Response("""{"ok":true}""");
             }
             generatedBody = body;
-            return Response("""{"refinedStoryPrompt":"Story","initialStoryBibleEntries":[{"category":"world","name":"Moon","content":"Red","importance":4}]}""");
+            return Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","content":"Red","importance":4}]}""");
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var settings = Settings();
@@ -483,12 +514,10 @@ public sealed class ProviderTests
         using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            provider.ValidatePlayerAnswerAsync(
+            provider.GenerateStoryDefinitionAsync(
                 Settings(),
                 null,
-                new(Guid.NewGuid(), "Name?", "Required", 0),
-                "Alex",
-                [],
+                "Story",
                 cancellation.Token));
     }
 

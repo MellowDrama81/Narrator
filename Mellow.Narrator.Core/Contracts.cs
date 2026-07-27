@@ -61,9 +61,10 @@ public interface ISecureStorageService
     Task<bool> RemoveAsync(string key, CancellationToken cancellationToken = default);
 }
 
-public sealed record PlayerAnswerValidationResponse(bool HasWarning, string? Warning);
 public sealed record StoryDefinitionGenerationResponse(
     string RefinedStoryPrompt,
+    string SuggestedTitle,
+    string InitialEventsPrompt,
     IReadOnlyList<ProposedStoryBibleEntry> InitialStoryBibleEntries);
 
 public sealed record StoryGenerationResponse(
@@ -85,7 +86,6 @@ public sealed record BibleLimitImpact(int StoryDefinitionCount, int StoryStateCo
 
 public sealed record GenerationContext(
     StoryDefinitionSnapshot Definition,
-    IReadOnlyList<PlayerResponse> PlayerResponses,
     StoryBible StoryBible,
     IReadOnlyList<StoryTurn> RecentTurns,
     string? PlayerAction,
@@ -95,7 +95,6 @@ public interface ILanguageModelProvider
 {
     Task<IReadOnlyList<string>> DiscoverModelsAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default);
     Task<ConnectionTestResult> TestConnectionAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default);
-    Task<PlayerAnswerValidationResponse> ValidatePlayerAnswerAsync(ApiConnectionSettings settings, string? credential, PlayerQuestion question, string answer, IReadOnlyList<PlayerResponse> previousAnswers, CancellationToken cancellationToken = default);
     Task<StoryDefinitionGenerationResponse> GenerateStoryDefinitionAsync(ApiConnectionSettings settings, string? credential, string storyPrompt, CancellationToken cancellationToken = default);
     Task<StoryGenerationResponse> GenerateOpeningAsync(ApiConnectionSettings settings, string? credential, GenerationContext context, CancellationToken cancellationToken = default);
     Task<StoryGenerationResponse> GenerateTurnAsync(ApiConnectionSettings settings, string? credential, GenerationContext context, CancellationToken cancellationToken = default);
@@ -114,7 +113,6 @@ public interface INarratorApplication
     Task<StoryState> CullStoryStateAsync(Guid stateId, CancellationToken cancellationToken = default);
     Task<StoryDefinition> UpdateInitialStoryBibleAsync(Guid definitionId, StoryBible bible, CancellationToken cancellationToken = default);
     Task<StoryState> UpdateCurrentStoryBibleAsync(Guid stateId, StoryBible bible, CancellationToken cancellationToken = default);
-    Task<PlayerAnswerValidationResponse> ValidateAnswerAsync(Guid definitionId, PlayerQuestion question, string answer, IReadOnlyList<PlayerResponse> previousAnswers, CancellationToken cancellationToken = default);
     Task<(StoryState State, StoryTurn Opening)> StartStoryAsync(StartStoryDraft draft, Guid targetStateId, CancellationToken cancellationToken = default);
     Task<(StoryState State, StoryTurn Turn)> PlayTurnAsync(Guid stateId, string action, CancellationToken cancellationToken = default);
 }

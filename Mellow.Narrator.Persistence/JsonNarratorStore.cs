@@ -467,7 +467,6 @@ public sealed class JsonNarratorStore :
         return source with
         {
             Id = Guid.NewGuid(),
-            PlayerQuestions = source.PlayerQuestions.Select(x => x with { Id = Guid.NewGuid() }).ToArray(),
             InitialStoryBible = new(source.InitialStoryBible.Entries.Select(MapEntry).ToArray()),
             StoryBibleMaintenanceHistory = source.StoryBibleMaintenanceHistory.Select(x => x with
             {
@@ -485,15 +484,9 @@ public sealed class JsonNarratorStore :
     {
         var newStateId = Guid.NewGuid();
         var entryIds = new Dictionary<Guid, Guid>();
-        var questionIds = new Dictionary<Guid, Guid>();
         Guid MapEntryId(Guid oldId)
         {
             if (!entryIds.TryGetValue(oldId, out var mapped)) entryIds[oldId] = mapped = Guid.NewGuid();
-            return mapped;
-        }
-        Guid MapQuestionId(Guid oldId)
-        {
-            if (!questionIds.TryGetValue(oldId, out var mapped)) questionIds[oldId] = mapped = Guid.NewGuid();
             return mapped;
         }
         StoryBibleEntry MapEntry(StoryBibleEntry entry) => entry with { Id = MapEntryId(entry.Id) };
@@ -512,12 +505,8 @@ public sealed class JsonNarratorStore :
             {
                 Definition = source.Setup.Definition with
                 {
-                    PlayerQuestions = source.Setup.Definition.PlayerQuestions
-                        .Select(x => x with { Id = MapQuestionId(x.Id) }).ToArray(),
                     InitialStoryBible = MapBible(source.Setup.Definition.InitialStoryBible)
-                },
-                PlayerResponses = source.Setup.PlayerResponses
-                    .Select(x => x with { QuestionId = MapQuestionId(x.QuestionId) }).ToArray()
+                }
             },
             CurrentStoryBible = MapBible(source.CurrentStoryBible),
             StoryBibleMaintenanceHistory = source.StoryBibleMaintenanceHistory.Select(x => x with

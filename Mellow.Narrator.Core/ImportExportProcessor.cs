@@ -26,7 +26,6 @@ public static class ImportExportProcessor
         return source with
         {
             Id = Guid.NewGuid(),
-            PlayerQuestions = source.PlayerQuestions.Select(x => x with { Id = Guid.NewGuid() }).ToArray(),
             InitialStoryBible = new(source.InitialStoryBible.Entries.Select(MapEntry).ToArray()),
             StoryBibleMaintenanceHistory = source.StoryBibleMaintenanceHistory.Select(x => x with
             {
@@ -46,11 +45,8 @@ public static class ImportExportProcessor
         ValidateState(source, turns, limits);
         var newStateId = Guid.NewGuid();
         var entryIds = new Dictionary<Guid, Guid>();
-        var questionIds = new Dictionary<Guid, Guid>();
         Guid MapEntryId(Guid oldId) =>
             entryIds.TryGetValue(oldId, out var mapped) ? mapped : entryIds[oldId] = Guid.NewGuid();
-        Guid MapQuestionId(Guid oldId) =>
-            questionIds.TryGetValue(oldId, out var mapped) ? mapped : questionIds[oldId] = Guid.NewGuid();
         StoryBibleEntry MapEntry(StoryBibleEntry entry) => entry with { Id = MapEntryId(entry.Id) };
         StoryBible MapBible(StoryBible bible) => new(bible.Entries.Select(MapEntry).ToArray());
         AppliedStoryBibleChange MapChange(AppliedStoryBibleChange change) => change with
@@ -66,14 +62,8 @@ public static class ImportExportProcessor
             {
                 Definition = source.Setup.Definition with
                 {
-                    PlayerQuestions = source.Setup.Definition.PlayerQuestions
-                        .Select(x => x with { Id = MapQuestionId(x.Id) }).ToArray(),
                     InitialStoryBible = MapBible(source.Setup.Definition.InitialStoryBible)
-                },
-                PlayerResponses = source.Setup.PlayerResponses.Select(x => x with
-                {
-                    QuestionId = MapQuestionId(x.QuestionId)
-                }).ToArray()
+                }
             },
             CurrentStoryBible = MapBible(source.CurrentStoryBible),
             StoryBibleMaintenanceHistory = source.StoryBibleMaintenanceHistory.Select(x => x with
@@ -98,7 +88,7 @@ public static class ImportExportProcessor
         if (value.Id == Guid.Empty) throw new InvalidDataException("The Story Definition ID is invalid.");
         ValidateText(value.Title, limits.MaxStoryTitleCharacters, "Story Definition title");
         ValidateText(value.StoryPrompt, limits.MaxStoryPromptCharacters, "Story Prompt");
-        ValidateQuestions(value.PlayerQuestions, limits);
+        ValidateOptionalText(value.InitialEventsPrompt, limits.MaxStoryPromptCharacters, "Initial Events prompt");
         ValidateBible(value.InitialStoryBible, limits);
         ValidateMaintenance(value.StoryBibleMaintenanceHistory);
         ValidateUtc(value.CreatedAtUtc, "created timestamp");
@@ -114,20 +104,10 @@ public static class ImportExportProcessor
         ValidateText(state.Label, limits.MaxStoryLabelCharacters, "Story State label");
         ValidateText(state.Setup.Definition.Title, limits.MaxStoryTitleCharacters, "snapshot title");
         ValidateText(state.Setup.Definition.StoryPrompt, limits.MaxStoryPromptCharacters, "snapshot Story Prompt");
-        ValidateQuestions(state.Setup.Definition.PlayerQuestions, limits);
+        ValidateOptionalText(state.Setup.Definition.InitialEventsPrompt, limits.MaxStoryPromptCharacters, "snapshot Initial Events prompt");
         ValidateBible(state.Setup.Definition.InitialStoryBible, limits);
         ValidateBible(state.CurrentStoryBible, limits);
         ValidateMaintenance(state.StoryBibleMaintenanceHistory);
-        var questionsById = state.Setup.Definition.PlayerQuestions.ToDictionary(x => x.Id);
-        if (state.Setup.PlayerResponses.Select(x => x.QuestionId).Distinct().Count() != state.Setup.PlayerResponses.Count ||
-            state.Setup.PlayerResponses.Count != questionsById.Count ||
-            state.Setup.PlayerResponses.Any(response =>
-                !questionsById.TryGetValue(response.QuestionId, out var question) ||
-                !string.Equals(response.Question, question.Question, StringComparison.Ordinal) ||
-                !string.Equals(response.ValidationInstruction, question.ValidationInstruction, StringComparison.Ordinal)))
-            throw new InvalidDataException("Player responses do not match the snapshot questions.");
-        foreach (var response in state.Setup.PlayerResponses)
-            ValidateText(response.Answer, limits.MaxPlayerAnswerCharacters, "player answer");
         ValidateUtc(state.StartedAtUtc, "started timestamp");
         if (state.LastActionAtUtc is { } lastAction) ValidateUtc(lastAction, "last-action timestamp");
 
@@ -155,19 +135,6 @@ public static class ImportExportProcessor
             ValidateChanges(turn.StoryBibleChanges);
             ValidateUtc(turn.CompletedAtUtc, "turn timestamp");
             ValidateText(turn.Generation.ModelId, 1000, "generation model ID");
-        }
-    }
-
-    private static void ValidateQuestions(IReadOnlyList<PlayerQuestion> questions, ContentLimitSettings limits)
-    {
-        if (questions.Select(x => x.Id).Any(x => x == Guid.Empty) ||
-            questions.Select(x => x.Id).Distinct().Count() != questions.Count ||
-            questions.Select(x => x.SortOrder).Distinct().Count() != questions.Count)
-            throw new InvalidDataException("Player question identities or ordering are invalid.");
-        foreach (var question in questions)
-        {
-            ValidateText(question.Question, limits.MaxPlayerQuestionCharacters, "player question");
-            ValidateText(question.ValidationInstruction, limits.MaxValidationInstructionCharacters, "validation instruction");
         }
     }
 
@@ -220,6 +187,12 @@ public static class ImportExportProcessor
     {
         if (string.IsNullOrWhiteSpace(value) || value.Length > maximum)
             throw new InvalidDataException($"The {name} is empty or exceeds its configured limit.");
+    }
+
+    private static void ValidateOptionalText(string? value, int maximum, string name)
+    {
+        if (value is not null && value.Length > maximum)
+            throw new InvalidDataException($"The {name} exceeds its configured limit.");
     }
 
     private static void ValidateUtc(DateTimeOffset value, string name)
