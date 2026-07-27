@@ -283,8 +283,6 @@ public sealed class JsonNarratorStore :
     {
         var loaded = await JsonFileStore.ReadAsync<ApiConnectionSettings>(SettingsPath, cancellationToken, ReportRecovery);
         var normalized = loaded ?? NarratorDefaults.Create();
-        if (normalized.PromptTemplates is null)
-            normalized = normalized with { PromptTemplates = PromptTemplateDefaults.Create() };
         if (normalized.Logging is null)
             normalized = normalized with { Logging = LoggingDefaults.Create() };
         if (_logLevelSwitch is not null) _logLevelSwitch.MinimumLevel = normalized.Logging.MinimumLevel;

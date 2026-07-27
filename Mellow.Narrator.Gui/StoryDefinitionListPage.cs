@@ -38,6 +38,8 @@ public sealed class StoryDefinitionListPage : ContentPage, IWorkspacePayloadPage
                 return new VerticalStackLayout { Padding = new Thickness(4, 8), Children = { title, updated } };
             })
         };
+        var empty = Ui.Empty("No Story Definitions yet. Click New to create one.");
+        _items.CollectionChanged += (_, _) => empty.IsVisible = _items.Count == 0;
         var grid = new Grid
         {
             Padding = 16,
@@ -47,21 +49,21 @@ public sealed class StoryDefinitionListPage : ContentPage, IWorkspacePayloadPage
                 Ui.Heading("Story Definitions"),
                 Ui.Buttons(
                     Ui.Button("New", (_, _) => _tabs.OpenPrompt()),
-                    Ui.Button("Open", (_, _) => { if (Selected is { } x) _tabs.OpenDefinition(x.Id); }),
+                    Ui.SecondaryButton("Open", (_, _) => { if (Selected is { } x) _tabs.OpenDefinition(x.Id); }),
                     Ui.Button("Start", async (_, _) => await StartAsync()),
-                    Ui.Button("Import", Import),
-                    Ui.Button("Export", Export),
-                    Ui.Button("Earlier", async (_, _) => await Move(-1)),
-                    Ui.Button("Later", async (_, _) => await Move(1)),
-                    Ui.Button("Delete", Delete),
-                    _startBusy),
+                    Ui.SecondaryButton("Import", Import),
+                    Ui.SecondaryButton("Export", Export),
+                    Ui.SecondaryButton("Earlier", async (_, _) => await Move(-1)),
+                    Ui.SecondaryButton("Later", async (_, _) => await Move(1)),
+                    Ui.DestructiveButton("Delete", Delete),
+                    Ui.Busy(_startBusy, "Starting…")),
                 _status,
-                _list
+                new Grid { Children = { _list, empty } }
             }
         };
         grid.SetRow(grid.Children[1], 1);
         grid.SetRow(_status, 2);
-        grid.SetRow(_list, 3);
+        grid.SetRow(grid.Children[3], 3);
         Content = grid;
     }
 

@@ -32,6 +32,41 @@ internal static class Ui
         return button;
     }
 
+    public static Button SecondaryButton(string text, EventHandler clicked)
+    {
+        var button = Button(text, clicked);
+        button.BackgroundColor = Colors.Transparent;
+        button.TextColor = Color.FromArgb("#512BD4");
+        button.BorderColor = Color.FromArgb("#512BD4");
+        button.BorderWidth = 1;
+        return button;
+    }
+
+    public static Button DestructiveButton(string text, EventHandler clicked)
+    {
+        var button = Button(text, clicked);
+        button.BackgroundColor = Color.FromArgb("#C0392B");
+        button.TextColor = Colors.White;
+        return button;
+    }
+
+    public static Label Empty(string text) => new()
+    {
+        Text = text,
+        FontSize = 14,
+        TextColor = Colors.Gray,
+        HorizontalOptions = LayoutOptions.Center,
+        VerticalOptions = LayoutOptions.Center,
+        Margin = new Thickness(0, 32)
+    };
+
+    public static View Busy(ActivityIndicator indicator, string text = "Working…")
+    {
+        var label = new Label { Text = text, VerticalOptions = LayoutOptions.Center };
+        label.SetBinding(Label.IsVisibleProperty, new Binding(nameof(ActivityIndicator.IsRunning), source: indicator));
+        return new HorizontalStackLayout { Spacing = 8, Children = { indicator, label } };
+    }
+
     public static FlexLayout Buttons(params View[] children)
     {
         var layout = new FlexLayout

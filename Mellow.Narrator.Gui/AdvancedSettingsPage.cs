@@ -53,40 +53,67 @@ public sealed class AdvancedSettingsPage : ContentPage
         Title = "Advanced Settings";
         var content = new VerticalStackLayout { Padding = 16, Spacing = 6 };
         content.Children.Add(Ui.Heading("Advanced Settings"));
-        content.Children.Add(Ui.Heading("Logging"));
-        content.Children.Add(new Label { Text = "Log level (default Information)" });
-        content.Children.Add(_logLevel);
-        content.Children.Add(new Label
+
+        var logging = Section(content, "Logging", expanded: true);
+        logging.Children.Add(new Label { Text = "Log level" });
+        logging.Children.Add(_logLevel);
+        logging.Children.Add(new Label { Text = "default Information", FontSize = 11, TextColor = Colors.Gray });
+        logging.Children.Add(new Label
         {
             Text = "Logs are rolling JSON-lines files in the app's private data folder. Trace includes complete LLM request and response bodies and may contain private story and player content. API credentials are never logged.",
             FontSize = 12
         });
-        content.Children.Add(Ui.Heading("Generation and Limits"));
-        Add(content, "Temperature (blank = provider default)", "temperature");
-        Add(content, "Top-p (blank = provider default)", "topP");
-        Add(content, "Reasoning effort (blank = provider default)", "reasoning");
-        Add(content, "Bible entry character limit", "bibleEntry");
-        Add(content, "Bible total character limit", "bibleTotal");
-        Add(content, "Bible warning percent", "bibleWarning");
-        Add(content, "Automatic retries", "retries");
-        Add(content, "Initial retry delay seconds", "retryInitial");
-        Add(content, "Maximum retry delay seconds", "retryMax");
-        Add(content, "Maximum Retry-After seconds", "retryAfter");
-        Add(content, "Title characters", "title");
-        Add(content, "Label characters", "label");
-        Add(content, "Story Prompt characters", "prompt");
-        Add(content, "Player action characters", "action");
-        Add(content, "Narration characters", "narration");
-        Add(content, "Minimum suggested actions", "suggestedMin");
-        Add(content, "Maximum suggested actions", "suggestedCount");
-        Add(content, "Suggested action characters", "suggestedLength");
-        Add(content, "Bible category characters", "category");
-        Add(content, "Bible name characters", "name");
-        Add(content, "Bible updates per response", "updates");
-        Add(content, "HTTP response bytes", "responseBytes");
-        content.Children.Add(Ui.Buttons(Ui.Button("Save", Save), Ui.Button("Reset defaults", Reset)));
+
+        var modelParameters = Section(content, "Model Parameters", expanded: false);
+        Add(modelParameters, "Temperature (blank = provider default)", "temperature");
+        Add(modelParameters, "Top-p (blank = provider default)", "topP");
+        Add(modelParameters, "Reasoning effort (blank = provider default)", "reasoning");
+
+        var bibleAndRetries = Section(content, "Story Bible & Retries", expanded: false);
+        Add(bibleAndRetries, "Bible entry character limit", "bibleEntry");
+        Add(bibleAndRetries, "Bible total character limit", "bibleTotal");
+        Add(bibleAndRetries, "Bible warning percent", "bibleWarning");
+        Add(bibleAndRetries, "Automatic retries", "retries");
+        Add(bibleAndRetries, "Initial retry delay seconds", "retryInitial");
+        Add(bibleAndRetries, "Maximum retry delay seconds", "retryMax");
+        Add(bibleAndRetries, "Maximum Retry-After seconds", "retryAfter");
+
+        var contentLimits = Section(content, "Content Limits", expanded: false);
+        Add(contentLimits, "Title characters", "title");
+        Add(contentLimits, "Label characters", "label");
+        Add(contentLimits, "Story Prompt characters", "prompt");
+        Add(contentLimits, "Player action characters", "action");
+        Add(contentLimits, "Narration characters", "narration");
+        Add(contentLimits, "Minimum suggested actions", "suggestedMin");
+        Add(contentLimits, "Maximum suggested actions", "suggestedCount");
+        Add(contentLimits, "Suggested action characters", "suggestedLength");
+        Add(contentLimits, "Bible category characters", "category");
+        Add(contentLimits, "Bible name characters", "name");
+        Add(contentLimits, "Bible updates per response", "updates");
+        Add(contentLimits, "HTTP response bytes", "responseBytes");
+
+        content.Children.Add(Ui.Buttons(Ui.Button("Save", Save), Ui.SecondaryButton("Reset defaults", Reset)));
         Content = new ScrollView { Content = content };
         ToolbarItems.Add(new ToolbarItem("Done", null, async () => await Navigation.PopModalAsync()));
+    }
+
+    private static VerticalStackLayout Section(Layout parent, string title, bool expanded)
+    {
+        var body = new VerticalStackLayout { Spacing = 6, IsVisible = expanded, Margin = new Thickness(8, 0, 0, 12) };
+        var arrow = new Label { Text = expanded ? "▾" : "▸", FontAttributes = FontAttributes.Bold, WidthRequest = 18 };
+        var heading = new Label { Text = title, FontAttributes = FontAttributes.Bold, FontSize = 16 };
+        var header = new HorizontalStackLayout { Spacing = 6, Margin = new Thickness(0, 8, 0, 4), Children = { arrow, heading } };
+        header.GestureRecognizers.Add(new TapGestureRecognizer
+        {
+            Command = new Command(() =>
+            {
+                body.IsVisible = !body.IsVisible;
+                arrow.Text = body.IsVisible ? "▾" : "▸";
+            })
+        });
+        parent.Children.Add(header);
+        parent.Children.Add(body);
+        return body;
     }
 
     protected override async void OnAppearing()
@@ -187,8 +214,10 @@ public sealed class AdvancedSettingsPage : ContentPage
     {
         var entry = new Entry { Keyboard = key == "reasoning" ? Keyboard.Default : Keyboard.Numeric };
         _fields[key] = entry;
-        content.Children.Add(new Label { Text = Help.TryGetValue(key, out var help) ? $"{label} ({help})" : label });
+        content.Children.Add(new Label { Text = label });
         content.Children.Add(entry);
+        if (Help.TryGetValue(key, out var help))
+            content.Children.Add(new Label { Text = help, FontSize = 11, TextColor = Colors.Gray });
     }
     private void Set(string key, object? value) => _fields[key].Text = value is null ? "" : Convert.ToString(value, CultureInfo.InvariantCulture);
     private double Number(string key) => double.TryParse(_fields[key].Text, CultureInfo.InvariantCulture, out var value) ? value : throw new NarratorException($"Invalid value for {key}.");

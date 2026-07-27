@@ -14,19 +14,25 @@ public sealed class SettingsTests
         Assert.Equal(NarratorLogLevel.Information, settings.Logging.MinimumLevel);
         Assert.Equal(2, settings.ContentLimits.MinSuggestedActions);
         Assert.Equal(3, settings.ContentLimits.MaxSuggestedActions);
-        Assert.Contains("Story Bible", settings.PromptTemplates.StoryDefinitionInstruction);
+    }
+
+    [Fact]
+    public void PromptTemplateDefaults_AreHardCoded()
+    {
+        var templates = PromptTemplateDefaults.Create();
+        Assert.Contains("Story Bible", templates.StoryDefinitionInstruction);
         Assert.Contains(
             PromptTemplateDefaults.ValidationErrorPlaceholder,
-            settings.PromptTemplates.CorrectiveRetryInstruction);
+            templates.CorrectiveRetryInstruction);
         Assert.Contains(
             PromptTemplateDefaults.SchemaPlaceholder,
-            settings.PromptTemplates.PromptedJsonInstruction);
+            templates.PromptedJsonInstruction);
         Assert.Contains(
             PromptTemplateDefaults.MinSuggestedActionsPlaceholder,
-            settings.PromptTemplates.StoryNarrationInstruction);
+            templates.StoryNarrationInstruction);
         Assert.Contains(
             PromptTemplateDefaults.MaxSuggestedActionsPlaceholder,
-            settings.PromptTemplates.StoryNarrationInstruction);
+            templates.StoryNarrationInstruction);
     }
 
     [Fact]
@@ -101,56 +107,4 @@ public sealed class SettingsTests
         Assert.Contains(nameof(ContentLimitSettings.MinSuggestedActions), SettingsValidator.Validate(value).Keys);
     }
 
-    [Fact]
-    public void Validator_RejectsEmptyAndOversizedPromptTemplates()
-    {
-        var defaults = PromptTemplateDefaults.Create();
-        var value = NarratorDefaults.Create() with
-        {
-            PromptTemplates = defaults with
-            {
-                StoryNarrationInstruction = new string('x', PromptTemplateDefaults.MaximumTemplateCharacters + 1)
-            }
-        };
-
-        var errors = SettingsValidator.Validate(value);
-
-        Assert.Contains(nameof(PromptTemplateSettings.StoryNarrationInstruction), errors.Keys);
-    }
-
-    [Fact]
-    public void Validator_RequiresDynamicPromptPlaceholders()
-    {
-        var defaults = PromptTemplateDefaults.Create();
-        var value = NarratorDefaults.Create() with
-        {
-            PromptTemplates = defaults with
-            {
-                CorrectiveRetryInstruction = "Try again.",
-                PromptedJsonInstruction = "Return valid JSON."
-            }
-        };
-
-        var errors = SettingsValidator.Validate(value);
-
-        Assert.Contains(nameof(PromptTemplateSettings.CorrectiveRetryInstruction), errors.Keys);
-        Assert.Contains(nameof(PromptTemplateSettings.PromptedJsonInstruction), errors.Keys);
-    }
-
-    [Fact]
-    public void Validator_RequiresSuggestedActionCountPlaceholders()
-    {
-        var defaults = PromptTemplateDefaults.Create();
-        var value = NarratorDefaults.Create() with
-        {
-            PromptTemplates = defaults with
-            {
-                StoryNarrationInstruction = "Narrate the scene and offer some suggested actions."
-            }
-        };
-
-        var errors = SettingsValidator.Validate(value);
-
-        Assert.Contains(nameof(PromptTemplateSettings.StoryNarrationInstruction), errors.Keys);
-    }
 }

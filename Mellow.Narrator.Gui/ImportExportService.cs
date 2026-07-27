@@ -56,6 +56,32 @@ internal static class ImportExportService
         await SaveTextAsync($"{Safe(state.Label)}-history.txt", text);
     }
 
+    public static async Task ExportBibleHistoryAsync(StoryState state, IReadOnlyList<StoryTurn> turns)
+    {
+        var groups = new List<(DateTimeOffset At, string Header, IReadOnlyList<AppliedStoryBibleChange> Changes)>();
+        groups.AddRange(state.StoryBibleMaintenanceHistory.Select(x =>
+            (x.CompletedAtUtc, x.Reason.ToString(), (IReadOnlyList<AppliedStoryBibleChange>)x.Changes)));
+        groups.AddRange(turns.Where(x => x.StoryBibleChanges.Count > 0).Select(x =>
+            (x.CompletedAtUtc, $"Turn {x.SequenceNumber}", x.StoryBibleChanges)));
+        var text = string.Join(
+            Environment.NewLine + Environment.NewLine,
+            groups.OrderByDescending(x => x.At).Select(FormatBibleHistoryGroup));
+        await SaveTextAsync($"{Safe(state.Label)}-bible-history.txt", text);
+    }
+
+    private static string FormatBibleHistoryGroup(
+        (DateTimeOffset At, string Header, IReadOnlyList<AppliedStoryBibleChange> Changes) group)
+    {
+        var lines = new List<string> { $"{group.Header} — {group.At.ToLocalTime():g}" };
+        lines.AddRange(group.Changes.Select(FormatBibleChange));
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string FormatBibleChange(AppliedStoryBibleChange change) =>
+        $"{change.Operation}: {change.Before?.Name ?? change.After?.Name} ({change.Source})" + Environment.NewLine +
+        $"Before: {change.Before?.Content ?? "—"}" + Environment.NewLine +
+        $"After: {change.After?.Content ?? "—"}";
+
     private static string FormatTurn(StoryTurn turn) =>
         turn.PlayerAction is null
             ? turn.Narration

@@ -139,8 +139,8 @@ public sealed class StoryDefinitionPage : ContentPage, IWorkspacePayloadPage, IC
             _content.Children.Add(Ui.Buttons(
                 Ui.Button("Save Definition", async (_, _) => await SaveDefinitionAsync(value, titleEntry.Text, promptEditor.Text, initialEventsEditor.Text)),
                 Ui.Button("Start Story", async (_, _) => await StartStoryAsync()),
-                Ui.Button("Export", async (_, _) => await ExportAsync(value))));
-            _content.Children.Add(_startBusy);
+                Ui.SecondaryButton("Export", async (_, _) => await ExportAsync(value))));
+            _content.Children.Add(Ui.Busy(_startBusy, "Starting…"));
             _content.Children.Add(Ui.Heading($"Initial Story Bible ({value.InitialStoryBible.Entries.Count})"));
             if (StoryBibleProcessor.IsApproachingLimits(value.InitialStoryBible, settings.StoryGeneration))
                 _content.Children.Add(new Label { Text = "The Story Bible is approaching one or more configured limits.", TextColor = Colors.DarkOrange });
@@ -178,11 +178,6 @@ public sealed class StoryDefinitionPage : ContentPage, IWorkspacePayloadPage, IC
         try { await ImportExportService.ExportDefinitionAsync(definition); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
-
-    internal static Label ChangeLabel(AppliedStoryBibleChange change) => new()
-    {
-        Text = $"{change.Operation}: {change.Before?.Name ?? change.After?.Name} ({change.Source})\nBefore: {change.Before?.Content ?? "—"}\nAfter: {change.After?.Content ?? "—"}"
-    };
 }
 
 internal static class StoryBibleView
@@ -250,7 +245,7 @@ internal static class StoryBibleView
                                     };
                                     await onSaveAsync(new StoryBible(bible.Entries.Select(x => x.Id == entry.Id ? updated : x).ToArray()));
                                 }),
-                                Ui.Button("Remove", async (_, _) =>
+                                Ui.DestructiveButton("Remove", async (_, _) =>
                                 {
                                     if (!await page.DisplayAlertAsync("Remove entry?", $"Remove \"{entry.Name}\" from the Story Bible?", "Remove", "Cancel")) return;
                                     await onSaveAsync(new StoryBible(bible.Entries.Where(x => x.Id != entry.Id).ToArray()));
@@ -305,7 +300,7 @@ internal static class StoryBibleView
                     newEntryRelevantTurn);
                 await onSaveAsync(new StoryBible(bible.Entries.Append(added).ToArray()));
             }),
-            Ui.Button("Cancel", (_, _) =>
+            Ui.SecondaryButton("Cancel", (_, _) =>
             {
                 newCategory.Text = "";
                 newName.Text = "";
@@ -316,7 +311,7 @@ internal static class StoryBibleView
 
         var serializedBytes = JsonSerializer.SerializeToUtf8Bytes(bible).Length;
         body.Children.Add(new Label { Text = $"{bible.Entries.Count} active entries; {serializedBytes:N0} serialized bytes" });
-        body.Children.Add(Ui.Button("Add Entry", (_, _) => addForm.IsVisible = !addForm.IsVisible));
+        body.Children.Add(Ui.SecondaryButton("Add Entry", (_, _) => addForm.IsVisible = !addForm.IsVisible));
         body.Children.Add(addForm);
         body.Children.Add(search);
         var filters = new Grid
@@ -328,7 +323,7 @@ internal static class StoryBibleView
         body.Children.Add(filters);
         body.Children.Add(entries);
         if (alwaysExpanded) return body;
-        var toggle = Ui.Button("Show / hide Bible", (_, _) => body.IsVisible = !body.IsVisible);
+        var toggle = Ui.SecondaryButton("Show / hide Bible", (_, _) => body.IsVisible = !body.IsVisible);
         return new VerticalStackLayout { Children = { toggle, body } };
     }
 }

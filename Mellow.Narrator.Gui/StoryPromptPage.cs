@@ -35,7 +35,7 @@ public sealed class StoryPromptPage : ContentPage, IWorkspacePayloadPage, IClose
                 Padding = 16,
                 Spacing = 8,
                 Children = { Ui.Heading(Title), new Label { Text = "Title" }, _title, new Label { Text = "Story Prompt" }, _prompt,
-                    Ui.Button("Generate Story Definition", Generate), _busy }
+                    Ui.Button("Generate Story Definition", Generate), Ui.Busy(_busy, "Generating…") }
             }
         };
         if (restoredDraft is not null)

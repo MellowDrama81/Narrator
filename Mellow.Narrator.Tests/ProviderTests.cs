@@ -95,11 +95,7 @@ public sealed class ProviderTests
         {
             BaseUrl = new("https://example.test/v1/"),
             ModelId = "story-model",
-            Capabilities = new(false, StructuredOutputTier.PromptedJson, "story-model", DateTimeOffset.UtcNow),
-            PromptTemplates = PromptTemplateDefaults.Create() with
-            {
-                StoryDefinitionInstruction = "CUSTOM DEFINITION INSTRUCTION"
-            }
+            Capabilities = new(false, StructuredOutputTier.PromptedJson, "story-model", DateTimeOffset.UtcNow)
         };
 
         var result = await provider.GenerateStoryDefinitionAsync(settings, "secret", "A red moon story");
@@ -109,7 +105,7 @@ public sealed class ProviderTests
         Assert.Equal("secret", captured.Headers.Authorization.Parameter);
         Assert.Contains("story-model", body);
         Assert.Contains("A red moon story", body);
-        Assert.Contains("CUSTOM DEFINITION INSTRUCTION", body);
+        Assert.Contains("Refine the Story Prompt", body);
         Assert.Contains("\"max_completion_tokens\"", body);
         Assert.DoesNotContain("\"max_tokens\"", body);
         Assert.Contains("\"role\":\"developer\"", body);
@@ -130,19 +126,13 @@ public sealed class ProviderTests
             return Response(content);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
-        var settings = Settings() with
-        {
-            PromptTemplates = PromptTemplateDefaults.Create() with
-            {
-                CorrectiveRetryInstruction = $"CUSTOM CORRECTION {PromptTemplateDefaults.ValidationErrorPlaceholder}"
-            }
-        };
+        var settings = Settings();
 
         var result = await provider.GenerateStoryDefinitionAsync(settings, null, "Story");
 
         Assert.Equal(2, requests);
         Assert.Equal(4, Assert.Single(result.InitialStoryBibleEntries).Importance);
-        Assert.Contains("CUSTOM CORRECTION", bodies[1]);
+        Assert.Contains("failed validation", bodies[1]);
         Assert.Contains("importance", bodies[1], StringComparison.OrdinalIgnoreCase);
     }
 
@@ -157,19 +147,12 @@ public sealed class ProviderTests
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
 
-        var settings = Settings() with
-        {
-            PromptTemplates = PromptTemplateDefaults.Create() with
-            {
-                StoryDefinitionInstruction = "CUSTOM DEFINITION INSTRUCTION",
-                PromptedJsonInstruction = $"CUSTOM SCHEMA {PromptTemplateDefaults.SchemaPlaceholder}"
-            }
-        };
+        var settings = Settings();
 
         await provider.GenerateStoryDefinitionAsync(settings, null, "Story prompt");
 
-        Assert.Contains("CUSTOM DEFINITION INSTRUCTION", body);
-        Assert.Contains("CUSTOM SCHEMA", body);
+        Assert.Contains("Refine the Story Prompt", body);
+        Assert.Contains("Return an object matching this JSON Schema exactly", body);
         Assert.Contains("refinedStoryPrompt", body);
     }
 
@@ -196,18 +179,12 @@ public sealed class ProviderTests
             "Continue",
             1);
 
-        var settings = Settings() with
-        {
-            PromptTemplates = PromptTemplateDefaults.Create() with
-            {
-                StoryNarrationInstruction = "CUSTOM NARRATION INSTRUCTION"
-            }
-        };
+        var settings = Settings();
         var result = await provider.GenerateTurnAsync(settings, null, context);
 
         Assert.Equal(1, requests);
         Assert.Equal(entry.Id, Assert.Single(result.RelevantStoryBibleEntryIds));
-        Assert.Contains("CUSTOM NARRATION INSTRUCTION", body);
+        Assert.Contains("You narrate an interactive story", body);
         Assert.Contains("Never invent or return any other ID", body);
         Assert.Contains("currentPlayerAction", body);
         Assert.Contains("Continue", body);

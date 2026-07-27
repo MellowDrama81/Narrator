@@ -18,6 +18,8 @@ public sealed class OpenAiCompatibleProvider(
     private readonly ILogger<OpenAiCompatibleProvider> _logger =
         logger ?? NullLogger<OpenAiCompatibleProvider>.Instance;
 
+    private static readonly PromptTemplateSettings Templates = PromptTemplateDefaults.Create();
+
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
@@ -59,7 +61,7 @@ public sealed class OpenAiCompatibleProvider(
                     {
                         var response = await CompleteAsync(settings, credential,
                             [Message("system", "Return a JSON object with exactly one boolean property named ok."), Message("user", "Return ok as true.")],
-                            SimpleProbeSchema(), candidate, cancellationToken, contract, false);
+                            SimpleProbeSchema(), candidate, cancellationToken, contract);
                         if (response["ok"]?.GetValue<bool>() == true)
                         {
                             tier = candidate;
@@ -95,7 +97,7 @@ public sealed class OpenAiCompatibleProvider(
     {
         var messages = new[]
         {
-            Message("system", settings.PromptTemplates.StoryDefinitionInstruction),
+            Message("system", Templates.StoryDefinitionInstruction),
             Message("user", storyPrompt)
         };
         return await CompleteWithCorrectionAsync(
@@ -118,7 +120,7 @@ public sealed class OpenAiCompatibleProvider(
     private async Task<StoryGenerationResponse> GenerateStoryAsync(
         ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
     {
-        var messages = BuildStoryMessages(settings.PromptTemplates, settings.ContentLimits, settings.StoryGeneration.RecentTurnCount, context, opening);
+        var messages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration.RecentTurnCount, context, opening);
         return await CompleteWithCorrectionAsync(
             settings,
             credential,
@@ -145,7 +147,7 @@ public sealed class OpenAiCompatibleProvider(
         catch (Exception ex) when (ex is JsonException or NarratorException)
         {
             var corrected = messages.Concat([
-                Message("system", settings.PromptTemplates.CorrectiveRetryInstruction.Replace(
+                Message("system", Templates.CorrectiveRetryInstruction.Replace(
                     PromptTemplateDefaults.ValidationErrorPlaceholder,
                     ex.Message,
                     StringComparison.Ordinal))
@@ -158,15 +160,11 @@ public sealed class OpenAiCompatibleProvider(
         ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> messages, JsonObject schema,
         StructuredOutputTier tier,
         CancellationToken cancellationToken,
-        ProviderRequestContract? requestContract = null,
-        bool useConfiguredPromptTemplates = true)
+        ProviderRequestContract? requestContract = null)
     {
         RequireConnection(settings);
-        var promptedJsonInstruction = useConfiguredPromptTemplates
-            ? settings.PromptTemplates.PromptedJsonInstruction
-            : $"Return an object matching this JSON Schema exactly: {PromptTemplateDefaults.SchemaPlaceholder}";
         var requestMessages = tier == StructuredOutputTier.PromptedJson
-            ? messages.Concat([Message("system", promptedJsonInstruction.Replace(
+            ? messages.Concat([Message("system", Templates.PromptedJsonInstruction.Replace(
                 PromptTemplateDefaults.SchemaPlaceholder,
                 schema.ToJsonString(Json),
                 StringComparison.Ordinal))]).ToArray()
@@ -406,13 +404,12 @@ public sealed class OpenAiCompatibleProvider(
     }
 
     private static IReadOnlyList<JsonObject> BuildStoryMessages(
-        PromptTemplateSettings templates,
         ContentLimitSettings limits,
         int recentTurnCount,
         GenerationContext context,
         bool opening)
     {
-        var narrationInstruction = templates.StoryNarrationInstruction
+        var narrationInstruction = Templates.StoryNarrationInstruction
             .Replace(PromptTemplateDefaults.MinSuggestedActionsPlaceholder, limits.MinSuggestedActions.ToString(), StringComparison.Ordinal)
             .Replace(PromptTemplateDefaults.MaxSuggestedActionsPlaceholder, limits.MaxSuggestedActions.ToString(), StringComparison.Ordinal);
         var messages = new List<JsonObject> { Message("system", narrationInstruction) };
@@ -450,8 +447,8 @@ public sealed class OpenAiCompatibleProvider(
             turnNumber = context.NextTurnNumber,
             currentPlayerAction = opening ? null : context.PlayerAction,
             instruction = opening
-                ? $"{templates.OpeningSceneInstruction} Copy turnNumber exactly into the response and set acknowledgedPlayerAction to null."
-                : $"{templates.ContinueStoryInstruction} Resolve currentPlayerAction now. " +
+                ? $"{Templates.OpeningSceneInstruction} Copy turnNumber exactly into the response and set acknowledgedPlayerAction to null."
+                : $"{Templates.ContinueStoryInstruction} Resolve currentPlayerAction now. " +
                   "Do not answer an action from the preceding history and do not repeat an earlier scene. " +
                   "Advance beyond the last assistant narration. Copy turnNumber and currentPlayerAction exactly into the response fields."
         }, Json)));

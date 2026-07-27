@@ -43,6 +43,8 @@ public sealed class StoryStateListPage : ContentPage
                 return new VerticalStackLayout { Padding = new Thickness(4, 8), Children = { label, dates, lastAction, open } };
             })
         };
+        var empty = Ui.Empty("No Story States yet. Start a story from a Story Definition.");
+        _items.CollectionChanged += (_, _) => empty.IsVisible = _items.Count == 0;
         var grid = new Grid
         {
             Padding = 16,
@@ -52,18 +54,18 @@ public sealed class StoryStateListPage : ContentPage
                 Ui.Heading("Story States"),
                 Ui.Buttons(
                     Ui.Button("Open", (_, _) => { if (Selected is { } x) _tabs.OpenPlay(x.Id); }),
-                    Ui.Button("Label", EditLabel),
-                    Ui.Button("Copy", Copy),
-                    Ui.Button("Import", Import),
-                    Ui.Button("Export", Export),
-                    Ui.Button("Earlier", async (_, _) => await Move(-1)),
-                    Ui.Button("Later", async (_, _) => await Move(1)),
-                    Ui.Button("Delete", Delete)),
-                _list
+                    Ui.SecondaryButton("Label", EditLabel),
+                    Ui.SecondaryButton("Copy", Copy),
+                    Ui.SecondaryButton("Import", Import),
+                    Ui.SecondaryButton("Export", Export),
+                    Ui.SecondaryButton("Earlier", async (_, _) => await Move(-1)),
+                    Ui.SecondaryButton("Later", async (_, _) => await Move(1)),
+                    Ui.DestructiveButton("Delete", Delete)),
+                new Grid { Children = { _list, empty } }
             }
         };
         grid.SetRow(grid.Children[1], 1);
-        grid.SetRow(_list, 2);
+        grid.SetRow(grid.Children[2], 2);
         Content = grid;
     }
 

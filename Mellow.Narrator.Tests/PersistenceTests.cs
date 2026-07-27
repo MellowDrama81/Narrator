@@ -37,10 +37,6 @@ public sealed class PersistenceTests : IDisposable
             {
                 OutputTokenParameter = OutputTokenParameter.MaxTokens,
                 InstructionMessageRole = InstructionMessageRole.System
-            },
-            PromptTemplates = PromptTemplateDefaults.Create() with
-            {
-                StoryNarrationInstruction = "Persist this narration template."
             }
         };
 
@@ -49,7 +45,6 @@ public sealed class PersistenceTests : IDisposable
 
         Assert.Equal(OutputTokenParameter.MaxTokens, actual.Capabilities.OutputTokenParameter);
         Assert.Equal(InstructionMessageRole.System, actual.Capabilities.InstructionMessageRole);
-        Assert.Equal("Persist this narration template.", actual.PromptTemplates.StoryNarrationInstruction);
     }
 
     [Fact]
@@ -59,15 +54,11 @@ public sealed class PersistenceTests : IDisposable
         await repository.SaveAsync(NarratorDefaults.Create());
         var path = Path.Combine(_root, "Mellow.Narrator", "settings", "api-connection.json");
         var document = JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
-        document["data"]!.AsObject().Remove("promptTemplates");
         document["data"]!.AsObject().Remove("logging");
         await File.WriteAllTextAsync(path, document.ToJsonString());
 
         var loaded = await repository.LoadAsync();
 
-        Assert.Equal(
-            PromptTemplateDefaults.Create().StoryNarrationInstruction,
-            loaded.PromptTemplates.StoryNarrationInstruction);
         Assert.Equal(NarratorLogLevel.Information, loaded.Logging.MinimumLevel);
     }
 

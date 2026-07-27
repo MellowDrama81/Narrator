@@ -14,12 +14,10 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
     private readonly ActivityIndicator _busy = new();
     private readonly Button _copy;
     private readonly VerticalStackLayout _bible = new();
-    private readonly VerticalStackLayout _history = new() { IsVisible = false, Spacing = 8 };
     private readonly Label _limitWarning = new() { TextColor = Colors.DarkOrange };
     private readonly ScrollView _story;
     private CancellationTokenSource? _request;
     private PendingOperationState? _pendingOperation;
-    private bool _historyLoaded;
 
     public PlayStoryPage(
         Guid stateId,
@@ -35,62 +33,63 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
         _tabs = tabs;
         _pendingOperation = restoredOperation;
         _action.Text = restoredState?.PendingPlayerAction ?? "";
-        _copy = Ui.Button("Copy Story", Copy);
+        _copy = Ui.SecondaryButton("Copy Story", Copy);
         Title = "Play Story";
         _story = new ScrollView
         {
             Content = new VerticalStackLayout
             {
                 Spacing = 8,
+                Padding = new Thickness(0, 0, 16, 0),
                 Children =
                 {
                     _limitWarning, _narration, Ui.Heading("Suggested Actions"), _suggestions, _action,
-                    Ui.Buttons(Ui.Button("Continue", Play), _copy, Ui.Button("Export", Export), Ui.Button("Export Full History", ExportHistory)),
-                    _busy
+                    Ui.Buttons(Ui.Button("Continue", Play), _copy, Ui.SecondaryButton("Export", Export), Ui.SecondaryButton("Export Full History", ExportHistory)),
+                    Ui.Busy(_busy, "Continuing…")
                 }
             }
         };
-        var sidePanel = new ScrollView
+        var sidePanelContent = new VerticalStackLayout
         {
-            IsVisible = false,
-            Content = new VerticalStackLayout
+            Spacing = 8,
+            Padding = new Thickness(0, 0, 16, 0),
+            Children =
             {
-                Spacing = 8,
-                Children =
-                {
-                    Ui.Heading("Story Bible"), _bible,
-                    Ui.Button("Show / hide Bible change history", async (_, _) => await ToggleHistoryAsync()), _history
-                }
+                Ui.Heading("Story Bible"), _bible,
+                Ui.SecondaryButton("Export Bible History", ExportBibleHistory)
             }
         };
+        var sidePanel = new ScrollView { IsVisible = false, Content = sidePanelContent };
         var storyColumn = new ColumnDefinition(new GridLength(2, GridUnitType.Star));
         var sidePanelColumn = new ColumnDefinition(new GridLength(0, GridUnitType.Absolute));
+        var sidePanelToggle = new Button
+        {
+            Text = "\U0001F4D6",
+            FontSize = 18,
+            Padding = new Thickness(0),
+            WidthRequest = 36,
+            HeightRequest = 36,
+            HorizontalOptions = LayoutOptions.End,
+            VerticalOptions = LayoutOptions.Start,
+            Margin = new Thickness(0, 8, 6, 0)
+        };
+        var storyPane = new Grid { Children = { _story, sidePanelToggle } };
         var columns = new Grid
         {
             ColumnSpacing = 0,
             ColumnDefinitions = { storyColumn, sidePanelColumn },
-            Children = { _story, sidePanel }
+            Children = { storyPane, sidePanel }
         };
         Grid.SetColumn(sidePanel, 1);
-        var sidePanelToggle = Ui.Button("Story Bible", (_, _) =>
+        _story.Margin = new Thickness(40, 12, 40, 12);
+        sidePanelToggle.Clicked += (_, _) =>
         {
             var show = !sidePanel.IsVisible;
             sidePanel.IsVisible = show;
             sidePanelColumn.Width = show ? new GridLength(1, GridUnitType.Star) : new GridLength(0, GridUnitType.Absolute);
             columns.ColumnSpacing = show ? 16 : 0;
-        });
-        sidePanelToggle.HorizontalOptions = LayoutOptions.End;
-        sidePanelToggle.FontSize = 12;
-        sidePanelToggle.Padding = new Thickness(8, 2);
-        var layout = new Grid
-        {
-            Padding = 16,
-            RowSpacing = 8,
-            RowDefinitions = { new(GridLength.Auto), new(GridLength.Star) },
-            Children = { sidePanelToggle, columns }
         };
-        Grid.SetRow(columns, 1);
-        Content = layout;
+        Content = columns;
         _action.TextChanged += (_, _) => _tabs.ScheduleWorkspaceSave();
         _action.Completed += Play;
     }
@@ -185,8 +184,7 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
                 _suggestions.Children.Add(button);
             }
             _bible.Children.Clear();
-            _bible.Children.Add(StoryBibleView.Create(this, state.CurrentStoryBible, settings.ContentLimits, state.LastCommittedTurnSequence, SaveBibleAsync));
-            if (_historyLoaded) await LoadHistoryAsync(state);
+            _bible.Children.Add(StoryBibleView.Create(this, state.CurrentStoryBible, settings.ContentLimits, state.LastCommittedTurnSequence, SaveBibleAsync, alwaysExpanded: true));
             if (scrollToLatestTurn && latestTurnAnchor is not null)
                 await ScrollToTopAsync(latestTurnAnchor);
         }
@@ -213,35 +211,6 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
     {
         try { await _app.UpdateCurrentStoryBibleAsync(_stateId, next); await Refresh(); }
         catch (Exception ex) { await Ui.Error(this, ex); }
-    }
-
-    private async Task ToggleHistoryAsync()
-    {
-        _history.IsVisible = !_history.IsVisible;
-        if (!_history.IsVisible || _historyLoaded) return;
-        var state = await _repository.GetAsync(_stateId) ?? throw new NarratorException("Story State not found.");
-        await LoadHistoryAsync(state);
-    }
-
-    private async Task LoadHistoryAsync(StoryState state)
-    {
-        _history.Children.Clear();
-        var groups = new List<(DateTimeOffset At, string Header, IReadOnlyList<AppliedStoryBibleChange> Changes)>();
-        groups.AddRange(state.StoryBibleMaintenanceHistory.Select(x =>
-            (x.CompletedAtUtc, x.Reason.ToString(), x.Changes)));
-        var allTurns = await _repository.GetTurnsAsync(_stateId);
-        groups.AddRange(allTurns.Where(x => x.StoryBibleChanges.Count > 0).Select(x =>
-            (x.CompletedAtUtc, $"Turn {x.SequenceNumber}", x.StoryBibleChanges)));
-        foreach (var group in groups.OrderByDescending(x => x.At))
-        {
-            _history.Children.Add(new Label
-            {
-                Text = $"{group.Header} — {group.At.ToLocalTime():g}",
-                FontAttributes = FontAttributes.Bold
-            });
-            foreach (var change in group.Changes) _history.Children.Add(StoryDefinitionPage.ChangeLabel(change));
-        }
-        _historyLoaded = true;
     }
 
     private async void Play(object? sender, EventArgs e)
@@ -312,6 +281,17 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
             var snapshot = await _repository.GetSnapshotAsync(_stateId)
                 ?? throw new NarratorException("Story State not found.");
             await ImportExportService.ExportNarrationHistoryAsync(snapshot.State, snapshot.Turns);
+        }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private async void ExportBibleHistory(object? sender, EventArgs e)
+    {
+        try
+        {
+            var snapshot = await _repository.GetSnapshotAsync(_stateId)
+                ?? throw new NarratorException("Story State not found.");
+            await ImportExportService.ExportBibleHistoryAsync(snapshot.State, snapshot.Turns);
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }

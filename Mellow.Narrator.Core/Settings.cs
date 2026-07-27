@@ -21,7 +21,6 @@ public sealed record PromptTemplateSettings(
 
 public static class PromptTemplateDefaults
 {
-    public const int MaximumTemplateCharacters = 20000;
     public const string ValidationErrorPlaceholder = "{validationError}";
     public const string SchemaPlaceholder = "{schema}";
     public const string MinSuggestedActionsPlaceholder = "{minSuggestedActions}";
@@ -51,6 +50,8 @@ public static class PromptTemplateDefaults
         or "You will push open the door"). Narrate the immediate scene, offer between {MinSuggestedActionsPlaceholder} and {MaxSuggestedActionsPlaceholder} concise suggested actions, flag every existing Bible entry relevant now,
         and return only incremental Story Bible updates. Resolve the current player action from the final request,
         advance beyond the most recent narration, and never answer an older action or repeat an earlier scene.
+        If the player's action is passive, hesitant, or leaves no clear direction, take the initiative yourself:
+        introduce a complication, event, or NPC action that pushes the plot forward instead of letting the scene idle.
         For an add update, always set entryId to null because the application assigns the ID. Never invent IDs.
         For replace and remove updates, use only an existing Story Bible entry ID supplied in the request.
         In relevantStoryBibleEntryIds, use only IDs copied exactly from the current Story Bible. Never invent IDs.
@@ -115,7 +116,6 @@ public sealed record ApiConnectionSettings(
     ContentLimitSettings ContentLimits,
     ConnectionCapabilities Capabilities)
 {
-    public PromptTemplateSettings PromptTemplates { get; init; } = PromptTemplateDefaults.Create();
     public LoggingSettings Logging { get; init; } = LoggingDefaults.Create();
 }
 
@@ -157,7 +157,6 @@ public static class SettingsValidator
             errors[nameof(value.Logging)] = "Logging settings are required.";
         else if (!Enum.IsDefined(value.Logging.MinimumLevel))
             errors[nameof(value.Logging.MinimumLevel)] = "Select a valid logging level.";
-        ValidatePromptTemplates(errors, value.PromptTemplates);
 
         var c = value.ContentLimits;
         Range(errors, nameof(c.MaxStoryTitleCharacters), c.MaxStoryTitleCharacters, 1, 1000);
@@ -175,48 +174,6 @@ public static class SettingsValidator
         Range(errors, nameof(c.MaxStoryBibleUpdatesPerResponse), c.MaxStoryBibleUpdatesPerResponse, 1, 1000);
         Range(errors, nameof(c.MaxResponseBodyBytes), c.MaxResponseBodyBytes, 64 * 1024, 16 * 1024 * 1024);
         return errors;
-    }
-
-    private static void ValidatePromptTemplates(
-        IDictionary<string, string> errors,
-        PromptTemplateSettings? templates)
-    {
-        if (templates is null)
-        {
-            errors[nameof(ApiConnectionSettings.PromptTemplates)] = "Prompt templates are required.";
-            return;
-        }
-
-        Prompt(errors, nameof(templates.StoryDefinitionInstruction), templates.StoryDefinitionInstruction);
-        Prompt(errors, nameof(templates.StoryNarrationInstruction), templates.StoryNarrationInstruction);
-        Prompt(errors, nameof(templates.CorrectiveRetryInstruction), templates.CorrectiveRetryInstruction);
-        Prompt(errors, nameof(templates.PromptedJsonInstruction), templates.PromptedJsonInstruction);
-        Prompt(errors, nameof(templates.OpeningSceneInstruction), templates.OpeningSceneInstruction);
-        Prompt(errors, nameof(templates.ContinueStoryInstruction), templates.ContinueStoryInstruction);
-        if (!string.IsNullOrWhiteSpace(templates.CorrectiveRetryInstruction) &&
-            !templates.CorrectiveRetryInstruction.Contains(PromptTemplateDefaults.ValidationErrorPlaceholder, StringComparison.Ordinal))
-            errors[nameof(templates.CorrectiveRetryInstruction)] =
-                $"Must contain {PromptTemplateDefaults.ValidationErrorPlaceholder}.";
-        if (!string.IsNullOrWhiteSpace(templates.PromptedJsonInstruction) &&
-            !templates.PromptedJsonInstruction.Contains(PromptTemplateDefaults.SchemaPlaceholder, StringComparison.Ordinal))
-            errors[nameof(templates.PromptedJsonInstruction)] =
-                $"Must contain {PromptTemplateDefaults.SchemaPlaceholder}.";
-        if (!string.IsNullOrWhiteSpace(templates.StoryNarrationInstruction) &&
-            (!templates.StoryNarrationInstruction.Contains(PromptTemplateDefaults.MinSuggestedActionsPlaceholder, StringComparison.Ordinal) ||
-             !templates.StoryNarrationInstruction.Contains(PromptTemplateDefaults.MaxSuggestedActionsPlaceholder, StringComparison.Ordinal)))
-            errors[nameof(templates.StoryNarrationInstruction)] =
-                $"Must contain {PromptTemplateDefaults.MinSuggestedActionsPlaceholder} and {PromptTemplateDefaults.MaxSuggestedActionsPlaceholder}.";
-    }
-
-    private static void Prompt(
-        IDictionary<string, string> errors,
-        string name,
-        string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            errors[name] = "Must not be empty.";
-        else if (value.Length > PromptTemplateDefaults.MaximumTemplateCharacters)
-            errors[name] = $"Must not exceed {PromptTemplateDefaults.MaximumTemplateCharacters} characters.";
     }
 
     private static void OptionalRange(IDictionary<string, string> errors, string name, double? value, double min, double max)

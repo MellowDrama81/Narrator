@@ -19,8 +19,8 @@ public sealed class ManageTabsPage : ContentPage
             {
                 var title = new Label { FontAttributes = FontAttributes.Bold };
                 title.SetBinding(Label.TextProperty, nameof(Page.Title));
-                var earlier = Ui.Button("Earlier", async (sender, _) => await MoveAsync(sender, -1));
-                var later = Ui.Button("Later", async (sender, _) => await MoveAsync(sender, 1));
+                var earlier = Ui.SecondaryButton("Earlier", async (sender, _) => await MoveAsync(sender, -1));
+                var later = Ui.SecondaryButton("Later", async (sender, _) => await MoveAsync(sender, 1));
                 earlier.BindingContextChanged += (_, _) => UpdateButtons(earlier, later);
                 later.BindingContextChanged += (_, _) => UpdateButtons(earlier, later);
                 return new VerticalStackLayout

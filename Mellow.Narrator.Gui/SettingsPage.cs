@@ -54,7 +54,7 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
             _credentialEdited = true;
             _clearCredential = false;
         };
-        var clear = Ui.Button("Clear stored API key", (_, _) =>
+        var clear = Ui.DestructiveButton("Clear stored API key", (_, _) =>
         {
             _clearCredential = true;
             _credentialEdited = false;
@@ -85,13 +85,12 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
                     Field("Maximum Story Bible entries (default 200; range 1–2000)", _maxEntries),
                     Ui.Buttons(
                         Ui.Button("Save", Save),
-                        Ui.Button("Load Models", DiscoverModels),
-                        Ui.Button("Test Connection", Test),
-                        Ui.Button("Reset defaults", Reset)),
+                        Ui.SecondaryButton("Load Models", DiscoverModels),
+                        Ui.SecondaryButton("Test Connection", Test),
+                        Ui.SecondaryButton("Reset defaults", Reset)),
                     Ui.Buttons(
-                        Ui.Button("Advanced Settings", async (_, _) => await Navigation.PushModalAsync(new NavigationPage(new AdvancedSettingsPage(_app)))),
-                        Ui.Button("Manage Trash", async (_, _) => await Navigation.PushModalAsync(new NavigationPage(new TrashPage(_trash))))),
-                    Ui.Button("Prompt Templates", async (_, _) => await Navigation.PushModalAsync(new NavigationPage(new PromptTemplatesPage(_app)))),
+                        Ui.SecondaryButton("Advanced Settings", async (_, _) => await Navigation.PushModalAsync(new NavigationPage(new AdvancedSettingsPage(_app)))),
+                        Ui.SecondaryButton("Manage Trash", async (_, _) => await Navigation.PushModalAsync(new NavigationPage(new TrashPage(_trash))))),
                     _status
                 }
             }

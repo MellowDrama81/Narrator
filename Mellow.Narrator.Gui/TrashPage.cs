@@ -28,19 +28,23 @@ public sealed class TrashPage : ContentPage
                 return new VerticalStackLayout { Padding = 6, Children = { label, detail } };
             })
         };
-        Content = new Grid
+        var empty = Ui.Empty("Trash is empty.");
+        _items.CollectionChanged += (_, _) => empty.IsVisible = _items.Count == 0;
+        var listArea = new Grid { Children = { _list, empty } };
+        var grid = new Grid
         {
             Padding = 16,
             RowDefinitions = { new(GridLength.Auto), new(GridLength.Auto), new(GridLength.Star) },
             Children =
             {
-                Ui.Buttons(Ui.Button("Restore", Restore), Ui.Button("Delete Permanently", Delete), Ui.Button("Empty Trash", Empty)),
+                Ui.Buttons(Ui.Button("Restore", Restore), Ui.DestructiveButton("Delete Permanently", Delete), Ui.DestructiveButton("Empty Trash", Empty)),
                 _usage,
-                _list
+                listArea
             }
         };
-        ((Grid)Content).SetRow(_usage, 1);
-        ((Grid)Content).SetRow(_list, 2);
+        grid.SetRow(_usage, 1);
+        grid.SetRow(listArea, 2);
+        Content = grid;
         ToolbarItems.Add(new ToolbarItem("Done", null, async () => await Navigation.PopModalAsync()));
     }
 
