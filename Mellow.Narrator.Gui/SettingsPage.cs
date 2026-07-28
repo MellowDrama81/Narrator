@@ -26,7 +26,11 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
         ["category"] = "default 100; range 1–1000",
         ["name"] = "default 200; range 1–2000",
         ["updates"] = "default 100; range 1–1000",
-        ["responseBytes"] = "default 2097152; range 65536–16777216"
+        ["responseBytes"] = "default 2097152; range 65536–16777216",
+        ["paragraphsMin"] = "default 4; range 1–20; must not exceed the maximum",
+        ["paragraphsMax"] = "default 6; range 1–20",
+        ["sentencesMin"] = "default 2; range 1–20; must not exceed the maximum",
+        ["sentencesMax"] = "default 5; range 1–20"
     };
     private readonly INarratorApplication _app;
     private readonly ITrashStore _trash;
@@ -146,6 +150,10 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
         Add(contentLimits, "Minimum suggested actions", "suggestedMin");
         Add(contentLimits, "Maximum suggested actions", "suggestedCount");
         Add(contentLimits, "Suggested action characters", "suggestedLength");
+        Add(contentLimits, "Minimum paragraphs per response", "paragraphsMin");
+        Add(contentLimits, "Maximum paragraphs per response", "paragraphsMax");
+        Add(contentLimits, "Minimum sentences per paragraph", "sentencesMin");
+        Add(contentLimits, "Maximum sentences per paragraph", "sentencesMax");
         Add(contentLimits, "Bible category characters", "category");
         Add(contentLimits, "Bible name characters", "name");
         Add(contentLimits, "Bible updates per response", "updates");
@@ -307,7 +315,11 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
                 Int("suggestedCount"), Int("suggestedLength"),
                 Int("category"), Int("name"), Int("updates"), Int("responseBytes"))
             {
-                MinSuggestedActions = Int("suggestedMin")
+                MinSuggestedActions = Int("suggestedMin"),
+                MinParagraphsPerResponse = Int("paragraphsMin"),
+                MaxParagraphsPerResponse = Int("paragraphsMax"),
+                MinSentencesPerParagraph = Int("sentencesMin"),
+                MaxSentencesPerParagraph = Int("sentencesMax")
             },
             Logging = new((NarratorLogLevel?)_logLevel.SelectedItem
                 ?? throw new NarratorException("Select a logging level.")),
@@ -365,6 +377,10 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
         Set("suggestedMin", c.MinSuggestedActions);
         Set("suggestedCount", c.MaxSuggestedActions);
         Set("suggestedLength", c.MaxSuggestedActionCharacters);
+        Set("paragraphsMin", c.MinParagraphsPerResponse);
+        Set("paragraphsMax", c.MaxParagraphsPerResponse);
+        Set("sentencesMin", c.MinSentencesPerParagraph);
+        Set("sentencesMax", c.MaxSentencesPerParagraph);
         Set("category", c.MaxStoryBibleCategoryCharacters);
         Set("name", c.MaxStoryBibleNameCharacters);
         Set("updates", c.MaxStoryBibleUpdatesPerResponse);

@@ -502,7 +502,11 @@ public sealed class OpenAiCompatibleProvider(
     {
         var narrationInstruction = Templates.StoryNarrationInstruction
             .Replace(PromptTemplateDefaults.MinSuggestedActionsPlaceholder, limits.MinSuggestedActions.ToString(), StringComparison.Ordinal)
-            .Replace(PromptTemplateDefaults.MaxSuggestedActionsPlaceholder, limits.MaxSuggestedActions.ToString(), StringComparison.Ordinal);
+            .Replace(PromptTemplateDefaults.MaxSuggestedActionsPlaceholder, limits.MaxSuggestedActions.ToString(), StringComparison.Ordinal)
+            .Replace(PromptTemplateDefaults.MinParagraphsPlaceholder, limits.MinParagraphsPerResponse.ToString(), StringComparison.Ordinal)
+            .Replace(PromptTemplateDefaults.MaxParagraphsPlaceholder, limits.MaxParagraphsPerResponse.ToString(), StringComparison.Ordinal)
+            .Replace(PromptTemplateDefaults.MinSentencesPlaceholder, limits.MinSentencesPerParagraph.ToString(), StringComparison.Ordinal)
+            .Replace(PromptTemplateDefaults.MaxSentencesPlaceholder, limits.MaxSentencesPerParagraph.ToString(), StringComparison.Ordinal);
         var messages = new List<JsonObject> { Message("system", narrationInstruction) };
         messages.Add(Message("user", JsonSerializer.Serialize(new
         {

@@ -25,6 +25,10 @@ public static class PromptTemplateDefaults
     public const string SchemaPlaceholder = "{schema}";
     public const string MinSuggestedActionsPlaceholder = "{minSuggestedActions}";
     public const string MaxSuggestedActionsPlaceholder = "{maxSuggestedActions}";
+    public const string MinParagraphsPlaceholder = "{minParagraphs}";
+    public const string MaxParagraphsPlaceholder = "{maxParagraphs}";
+    public const string MinSentencesPlaceholder = "{minSentences}";
+    public const string MaxSentencesPlaceholder = "{maxSentences}";
 
     public static PromptTemplateSettings Create() => new(
         """
@@ -53,8 +57,9 @@ public static class PromptTemplateDefaults
         You narrate an interactive story. Return JSON only. The Story Bible is authoritative and complete.
         Narrate in second person and present tense, as though it is happening to the player right now
         (for example, "You push open the door and the room falls silent," not "She pushed open the door"
-        or "You will push open the door"). Narrate the immediate scene in 4 to 6 short paragraphs of no more
-        than 2 to 5 sentences each, separating every paragraph from the next with a blank line by embedding a
+        or "You will push open the door"). Narrate the immediate scene in {MinParagraphsPlaceholder} to
+        {MaxParagraphsPlaceholder} short paragraphs of {MinSentencesPlaceholder} to {MaxSentencesPlaceholder}
+        sentences each, separating every paragraph from the next with a blank line by embedding a
         literal double newline character (\n\n) between them inside the narration string; never write a long
         paragraph, and never return the scene as one unbroken block of text,
         offer between {MinSuggestedActionsPlaceholder} and {MaxSuggestedActionsPlaceholder} concise suggested actions, flag every existing Bible entry relevant now,
@@ -114,6 +119,10 @@ public sealed record ContentLimitSettings(
     int MaxResponseBodyBytes)
 {
     public int MinSuggestedActions { get; init; } = 2;
+    public int MinParagraphsPerResponse { get; init; } = 4;
+    public int MaxParagraphsPerResponse { get; init; } = 6;
+    public int MinSentencesPerParagraph { get; init; } = 2;
+    public int MaxSentencesPerParagraph { get; init; } = 5;
 }
 
 public enum StructuredOutputTier { Untested, StrictJsonSchema, JsonMode, PromptedJson, Unsupported }
@@ -198,6 +207,14 @@ public static class SettingsValidator
         Range(errors, nameof(c.MaxStoryBibleNameCharacters), c.MaxStoryBibleNameCharacters, 1, 2000);
         Range(errors, nameof(c.MaxStoryBibleUpdatesPerResponse), c.MaxStoryBibleUpdatesPerResponse, 1, 1000);
         Range(errors, nameof(c.MaxResponseBodyBytes), c.MaxResponseBodyBytes, 64 * 1024, 16 * 1024 * 1024);
+        Range(errors, nameof(c.MinParagraphsPerResponse), c.MinParagraphsPerResponse, 1, 20);
+        Range(errors, nameof(c.MaxParagraphsPerResponse), c.MaxParagraphsPerResponse, 1, 20);
+        if (c.MinParagraphsPerResponse > c.MaxParagraphsPerResponse)
+            errors[nameof(c.MinParagraphsPerResponse)] = "Must not exceed the maximum paragraphs per response.";
+        Range(errors, nameof(c.MinSentencesPerParagraph), c.MinSentencesPerParagraph, 1, 20);
+        Range(errors, nameof(c.MaxSentencesPerParagraph), c.MaxSentencesPerParagraph, 1, 20);
+        if (c.MinSentencesPerParagraph > c.MaxSentencesPerParagraph)
+            errors[nameof(c.MinSentencesPerParagraph)] = "Must not exceed the maximum sentences per paragraph.";
         return errors;
     }
 
