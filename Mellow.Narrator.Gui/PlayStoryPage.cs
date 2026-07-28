@@ -18,6 +18,7 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
     private readonly VerticalStackLayout _bible = new();
     private readonly Label _limitWarning = new() { TextColor = Colors.DarkOrange };
     private readonly ScrollView _story;
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private CancellationTokenSource? _request;
     private PendingOperationState? _pendingOperation;
 
@@ -146,7 +147,7 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
     protected override async void OnAppearing()
     {
         base.OnAppearing();
-        if (_pendingOperation is not null)
+        if (_pendingOperation is not null && _request is null)
         {
             _pendingOperation = null;
             await _tabs.SaveWorkspaceNowAsync();
@@ -164,6 +165,16 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
     }
 
     private async Task Refresh(bool scrollToLatestTurn = false)
+    {
+        // Several independent callers (OnAppearing, SaveBibleAsync, Play() itself) can trigger a
+        // refresh; without serializing them, two overlapping rebuilds of the same collections can
+        // interleave and leave the busy overlay/controls reconciled against a stale snapshot.
+        await _refreshGate.WaitAsync();
+        try { await RefreshCoreAsync(scrollToLatestTurn); }
+        finally { _refreshGate.Release(); }
+    }
+
+    private async Task RefreshCoreAsync(bool scrollToLatestTurn)
     {
         View? latestTurnAnchor = null;
         var completed = false;
