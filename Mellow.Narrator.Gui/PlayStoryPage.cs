@@ -12,6 +12,8 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
     private readonly VerticalStackLayout _suggestions = new() { Spacing = 4 };
     private readonly Entry _action = new() { Placeholder = "What do you do?" };
     private readonly ActivityIndicator _busy = new();
+    private readonly Grid _busyOverlay;
+    private readonly Button _submit;
     private readonly Button _copy;
     private readonly VerticalStackLayout _bible = new();
     private readonly Label _limitWarning = new() { TextColor = Colors.DarkOrange };
@@ -34,7 +36,33 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
         _pendingOperation = restoredOperation;
         _action.Text = restoredState?.PendingPlayerAction ?? "";
         _copy = Ui.SecondaryButton("Copy Story", Copy);
+        _submit = Ui.Button("Submit", Play);
         Title = "Play Story";
+        var actionRow = new Grid
+        {
+            ColumnSpacing = 8,
+            ColumnDefinitions = { new(GridLength.Star), new(GridLength.Auto) },
+            Children = { _action, _submit }
+        };
+        Grid.SetColumn(_submit, 1);
+        var interactionArea = new VerticalStackLayout { Spacing = 8, Children = { _suggestions, actionRow } };
+        _busy.Color = Colors.White;
+        _busyOverlay = new Grid
+        {
+            IsVisible = false,
+            BackgroundColor = Color.FromArgb("#AA000000"),
+            Children =
+            {
+                new HorizontalStackLayout
+                {
+                    Spacing = 8,
+                    HorizontalOptions = LayoutOptions.Center,
+                    VerticalOptions = LayoutOptions.Center,
+                    Children = { _busy, new Label { Text = "Writing…", TextColor = Colors.White } }
+                }
+            }
+        };
+        var interactionStack = new Grid { Children = { interactionArea, _busyOverlay } };
         _story = new ScrollView
         {
             Content = new VerticalStackLayout
@@ -43,9 +71,8 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
                 Padding = new Thickness(0, 0, 16, 0),
                 Children =
                 {
-                    _limitWarning, _narration, Ui.Heading("Suggested Actions"), _suggestions, _action,
-                    Ui.Buttons(Ui.Button("Continue", Play), _copy, Ui.SecondaryButton("Export", Export), Ui.SecondaryButton("Export Full History", ExportHistory)),
-                    Ui.Busy(_busy, "Continuing…")
+                    _limitWarning, _narration, interactionStack,
+                    Ui.Buttons(_copy, Ui.SecondaryButton("Export", Export), Ui.SecondaryButton("Export Full History", ExportHistory))
                 }
             }
         };
@@ -128,7 +155,10 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
                     "Cancel",
                     null,
                     "Retry") == "Retry")
+            {
                 Play(null, EventArgs.Empty);
+                return;
+            }
         }
         await Refresh(scrollToLatestTurn: true);
     }
@@ -168,9 +198,13 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
                     _narration.Children.Add(actionLabel);
                     anchor = actionLabel;
                 }
-                var narrationLabel = new Label { Text = turn.Narration, FontSize = 17 };
-                _narration.Children.Add(narrationLabel);
-                latestTurnAnchor = anchor ?? narrationLabel;
+                foreach (var paragraph in SplitParagraphs(turn.Narration))
+                {
+                    var narrationLabel = new Label { Text = paragraph, FontSize = 17 };
+                    _narration.Children.Add(narrationLabel);
+                    anchor ??= narrationLabel;
+                }
+                latestTurnAnchor = anchor;
             }
             var last = turns.LastOrDefault();
             _suggestions.Children.Clear();
@@ -185,11 +219,19 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
             }
             _bible.Children.Clear();
             _bible.Children.Add(StoryBibleView.Create(this, state.CurrentStoryBible, settings.ContentLimits, state.LastCommittedTurnSequence, SaveBibleAsync, alwaysExpanded: true));
+            var inFlight = _request is not null;
+            _busyOverlay.IsVisible = inFlight;
+            _action.IsEnabled = !inFlight;
+            _submit.IsEnabled = !inFlight;
+            SetSuggestionsEnabled(!inFlight);
             if (scrollToLatestTurn && latestTurnAnchor is not null)
                 await ScrollToTopAsync(latestTurnAnchor);
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
+
+    private static string[] SplitParagraphs(string text) =>
+        text.Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private async Task ScrollToTopAsync(VisualElement anchor)
     {
@@ -221,6 +263,10 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
         {
             _request = new();
             _busy.IsRunning = true;
+            _busyOverlay.IsVisible = true;
+            _action.IsEnabled = false;
+            _submit.IsEnabled = false;
+            SetSuggestionsEnabled(false);
             _copy.IsEnabled = false;
             var action = _action.Text;
             var state = await _repository.GetAsync(_stateId) ?? throw new NarratorException("Story State not found.");
@@ -248,12 +294,21 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
         {
             _pendingOperation = null;
             _busy.IsRunning = false;
+            _busyOverlay.IsVisible = false;
+            _action.IsEnabled = true;
+            _submit.IsEnabled = true;
+            SetSuggestionsEnabled(true);
             _copy.IsEnabled = true;
             _request?.Dispose();
             _request = null;
             await _tabs.SaveWorkspaceNowAsync();
         }
         if (retry) Play(null, EventArgs.Empty);
+    }
+
+    private void SetSuggestionsEnabled(bool enabled)
+    {
+        foreach (var button in _suggestions.Children.OfType<Button>()) button.IsEnabled = enabled;
     }
 
     private async void Copy(object? sender, EventArgs e)

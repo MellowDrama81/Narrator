@@ -248,12 +248,7 @@ public sealed class OpenAiCompatibleProvider(
                 if (TraceBodiesEnabled(settings) && request.Content is not null)
                 {
                     var requestBody = await request.Content.ReadAsStringAsync(attemptCts.Token);
-                    _logger.LogTrace(
-                        "LLM request body for {RequestId}, {Method} {Endpoint}: {RequestBody}",
-                        requestId,
-                        request.Method,
-                        endpoint,
-                        RedactCredential(requestBody, credential));
+                    LogRequestMessages(requestId, endpoint, requestBody, credential);
                 }
                 var started = timeProvider.GetTimestamp();
                 using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, attemptCts.Token);
@@ -266,14 +261,7 @@ public sealed class OpenAiCompatibleProvider(
                     endpoint,
                     timeProvider.GetElapsedTime(started).TotalMilliseconds);
                 if (TraceBodiesEnabled(settings))
-                {
-                    _logger.LogTrace(
-                        "LLM response body for {RequestId}, {Method} {Endpoint}: {ResponseBody}",
-                        requestId,
-                        request.Method,
-                        endpoint,
-                        RedactCredential(Encoding.UTF8.GetString(bytes), credential));
-                }
+                    LogResponseBody(requestId, request.Method, endpoint, bytes, credential);
                 if (!response.IsSuccessStatusCode)
                 {
                     var retryable = response.StatusCode == HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500;
@@ -311,6 +299,88 @@ public sealed class OpenAiCompatibleProvider(
             requestId,
             last?.GetType().Name ?? "Unknown");
         throw new ProviderException(last is TaskCanceledException ? "The provider request timed out." : "The provider request failed.", null, last);
+    }
+
+    private void LogRequestMessages(Guid requestId, string endpoint, string requestBody, string? credential)
+    {
+        var messages = (JsonNode.Parse(requestBody) as JsonObject)?["messages"] as JsonArray;
+        if (messages is null)
+        {
+            _logger.LogTrace("LLM request body for {RequestId}, {Endpoint}: {RequestBody}", requestId, endpoint, RedactCredential(requestBody, credential));
+            return;
+        }
+        for (var index = 0; index < messages.Count; index++)
+        {
+            var message = messages[index] as JsonObject;
+            var role = message?["role"]?.GetValue<string>() ?? "unknown";
+            var content = message?["content"]?.GetValue<string>() ?? "";
+            _logger.LogTrace(
+                "LLM request message {MessageIndex} for {RequestId}, {Endpoint} [{Role}]: {Content}",
+                index,
+                requestId,
+                endpoint,
+                role,
+                RedactCredential(Decoded(content), credential));
+        }
+    }
+
+    private void LogResponseBody(Guid requestId, HttpMethod method, string endpoint, byte[] bytes, string? credential)
+    {
+        var text = Encoding.UTF8.GetString(bytes);
+        try
+        {
+            var content = (JsonNode.Parse(text) as JsonObject)?["choices"]?[0]?["message"]?["content"]?.GetValue<string>();
+            if (content is not null && LogStoryResponse(requestId, method, endpoint, content, credential)) return;
+        }
+        catch (JsonException) { }
+        catch (InvalidOperationException) { }
+        _logger.LogTrace(
+            "LLM response body for {RequestId}, {Method} {Endpoint}: {ResponseBody}",
+            requestId,
+            method,
+            endpoint,
+            RedactCredential(text, credential));
+    }
+
+    private bool LogStoryResponse(Guid requestId, HttpMethod method, string endpoint, string content, string? credential)
+    {
+        var parsed = JsonNode.Parse(content) as JsonObject;
+        var narration = parsed?["narration"]?.GetValue<string>();
+        if (narration is null) return false;
+
+        _logger.LogTrace(
+            "LLM response message for {RequestId}, {Method} {Endpoint}: {Narration}",
+            requestId,
+            method,
+            endpoint,
+            RedactCredential(narration, credential));
+
+        var suggestions = parsed!["suggestedActions"] as JsonArray ?? [];
+        for (var index = 0; index < suggestions.Count; index++)
+        {
+            var suggestion = suggestions[index]?.GetValue<string>();
+            if (suggestion is null) continue;
+            _logger.LogTrace(
+                "LLM response suggested action {ActionIndex} for {RequestId}: {Action}",
+                index,
+                requestId,
+                RedactCredential(suggestion, credential));
+        }
+
+        var updates = parsed["storyBibleUpdates"] as JsonArray ?? [];
+        for (var index = 0; index < updates.Count; index++)
+        {
+            var update = updates[index] as JsonObject;
+            var operation = update?["operation"]?.GetValue<string>() ?? "unknown";
+            var name = (update?["entry"] as JsonObject)?["name"]?.GetValue<string>() ?? update?["entryId"]?.GetValue<string>() ?? "(unknown)";
+            _logger.LogTrace(
+                "LLM response Story Bible update {UpdateIndex} for {RequestId}: {Operation} {Name}",
+                index,
+                requestId,
+                operation,
+                RedactCredential(name, credential));
+        }
+        return true;
     }
 
     private TimeSpan? RetryDelay(ApiConnectionSettings settings, HttpResponseMessage response, int attempt)
@@ -373,6 +443,27 @@ public sealed class OpenAiCompatibleProvider(
 
     private static bool TraceBodiesEnabled(ApiConnectionSettings settings) =>
         settings.Logging.MinimumLevel == NarratorLogLevel.Trace;
+
+    private static string Decoded(string content)
+    {
+        if (content.Length == 0 || (content[0] != '{' && content[0] != '[')) return content;
+        try
+        {
+            var node = JsonNode.Parse(content);
+            return node is null ? content : Readable(node);
+        }
+        catch (JsonException) { return content; }
+    }
+
+    private static string Readable(JsonNode? node) => node switch
+    {
+        null => "null",
+        JsonValue value when value.TryGetValue<string>(out var text) => text,
+        JsonValue value => value.ToJsonString(),
+        JsonArray array => string.Join(", ", array.Select(Readable)),
+        JsonObject obj => string.Join("; ", obj.Select(x => $"{x.Key}: {Readable(x.Value)}")),
+        _ => node.ToJsonString()
+    };
 
     private static string RedactCredential(string value, string? credential) =>
         string.IsNullOrEmpty(credential)

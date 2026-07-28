@@ -221,7 +221,7 @@ internal static class StoryBibleView
                     var categoryInput = new Entry { Text = entry.Category, Placeholder = "Category", MaxLength = limits.MaxStoryBibleCategoryCharacters };
                     var nameInput = new Entry { Text = entry.Name, Placeholder = "Name", MaxLength = limits.MaxStoryBibleNameCharacters };
                     var contentInput = new Editor { Text = entry.Content, Placeholder = "Content", AutoSize = EditorAutoSizeOption.TextChanges, MinimumHeightRequest = 80 };
-                    var importanceInput = new Picker { Title = "Importance", ItemsSource = new[] { "1", "2", "3", "4", "5" } };
+                    var importanceInput = new Picker { ItemsSource = new[] { "1", "2", "3", "4", "5" } };
                     importanceInput.SelectedIndex = Math.Clamp(entry.Importance, 1, 5) - 1;
                     var details = new VerticalStackLayout
                     {
@@ -275,7 +275,7 @@ internal static class StoryBibleView
         var newCategory = new Entry { Placeholder = "Category", MaxLength = limits.MaxStoryBibleCategoryCharacters };
         var newName = new Entry { Placeholder = "Name", MaxLength = limits.MaxStoryBibleNameCharacters };
         var newContent = new Editor { Placeholder = "Content", AutoSize = EditorAutoSizeOption.TextChanges, MinimumHeightRequest = 80 };
-        var newImportance = new Picker { Title = "Importance", ItemsSource = new[] { "1", "2", "3", "4", "5" }, SelectedIndex = 2 };
+        var newImportance = new Picker { ItemsSource = new[] { "1", "2", "3", "4", "5" }, SelectedIndex = 2 };
         var addForm = new VerticalStackLayout
         {
             IsVisible = false,
