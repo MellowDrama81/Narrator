@@ -72,7 +72,9 @@ public static class PromptTemplateDefaults
         """,
         $"Your previous response failed validation: {ValidationErrorPlaceholder}. Return a corrected JSON object only.",
         $"Return an object matching this JSON Schema exactly: {SchemaPlaceholder}",
-        "Create the opening scene.",
+        "Create the opening scene. Narrate entirely in second person present tense, addressing the player " +
+        "character as \"you\" throughout; never refer to them in third person (for example \"she\", \"he\", " +
+        "\"they\", or by name) even though no prior narration exists yet to anchor the pattern.",
         "Continue the story.");
 }
 
