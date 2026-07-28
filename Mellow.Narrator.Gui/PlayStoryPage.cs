@@ -165,6 +165,8 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
 
     private async Task Refresh(bool scrollToLatestTurn = false)
     {
+        View? latestTurnAnchor = null;
+        var completed = false;
         try
         {
             var state = await _repository.GetAsync(_stateId) ?? throw new NarratorException("Story State not found.");
@@ -188,7 +190,6 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
             var turns = await _repository.GetTurnsAsync(
                 _stateId,
                 Math.Max(1, settings.StoryGeneration.RecentTurnCount));
-            View? latestTurnAnchor = null;
             foreach (var turn in turns)
             {
                 View? anchor = null;
@@ -219,15 +220,19 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
             }
             _bible.Children.Clear();
             _bible.Children.Add(StoryBibleView.Create(this, state.CurrentStoryBible, settings.ContentLimits, state.LastCommittedTurnSequence, SaveBibleAsync, alwaysExpanded: true));
+            completed = true;
+        }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+        finally
+        {
             var inFlight = _request is not null;
             _busyOverlay.IsVisible = inFlight;
             _action.IsEnabled = !inFlight;
             _submit.IsEnabled = !inFlight;
             SetSuggestionsEnabled(!inFlight);
-            if (scrollToLatestTurn && latestTurnAnchor is not null)
-                await ScrollToTopAsync(latestTurnAnchor);
         }
-        catch (Exception ex) { await Ui.Error(this, ex); }
+        if (completed && scrollToLatestTurn && latestTurnAnchor is not null)
+            await ScrollToTopAsync(latestTurnAnchor);
     }
 
     private static string[] SplitParagraphs(string text) =>
