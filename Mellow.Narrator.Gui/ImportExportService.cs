@@ -79,8 +79,16 @@ internal static class ImportExportService
 
     private static string FormatBibleChange(AppliedStoryBibleChange change) =>
         $"{change.Operation}: {change.Before?.Name ?? change.After?.Name} ({change.Source})" + Environment.NewLine +
-        $"Before: {change.Before?.Content ?? "—"}" + Environment.NewLine +
-        $"After: {change.After?.Content ?? "—"}";
+        $"Before: {FormatFacts(change.Before)}" + Environment.NewLine +
+        $"After: {FormatFacts(change.After)}";
+
+    private static string FormatFacts(StoryBibleEntry? entry)
+    {
+        if (entry is null) return "—";
+        var known = string.Join("; ", entry.KnownFacts);
+        var secret = entry.SecretFacts.Count == 0 ? "" : $" [secret: {string.Join("; ", entry.SecretFacts)}]";
+        return $"{known}{secret}";
+    }
 
     private static string FormatTurn(StoryTurn turn) =>
         turn.PlayerAction is null

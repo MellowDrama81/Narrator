@@ -680,16 +680,19 @@ public sealed class OpenAiCompatibleProvider(
 
     private static void ValidateProposedEntry(JsonObject entry, ApiConnectionSettings settings)
     {
-        RequireProperties(entry, "category", "name", "content", "importance");
+        RequireProperties(entry, "category", "name", "knownFacts", "secretFacts", "importance");
         var category = RequiredString(entry, "category");
         var name = RequiredString(entry, "name");
-        var content = RequiredString(entry, "content");
         if (string.IsNullOrWhiteSpace(category) || category.Length > settings.ContentLimits.MaxStoryBibleCategoryCharacters)
             throw new JsonException("A Story Bible category is empty or exceeds the configured limit.");
         if (string.IsNullOrWhiteSpace(name) || name.Length > settings.ContentLimits.MaxStoryBibleNameCharacters)
             throw new JsonException("A Story Bible name is empty or exceeds the configured limit.");
-        if (string.IsNullOrWhiteSpace(content))
-            throw new JsonException("A Story Bible entry has empty content.");
+        var knownFacts = RequiredStringArray(entry, "knownFacts");
+        var secretFacts = RequiredStringArray(entry, "secretFacts");
+        if (knownFacts.Count == 0 && secretFacts.Count == 0)
+            throw new JsonException("A Story Bible entry has no known or secret facts.");
+        if (knownFacts.Any(string.IsNullOrWhiteSpace) || secretFacts.Any(string.IsNullOrWhiteSpace))
+            throw new JsonException("A Story Bible entry has an empty fact.");
         var importance = RequiredInteger(entry, "importance");
         if (importance is < 1 or > 5) throw new JsonException("Story Bible importance must be from 1 to 5.");
     }
@@ -703,6 +706,9 @@ public sealed class OpenAiCompatibleProvider(
 
     private static JsonArray RequiredArray(JsonObject value, string name) =>
         value[name] as JsonArray ?? throw new JsonException($"'{name}' must be an array.");
+
+    private static IReadOnlyList<string> RequiredStringArray(JsonObject value, string name) =>
+        RequiredArray(value, name).Select(x => StringValue(x, $"An item in '{name}'")).ToArray();
 
     private static string RequiredString(JsonObject value, string name) =>
         StringValue(value[name], $"'{name}'");
@@ -811,9 +817,10 @@ public sealed class OpenAiCompatibleProvider(
     {
         ["category"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxStoryBibleCategoryCharacters },
         ["name"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxStoryBibleNameCharacters },
-        ["content"] = new JsonObject { ["type"] = "string" },
+        ["knownFacts"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } },
+        ["secretFacts"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } },
         ["importance"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 5 }
-    }, ["category", "name", "content", "importance"]);
+    }, ["category", "name", "knownFacts", "secretFacts", "importance"]);
 
     private static JsonObject ObjectSchema(IReadOnlyDictionary<string, JsonNode?> properties, IEnumerable<string> required) => new()
     {

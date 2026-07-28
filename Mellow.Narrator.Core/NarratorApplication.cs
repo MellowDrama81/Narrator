@@ -181,7 +181,14 @@ public sealed class NarratorApplication(
             ? await definitions.GetAsync(draft.SourceStoryDefinitionId.Value, cancellationToken)
             : null;
         var raw = new StoryBible(generated.InitialStoryBibleEntries.Select(x =>
-            new StoryBibleEntry(idGenerator.NewId(), x.Category.Trim(), x.Name.Trim(), x.Content.Trim(), x.Importance, 0)).ToArray());
+            new StoryBibleEntry(
+                idGenerator.NewId(),
+                x.Category.Trim(),
+                x.Name.Trim(),
+                x.KnownFacts.Select(f => f.Trim()).ToArray(),
+                x.SecretFacts.Select(f => f.Trim()).ToArray(),
+                x.Importance,
+                0)).ToArray());
         var (bible, culls) = StoryBibleProcessor.CullToLimits(raw, settings.StoryGeneration);
         var maintenance = source?.StoryBibleMaintenanceHistory.ToList() ?? [];
         if (culls.Count > 0)
@@ -413,16 +420,19 @@ public sealed class NarratorApplication(
     }
 
     private static void ValidateGeneratedEntry(ProposedStoryBibleEntry entry, ContentLimitSettings limits) =>
-        ValidateEntryFields(entry.Category, entry.Name, entry.Content, entry.Importance, limits);
+        ValidateEntryFields(entry.Category, entry.Name, entry.KnownFacts, entry.SecretFacts, entry.Importance, limits);
 
-    private static void ValidateEntryFields(string category, string name, string content, int importance, ContentLimitSettings limits)
+    private static void ValidateEntryFields(
+        string category, string name, IReadOnlyList<string> knownFacts, IReadOnlyList<string> secretFacts, int importance, ContentLimitSettings limits)
     {
         if (string.IsNullOrWhiteSpace(category) || category.Length > limits.MaxStoryBibleCategoryCharacters)
             throw new NarratorException("A Story Bible category is empty or exceeds the configured limit.");
         if (string.IsNullOrWhiteSpace(name) || name.Length > limits.MaxStoryBibleNameCharacters)
             throw new NarratorException("A Story Bible entry name is empty or exceeds the configured limit.");
-        if (string.IsNullOrWhiteSpace(content))
-            throw new NarratorException("A Story Bible entry has empty content.");
+        if (knownFacts.Count == 0 && secretFacts.Count == 0)
+            throw new NarratorException("A Story Bible entry must have at least one known or secret fact.");
+        if (knownFacts.Any(string.IsNullOrWhiteSpace) || secretFacts.Any(string.IsNullOrWhiteSpace))
+            throw new NarratorException("A Story Bible entry has an empty fact.");
         if (importance is < 1 or > 5)
             throw new NarratorException("Story Bible importance must be from 1 to 5.");
     }
@@ -437,9 +447,10 @@ public sealed class NarratorApplication(
             if (!seenIds.Add(id)) throw new NarratorException("Story Bible entry IDs must be unique.");
             var category = entry.Category.Trim();
             var name = entry.Name.Trim();
-            var content = entry.Content.Trim();
-            ValidateEntryFields(category, name, content, entry.Importance, limits);
-            entries.Add(entry with { Id = id, Category = category, Name = name, Content = content });
+            var knownFacts = entry.KnownFacts.Select(x => x.Trim()).ToArray();
+            var secretFacts = entry.SecretFacts.Select(x => x.Trim()).ToArray();
+            ValidateEntryFields(category, name, knownFacts, secretFacts, entry.Importance, limits);
+            entries.Add(entry with { Id = id, Category = category, Name = name, KnownFacts = knownFacts, SecretFacts = secretFacts });
         }
         return new StoryBible(entries);
     }

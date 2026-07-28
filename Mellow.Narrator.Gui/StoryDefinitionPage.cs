@@ -209,7 +209,8 @@ internal static class StoryBibleView
             var filtered = bible.Entries.Where(x =>
                 (string.IsNullOrEmpty(query) ||
                     x.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                    x.Content.Contains(query, StringComparison.OrdinalIgnoreCase)) &&
+                    x.KnownFacts.Any(f => f.Contains(query, StringComparison.OrdinalIgnoreCase)) ||
+                    x.SecretFacts.Any(f => f.Contains(query, StringComparison.OrdinalIgnoreCase))) &&
                 (selectedCategory is null || x.Category.Equals(selectedCategory, StringComparison.OrdinalIgnoreCase)) &&
                 (selectedImportance is null || x.Importance == selectedImportance));
 
@@ -220,7 +221,20 @@ internal static class StoryBibleView
                 {
                     var categoryInput = new Entry { Text = entry.Category, Placeholder = "Category", MaxLength = limits.MaxStoryBibleCategoryCharacters };
                     var nameInput = new Entry { Text = entry.Name, Placeholder = "Name", MaxLength = limits.MaxStoryBibleNameCharacters };
-                    var contentInput = new Editor { Text = entry.Content, Placeholder = "Content", AutoSize = EditorAutoSizeOption.TextChanges, MinimumHeightRequest = 80 };
+                    var knownInput = new Editor
+                    {
+                        Text = string.Join('\n', entry.KnownFacts),
+                        Placeholder = "One known fact per line",
+                        AutoSize = EditorAutoSizeOption.TextChanges,
+                        MinimumHeightRequest = 80
+                    };
+                    var secretInput = new Editor
+                    {
+                        Text = string.Join('\n', entry.SecretFacts),
+                        Placeholder = "One secret fact per line",
+                        AutoSize = EditorAutoSizeOption.TextChanges,
+                        MinimumHeightRequest = 80
+                    };
                     var importanceInput = new Picker { ItemsSource = new[] { "1", "2", "3", "4", "5" } };
                     importanceInput.SelectedIndex = Math.Clamp(entry.Importance, 1, 5) - 1;
                     var details = new VerticalStackLayout
@@ -231,7 +245,8 @@ internal static class StoryBibleView
                         {
                             new Label { Text = "Category" }, categoryInput,
                             new Label { Text = "Name" }, nameInput,
-                            new Label { Text = "Content" }, contentInput,
+                            new Label { Text = "Known facts" }, knownInput,
+                            new Label { Text = "Secret facts (not yet known to the player character)" }, secretInput,
                             new Label { Text = "Importance" }, importanceInput,
                             Ui.Buttons(
                                 Ui.Button("Save", async (_, _) =>
@@ -240,7 +255,8 @@ internal static class StoryBibleView
                                     {
                                         Category = categoryInput.Text ?? "",
                                         Name = nameInput.Text ?? "",
-                                        Content = contentInput.Text ?? "",
+                                        KnownFacts = SplitFacts(knownInput.Text),
+                                        SecretFacts = SplitFacts(secretInput.Text),
                                         Importance = int.TryParse(importanceInput.SelectedItem?.ToString(), out var parsedImportance) ? parsedImportance : entry.Importance
                                     };
                                     await onSaveAsync(new StoryBible(bible.Entries.Select(x => x.Id == entry.Id ? updated : x).ToArray()));
@@ -253,12 +269,13 @@ internal static class StoryBibleView
                             new Label { Text = $"Stable ID: {entry.Id:D}", FontSize = 11 }
                         }
                     };
+                    var secretTag = entry.SecretFacts.Count == 0 ? "" : $", {entry.SecretFacts.Count} secret";
                     entries.Children.Add(new VerticalStackLayout
                     {
                         Children =
                         {
                             Ui.Button(
-                                $"{entry.Name} [importance {entry.Importance}, relevant turn {entry.LastRelevantTurnNumber}]",
+                                $"{entry.Name} [importance {entry.Importance}, relevant turn {entry.LastRelevantTurnNumber}{secretTag}]",
                                 (_, _) => details.IsVisible = !details.IsVisible),
                             details
                         }
@@ -274,7 +291,8 @@ internal static class StoryBibleView
 
         var newCategory = new Entry { Placeholder = "Category", MaxLength = limits.MaxStoryBibleCategoryCharacters };
         var newName = new Entry { Placeholder = "Name", MaxLength = limits.MaxStoryBibleNameCharacters };
-        var newContent = new Editor { Placeholder = "Content", AutoSize = EditorAutoSizeOption.TextChanges, MinimumHeightRequest = 80 };
+        var newKnownFacts = new Editor { Placeholder = "One known fact per line", AutoSize = EditorAutoSizeOption.TextChanges, MinimumHeightRequest = 80 };
+        var newSecretFacts = new Editor { Placeholder = "One secret fact per line", AutoSize = EditorAutoSizeOption.TextChanges, MinimumHeightRequest = 80 };
         var newImportance = new Picker { ItemsSource = new[] { "1", "2", "3", "4", "5" }, SelectedIndex = 2 };
         var addForm = new VerticalStackLayout
         {
@@ -284,7 +302,8 @@ internal static class StoryBibleView
             {
                 new Label { Text = "Category" }, newCategory,
                 new Label { Text = "Name" }, newName,
-                new Label { Text = "Content" }, newContent,
+                new Label { Text = "Known facts" }, newKnownFacts,
+                new Label { Text = "Secret facts (not yet known to the player character)" }, newSecretFacts,
                 new Label { Text = "Importance" }, newImportance
             }
         };
@@ -295,7 +314,8 @@ internal static class StoryBibleView
                     Guid.Empty,
                     newCategory.Text ?? "",
                     newName.Text ?? "",
-                    newContent.Text ?? "",
+                    SplitFacts(newKnownFacts.Text),
+                    SplitFacts(newSecretFacts.Text),
                     int.TryParse(newImportance.SelectedItem?.ToString(), out var parsedNewImportance) ? parsedNewImportance : 3,
                     newEntryRelevantTurn);
                 await onSaveAsync(new StoryBible(bible.Entries.Append(added).ToArray()));
@@ -304,7 +324,8 @@ internal static class StoryBibleView
             {
                 newCategory.Text = "";
                 newName.Text = "";
-                newContent.Text = "";
+                newKnownFacts.Text = "";
+                newSecretFacts.Text = "";
                 newImportance.SelectedIndex = 2;
                 addForm.IsVisible = false;
             })));
@@ -326,4 +347,7 @@ internal static class StoryBibleView
         var toggle = Ui.SecondaryButton("Show / hide Bible", (_, _) => body.IsVisible = !body.IsVisible);
         return new VerticalStackLayout { Children = { toggle, body } };
     }
+
+    private static IReadOnlyList<string> SplitFacts(string? text) =>
+        (text ?? "").Replace("\r\n", "\n").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }

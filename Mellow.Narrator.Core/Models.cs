@@ -9,9 +9,36 @@ public sealed record StoryBibleEntry(
     Guid Id,
     string Category,
     string Name,
-    string Content,
+    IReadOnlyList<string> KnownFacts,
+    IReadOnlyList<string> SecretFacts,
     int Importance,
-    int LastRelevantTurnNumber);
+    int LastRelevantTurnNumber)
+{
+    // The default record equality compares KnownFacts/SecretFacts by reference (they're lists, not
+    // value types), so a freshly re-allocated but content-identical array would always compare unequal.
+    public bool Equals(StoryBibleEntry? other) =>
+        other is not null &&
+        Id == other.Id &&
+        Category == other.Category &&
+        Name == other.Name &&
+        Importance == other.Importance &&
+        LastRelevantTurnNumber == other.LastRelevantTurnNumber &&
+        KnownFacts.SequenceEqual(other.KnownFacts) &&
+        SecretFacts.SequenceEqual(other.SecretFacts);
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(Id);
+        hash.Add(Category);
+        hash.Add(Name);
+        hash.Add(Importance);
+        hash.Add(LastRelevantTurnNumber);
+        foreach (var fact in KnownFacts) hash.Add(fact);
+        foreach (var fact in SecretFacts) hash.Add(fact);
+        return hash.ToHashCode();
+    }
+}
 
 public sealed record StoryBibleLimitSnapshot(int MaxEntries, int MaxEntryCharacters, int MaxTotalCharacters);
 
@@ -19,7 +46,12 @@ public enum StoryBibleOperation { Add, Replace, Remove }
 public enum StoryBibleChangeSource { LlmUpdate, AutomaticCull, ManualEdit }
 public enum StoryBibleMaintenanceReason { GeneratedBibleLimitCull, UserApprovedLimitCull, ManualEdit }
 
-public sealed record ProposedStoryBibleEntry(string Category, string Name, string Content, int Importance);
+public sealed record ProposedStoryBibleEntry(
+    string Category,
+    string Name,
+    IReadOnlyList<string> KnownFacts,
+    IReadOnlyList<string> SecretFacts,
+    int Importance);
 
 public sealed record ProposedStoryBibleUpdate(
     StoryBibleOperation Operation,

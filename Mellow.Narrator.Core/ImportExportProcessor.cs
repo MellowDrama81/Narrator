@@ -147,8 +147,10 @@ public static class ImportExportProcessor
         {
             ValidateText(entry.Category, limits.MaxStoryBibleCategoryCharacters, "Story Bible category");
             ValidateText(entry.Name, limits.MaxStoryBibleNameCharacters, "Story Bible entry name");
-            if (string.IsNullOrWhiteSpace(entry.Content))
-                throw new InvalidDataException("A Story Bible entry has empty content.");
+            if (entry.KnownFacts.Count == 0 && entry.SecretFacts.Count == 0)
+                throw new InvalidDataException("A Story Bible entry has no known or secret facts.");
+            if (entry.KnownFacts.Any(string.IsNullOrWhiteSpace) || entry.SecretFacts.Any(string.IsNullOrWhiteSpace))
+                throw new InvalidDataException("A Story Bible entry has an empty fact.");
             if (entry.Importance is < 1 or > 5 || entry.LastRelevantTurnNumber < 0)
                 throw new InvalidDataException("Story Bible metadata is invalid.");
         }

@@ -6,6 +6,28 @@ namespace Mellow.Narrator.Gui;
 public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlightRequestPage
 {
     private const string StoredCredentialIndicator = "stored-api-key";
+    private static readonly IReadOnlyDictionary<string, string> Help = new Dictionary<string, string>
+    {
+        ["bibleEntry"] = "default 4000; range 100–50000",
+        ["bibleTotal"] = "default 60000; range 1000–1000000",
+        ["bibleWarning"] = "default 80%; range 50–95",
+        ["retries"] = "default 2; range 0–5",
+        ["retryInitial"] = "default 1; range 0.25–30",
+        ["retryMax"] = "default 10; range 1–120",
+        ["retryAfter"] = "default 60; range 1–600",
+        ["title"] = "default 200; range 1–1000",
+        ["label"] = "default 200; range 1–1000",
+        ["prompt"] = "default 20000; range 100–200000",
+        ["action"] = "default 4000; range 1–50000",
+        ["narration"] = "default 20000; range 100–200000",
+        ["suggestedMin"] = "default 2; range 1–20; must not exceed the maximum",
+        ["suggestedCount"] = "default 3; range 1–20",
+        ["suggestedLength"] = "default 500; range 1–5000",
+        ["category"] = "default 100; range 1–1000",
+        ["name"] = "default 200; range 1–2000",
+        ["updates"] = "default 100; range 1–1000",
+        ["responseBytes"] = "default 2097152; range 65536–16777216"
+    };
     private readonly INarratorApplication _app;
     private readonly ITrashStore _trash;
     private readonly MainTabbedPage _tabs;
@@ -20,6 +42,20 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
     private readonly Entry _temperature = Numeric();
     private readonly Entry _topP = Numeric();
     private readonly Entry _reasoning = new();
+    private readonly Picker _logLevel = new()
+    {
+        Title = "Logging level",
+        ItemsSource = new[]
+        {
+            NarratorLogLevel.Off,
+            NarratorLogLevel.Error,
+            NarratorLogLevel.Warning,
+            NarratorLogLevel.Information,
+            NarratorLogLevel.Debug,
+            NarratorLogLevel.Trace
+        }
+    };
+    private readonly Dictionary<string, Entry> _fields = [];
     private readonly Label _status = new();
     private bool _hasStoredCredential;
     private bool _credentialEdited;
@@ -61,40 +97,87 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
             SetCredentialText("");
             _status.Text = "The key will be removed when you save.";
         });
-        Content = new ScrollView
+
+        var content = new VerticalStackLayout { Padding = 16, Spacing = 8 };
+        content.Children.Add(Ui.Heading("Settings"));
+        content.Children.Add(Ui.Heading("API Connection"));
+        content.Children.Add(Field("Base URL", _baseUrl));
+        content.Children.Add(Field("Model ID", _model));
+        content.Children.Add(_discoveredModels);
+        content.Children.Add(new Label { Text = "Changing the model applies to every subsequent LLM request, including existing stories.", FontSize = 12 });
+        content.Children.Add(Field("API key", _apiKey));
+        content.Children.Add(new Label { Text = "A masked value means an API key is saved securely. Focus the field to replace it.", FontSize = 12 });
+        content.Children.Add(clear);
+
+        content.Children.Add(Ui.Heading("Generation"));
+        content.Children.Add(Field("Timeout seconds (default 120; range 10–900)", _timeout));
+        content.Children.Add(Field("Maximum output tokens (default 4096; range 256–131072)", _maxOutput));
+        content.Children.Add(Field("Temperature (blank; range 0–2)", _temperature));
+        content.Children.Add(Field("Top-p (blank; range 0–1)", _topP));
+        content.Children.Add(Field("Reasoning effort (blank = provider default)", _reasoning));
+        content.Children.Add(Field("Recent turns (default 8; range 0–100)", _recentTurns));
+        content.Children.Add(Field("Maximum Story Bible entries (default 200; range 1–2000)", _maxEntries));
+
+        var logging = Section(content, "Logging", expanded: false);
+        logging.Children.Add(new Label { Text = "Log level" });
+        logging.Children.Add(_logLevel);
+        logging.Children.Add(new Label { Text = "default Information", FontSize = 11, TextColor = Colors.Gray });
+        logging.Children.Add(new Label
         {
-            Content = new VerticalStackLayout
+            Text = "Logs are rolling JSON-lines files in the app's private data folder. Trace includes complete LLM request and response bodies and may contain private story and player content. API credentials are never logged.",
+            FontSize = 12
+        });
+
+        var bibleAndRetries = Section(content, "Story Bible & Retries", expanded: false);
+        Add(bibleAndRetries, "Bible entry character limit", "bibleEntry");
+        Add(bibleAndRetries, "Bible total character limit", "bibleTotal");
+        Add(bibleAndRetries, "Bible warning percent", "bibleWarning");
+        Add(bibleAndRetries, "Automatic retries", "retries");
+        Add(bibleAndRetries, "Initial retry delay seconds", "retryInitial");
+        Add(bibleAndRetries, "Maximum retry delay seconds", "retryMax");
+        Add(bibleAndRetries, "Maximum Retry-After seconds", "retryAfter");
+
+        var contentLimits = Section(content, "Content Limits", expanded: false);
+        Add(contentLimits, "Title characters", "title");
+        Add(contentLimits, "Label characters", "label");
+        Add(contentLimits, "Story Prompt characters", "prompt");
+        Add(contentLimits, "Player action characters", "action");
+        Add(contentLimits, "Narration characters", "narration");
+        Add(contentLimits, "Minimum suggested actions", "suggestedMin");
+        Add(contentLimits, "Maximum suggested actions", "suggestedCount");
+        Add(contentLimits, "Suggested action characters", "suggestedLength");
+        Add(contentLimits, "Bible category characters", "category");
+        Add(contentLimits, "Bible name characters", "name");
+        Add(contentLimits, "Bible updates per response", "updates");
+        Add(contentLimits, "HTTP response bytes", "responseBytes");
+
+        content.Children.Add(Ui.Buttons(
+            Ui.Button("Save", Save),
+            Ui.SecondaryButton("Load Models", DiscoverModels),
+            Ui.SecondaryButton("Test Connection", Test),
+            Ui.SecondaryButton("Reset defaults", Reset)));
+        content.Children.Add(Ui.SecondaryButton("Manage Trash", async (_, _) => await Navigation.PushModalAsync(new NavigationPage(new TrashPage(_trash)))));
+        content.Children.Add(_status);
+        Content = new ScrollView { Content = content };
+    }
+
+    private static VerticalStackLayout Section(Layout parent, string title, bool expanded)
+    {
+        var body = new VerticalStackLayout { Spacing = 6, IsVisible = expanded, Margin = new Thickness(8, 0, 0, 12) };
+        var arrow = new Label { Text = expanded ? "▾" : "▸", FontAttributes = FontAttributes.Bold, WidthRequest = 18 };
+        var heading = new Label { Text = title, FontAttributes = FontAttributes.Bold, FontSize = 16 };
+        var header = new HorizontalStackLayout { Spacing = 6, Margin = new Thickness(0, 8, 0, 4), Children = { arrow, heading } };
+        header.GestureRecognizers.Add(new TapGestureRecognizer
+        {
+            Command = new Command(() =>
             {
-                Padding = 16,
-                Spacing = 8,
-                Children =
-                {
-                    Ui.Heading("API Connection"),
-                    Field("Base URL", _baseUrl), Field("Model ID", _model), _discoveredModels,
-                    new Label { Text = "Changing the model applies to every subsequent LLM request, including existing stories.", FontSize = 12 },
-                    Field("API key", _apiKey),
-                    new Label { Text = "A masked value means an API key is saved securely. Focus the field to replace it.", FontSize = 12 },
-                    clear,
-                    Ui.Heading("Generation"),
-                    Field("Timeout seconds (default 120; range 10–900)", _timeout),
-                    Field("Maximum output tokens (default 4096; range 256–131072)", _maxOutput),
-                    Field("Temperature (blank; range 0–2)", _temperature),
-                    Field("Top-p (blank; range 0–1)", _topP),
-                    Field("Reasoning effort (blank = provider default)", _reasoning),
-                    Field("Recent turns (default 8; range 0–100)", _recentTurns),
-                    Field("Maximum Story Bible entries (default 200; range 1–2000)", _maxEntries),
-                    Ui.Buttons(
-                        Ui.Button("Save", Save),
-                        Ui.SecondaryButton("Load Models", DiscoverModels),
-                        Ui.SecondaryButton("Test Connection", Test),
-                        Ui.SecondaryButton("Reset defaults", Reset)),
-                    Ui.Buttons(
-                        Ui.SecondaryButton("Advanced Settings", async (_, _) => await Navigation.PushModalAsync(new NavigationPage(new AdvancedSettingsPage(_app)))),
-                        Ui.SecondaryButton("Manage Trash", async (_, _) => await Navigation.PushModalAsync(new NavigationPage(new TrashPage(_trash))))),
-                    _status
-                }
-            }
-        };
+                body.IsVisible = !body.IsVisible;
+                arrow.Text = body.IsVisible ? "▾" : "▸";
+            })
+        });
+        parent.Children.Add(header);
+        parent.Children.Add(body);
+        return body;
     }
 
     PendingOperationState? IWorkspacePayloadPage.PendingOperation => _pendingOperation;
@@ -132,10 +215,7 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
         try
         {
             var settings = await BuildAsync();
-            if (!await ConfirmBibleLimitImpactAsync(settings)) return;
-            var credential = CredentialChange();
-            await _app.SaveSettingsAsync(settings, credential);
-            CredentialSaved(credential);
+            if (!await TrySaveSettingsAsync(settings)) return;
             _status.Text = "Settings saved.";
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
@@ -150,10 +230,7 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
             var settings = await BuildAsync();
             if (string.IsNullOrWhiteSpace(settings.ModelId))
                 throw new NarratorException("Load models and select one, or enter a model ID before testing the connection.");
-            if (!await ConfirmBibleLimitImpactAsync(settings)) return;
-            var credential = CredentialChange();
-            await _app.SaveSettingsAsync(settings, credential, _request.Token);
-            CredentialSaved(credential);
+            if (!await TrySaveSettingsAsync(settings, _request.Token)) return;
             _pendingOperation = new(Guid.NewGuid(), PendingOperationType.TestApiConnection, null, null, DateTimeOffset.UtcNow);
             await _tabs.SaveWorkspaceNowAsync();
             var result = await _app.TestConnectionAsync(_request.Token);
@@ -181,10 +258,7 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
             var settings = await BuildAsync();
             if (settings.BaseUrl is null)
                 throw new NarratorException("Enter an API base URL before loading models.");
-            if (!await ConfirmBibleLimitImpactAsync(settings)) return;
-            var credential = CredentialChange();
-            await _app.SaveSettingsAsync(settings, credential, _request.Token);
-            CredentialSaved(credential);
+            if (!await TrySaveSettingsAsync(settings, _request.Token)) return;
             _pendingOperation = new(Guid.NewGuid(), PendingOperationType.DiscoverModels, null, null, DateTimeOffset.UtcNow);
             await _tabs.SaveWorkspaceNowAsync();
             var models = await _app.DiscoverModelsAsync(_request.Token);
@@ -222,17 +296,45 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
                 Optional(_temperature, "temperature"),
                 Optional(_topP, "top-p"),
                 string.IsNullOrWhiteSpace(_reasoning.Text) ? null : _reasoning.Text),
-            StoryGeneration = current.StoryGeneration with
+            StoryGeneration = new(
+                (int)Parse(_recentTurns, "recent turns"),
+                (int)Parse(_maxEntries, "maximum Story Bible entries"),
+                Int("bibleEntry"),
+                Int("bibleTotal"),
+                Int("bibleWarning")),
+            Retry = new(Int("retries"), Seconds("retryInitial"), Seconds("retryMax"), Seconds("retryAfter")),
+            ContentLimits = new(Int("title"), Int("label"), Int("prompt"), Int("action"), Int("narration"),
+                Int("suggestedCount"), Int("suggestedLength"),
+                Int("category"), Int("name"), Int("updates"), Int("responseBytes"))
             {
-                RecentTurnCount = (int)Parse(_recentTurns, "recent turns"),
-                MaxStoryBibleEntries = (int)Parse(_maxEntries, "maximum Story Bible entries")
+                MinSuggestedActions = Int("suggestedMin")
             },
+            Logging = new((NarratorLogLevel?)_logLevel.SelectedItem
+                ?? throw new NarratorException("Select a logging level.")),
             Capabilities = current.BaseUrl?.ToString() != _baseUrl.Text?.Trim()
                 ? new(false, StructuredOutputTier.Untested, null, null)
                 : current.ModelId != _model.Text?.Trim()
                     ? new(current.Capabilities.SupportsModelDiscovery, StructuredOutputTier.Untested, null, null)
                     : current.Capabilities
         };
+    }
+
+    private async Task<bool> TrySaveSettingsAsync(ApiConnectionSettings proposed, CancellationToken cancellationToken = default)
+    {
+        var current = await _app.GetSettingsAsync();
+        if (proposed.Logging.MinimumLevel == NarratorLogLevel.Trace &&
+            current.Logging.MinimumLevel != NarratorLogLevel.Trace &&
+            !await DisplayAlertAsync(
+                "Enable sensitive Trace logging?",
+                "Trace records complete LLM requests and responses, including Story Bibles, player answers, actions, and narration. API credentials remain excluded.",
+                "Enable Trace",
+                "Cancel"))
+            return false;
+        if (!await ConfirmBibleLimitImpactAsync(current, proposed)) return false;
+        var credential = CredentialChange();
+        await _app.SaveSettingsAsync(proposed, credential, cancellationToken);
+        CredentialSaved(credential);
+        return true;
     }
 
     private void Load(ApiConnectionSettings settings)
@@ -246,6 +348,27 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
         _reasoning.Text = settings.Parameters.ReasoningEffort ?? "";
         _recentTurns.Text = settings.StoryGeneration.RecentTurnCount.ToString(CultureInfo.InvariantCulture);
         _maxEntries.Text = settings.StoryGeneration.MaxStoryBibleEntries.ToString(CultureInfo.InvariantCulture);
+        _logLevel.SelectedItem = settings.Logging.MinimumLevel;
+        Set("bibleEntry", settings.StoryGeneration.MaxStoryBibleEntryCharacters);
+        Set("bibleTotal", settings.StoryGeneration.MaxStoryBibleCharacters);
+        Set("bibleWarning", settings.StoryGeneration.StoryBibleWarningPercent);
+        Set("retries", settings.Retry.MaxAutomaticRetries);
+        Set("retryInitial", settings.Retry.InitialDelay.TotalSeconds);
+        Set("retryMax", settings.Retry.MaxDelay.TotalSeconds);
+        Set("retryAfter", settings.Retry.MaxRetryAfter.TotalSeconds);
+        var c = settings.ContentLimits;
+        Set("title", c.MaxStoryTitleCharacters);
+        Set("label", c.MaxStoryLabelCharacters);
+        Set("prompt", c.MaxStoryPromptCharacters);
+        Set("action", c.MaxPlayerActionCharacters);
+        Set("narration", c.MaxNarrationCharacters);
+        Set("suggestedMin", c.MinSuggestedActions);
+        Set("suggestedCount", c.MaxSuggestedActions);
+        Set("suggestedLength", c.MaxSuggestedActionCharacters);
+        Set("category", c.MaxStoryBibleCategoryCharacters);
+        Set("name", c.MaxStoryBibleNameCharacters);
+        Set("updates", c.MaxStoryBibleUpdatesPerResponse);
+        Set("responseBytes", c.MaxResponseBodyBytes);
     }
 
     private string? CredentialChange()
@@ -277,14 +400,28 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
         finally { _updatingCredentialDisplay = false; }
     }
 
+    private void Add(Layout content, string label, string key)
+    {
+        var entry = Numeric();
+        _fields[key] = entry;
+        content.Children.Add(new Label { Text = label });
+        content.Children.Add(entry);
+        if (Help.TryGetValue(key, out var help))
+            content.Children.Add(new Label { Text = help, FontSize = 11, TextColor = Colors.Gray });
+    }
+
+    private void Set(string key, object? value) => _fields[key].Text = value is null ? "" : Convert.ToString(value, CultureInfo.InvariantCulture);
+    private double Number(string key) => Parse(_fields[key], key);
+    private int Int(string key) => checked((int)Number(key));
+    private TimeSpan Seconds(string key) => TimeSpan.FromSeconds(Number(key));
+
     private static double Parse(Entry entry, string name) =>
         double.TryParse(entry.Text, CultureInfo.InvariantCulture, out var value) ? value : throw new NarratorException($"Enter a valid {name}.");
     private static double? Optional(Entry entry, string name) =>
         string.IsNullOrWhiteSpace(entry.Text) ? null : Parse(entry, name);
 
-    private async Task<bool> ConfirmBibleLimitImpactAsync(ApiConnectionSettings proposed)
+    private async Task<bool> ConfirmBibleLimitImpactAsync(ApiConnectionSettings current, ApiConnectionSettings proposed)
     {
-        var current = await _app.GetSettingsAsync();
         var lowered = proposed.StoryGeneration.MaxStoryBibleEntries < current.StoryGeneration.MaxStoryBibleEntries ||
             proposed.StoryGeneration.MaxStoryBibleEntryCharacters < current.StoryGeneration.MaxStoryBibleEntryCharacters ||
             proposed.StoryGeneration.MaxStoryBibleCharacters < current.StoryGeneration.MaxStoryBibleCharacters;
@@ -297,6 +434,7 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
             "Save Anyway",
             "Cancel");
     }
+
     private static Entry Numeric() => new() { Keyboard = Keyboard.Numeric };
     private static VerticalStackLayout Field(string label, View control) => new() { Spacing = 2, Children = { new Label { Text = label }, control } };
 }

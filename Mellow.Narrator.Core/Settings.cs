@@ -39,9 +39,15 @@ public static class PromptTemplateDefaults
         the Initial Events prompt is supplied only for the earliest turns and is dropped once enough real
         history has accumulated, so anything that must be remembered later belongs in the Story Bible instead,
         not there. Leave it empty if the opening needs no guidance beyond the Story Prompt and Story Bible.
-        Include every durable fact required to narrate consistently. Keep entries concise, avoid duplicates,
-        and assign importance 1 through 5. Also propose a concise, evocative title for the story; it is used
-        only if the user did not already provide one. Return JSON only.
+        Each entry has a name and two lists of short, concise fact strings instead of one block of text:
+        knownFacts holds everything the player character already knows or could plainly observe, and
+        secretFacts holds hidden facts the character does not yet know — schemes, true motives, or facts
+        only other characters or the narrator are aware of. A single entry (for example one character) can
+        and often should have both known and secret facts about the same subject; do not split them into
+        separate entries. Either list may be empty, but not both. Include every durable fact required to
+        narrate consistently, avoid duplicate entries for the same subject, and assign importance 1 through 5.
+        Also propose a concise, evocative title for the story; it is used only if the user did not already
+        provide one. Return JSON only.
         """,
         $"""
         You narrate an interactive story. Return JSON only. The Story Bible is authoritative and complete.
@@ -52,16 +58,23 @@ public static class PromptTemplateDefaults
         literal double newline character (\n\n) between them inside the narration string; never write a long
         paragraph, and never return the scene as one unbroken block of text,
         offer between {MinSuggestedActionsPlaceholder} and {MaxSuggestedActionsPlaceholder} concise suggested actions, flag every existing Bible entry relevant now,
-        and return only incremental Story Bible updates. Resolve the current player action from the final request,
+        and return only incremental Story Bible updates. The narration string must contain only prose describing
+        the scene; never list, number, or otherwise embed the suggested actions or choices within it — they
+        belong solely in the suggestedActions field. Resolve the current player action from the final request,
         advance beyond the most recent narration, and never answer an older action or repeat an earlier scene.
         If the player's action is passive, hesitant, or leaves no clear direction, take the initiative yourself:
         introduce a complication, event, or NPC action that pushes the plot forward instead of letting the scene idle.
         Stop narrating the moment the player character reaches an important decision; never narrate past it or
         resolve it yourself, and make the suggested actions represent the distinct choices available at that point.
         Narrate strictly from the player character's own awareness: never reveal a fact, motive, or hidden
-        scheme the character has no way of knowing, even if the Story Bible records it for continuity. At most,
-        narrate what the character could actually perceive, such as suspicious behavior or an odd detail that
-        hints at something being wrong, without stating what that something is.
+        scheme the character has no way of knowing, even if the Story Bible records it for continuity. Each
+        entry's secretFacts are things the character does not yet know, and their content must never appear
+        in or be implied directly by the narration. At most, narrate what the character could actually
+        perceive, such as suspicious behavior or an odd detail that hints at something being wrong, without
+        stating what that something is. When story events genuinely make the character become aware of a
+        secret fact, issue a replace update for that entry moving the fact's substance from secretFacts into
+        knownFacts (rewording it as needed, and removing it from secretFacts); when adding a new fact the
+        character does not yet know, place it in secretFacts instead of knownFacts.
         For an add update, always set entryId to null because the application assigns the ID. Never invent IDs.
         For replace and remove updates, use only an existing Story Bible entry ID supplied in the request.
         In relevantStoryBibleEntryIds, use only IDs copied exactly from the current Story Bible. Never invent IDs.

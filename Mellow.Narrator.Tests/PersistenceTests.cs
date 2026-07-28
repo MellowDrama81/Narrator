@@ -340,7 +340,7 @@ public sealed class PersistenceTests : IDisposable
     private static (StoryState, StoryTurn) State()
     {
         var id = Guid.NewGuid();
-        var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Fact", "Content", 3, 0);
+        var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Fact", ["Content"], [], 3, 0);
         var bible = new StoryBible([entry]);
         var definition = new StoryDefinitionSnapshot("Story", "Prompt", bible);
         var now = DateTimeOffset.UtcNow;

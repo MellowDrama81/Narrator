@@ -12,7 +12,7 @@ public sealed class StoryBibleProcessorTests
         var result = StoryBibleProcessor.Apply(
             new([first, second]),
             [second.Id],
-            [new(StoryBibleOperation.Add, null, new("fact", "new", "new fact", 4))],
+            [new(StoryBibleOperation.Add, null, new("fact", "new", ["new fact"], [], 4))],
             3,
             new(8, 3, 4000, 60000, 80));
 
@@ -39,7 +39,7 @@ public sealed class StoryBibleProcessorTests
         var entry = Entry("00000000-0000-0000-0000-000000000001", "fact", 3, 0);
         var updates = new[]
         {
-            new ProposedStoryBibleUpdate(StoryBibleOperation.Replace, entry.Id, new("fact", "x", "x", 3)),
+            new ProposedStoryBibleUpdate(StoryBibleOperation.Replace, entry.Id, new("fact", "x", ["x"], [], 3)),
             new ProposedStoryBibleUpdate(StoryBibleOperation.Remove, entry.Id, null)
         };
         Assert.Throws<NarratorException>(() => StoryBibleProcessor.Apply(new([entry]), [], updates, 1, new(8, 10, 4000, 60000, 80)));
@@ -72,7 +72,7 @@ public sealed class StoryBibleProcessorTests
         var result = StoryBibleProcessor.Apply(
             StoryBible.Empty,
             [],
-            [new(StoryBibleOperation.Add, null, new("fact", "Fact", "Content", 3))],
+            [new(StoryBibleOperation.Add, null, new("fact", "Fact", ["Content"], [], 3))],
             4,
             new(8, 10, 4000, 60000, 80),
             () => id);
@@ -84,7 +84,7 @@ public sealed class StoryBibleProcessorTests
     [Fact]
     public void CullToLimits_RemovesIndividuallyOversizedEntryFirst()
     {
-        var oversized = new StoryBibleEntry(Guid.NewGuid(), "fact", "Large", new string('x', 500), 5, 10);
+        var oversized = new StoryBibleEntry(Guid.NewGuid(), "fact", "Large", [new string('x', 500)], [], 5, 10);
         var small = Entry("00000000-0000-0000-0000-000000000002", "small", 1, 0);
         var result = StoryBibleProcessor.CullToLimits(new([oversized, small]), new(8, 10, 200, 60000, 80));
         Assert.DoesNotContain(result.Bible.Entries, x => x.Id == oversized.Id);
@@ -95,10 +95,10 @@ public sealed class StoryBibleProcessorTests
     public void ApproachingLimits_UsesConfiguredPercentage()
     {
         var entries = Enumerable.Range(0, 8)
-            .Select(i => new StoryBibleEntry(Guid.NewGuid(), "fact", $"F{i}", "x", 3, 0)).ToArray();
+            .Select(i => new StoryBibleEntry(Guid.NewGuid(), "fact", $"F{i}", ["x"], [], 3, 0)).ToArray();
         Assert.True(StoryBibleProcessor.IsApproachingLimits(new(entries), new(8, 10, 4000, 60000, 80)));
     }
 
     private static StoryBibleEntry Entry(string id, string name, int importance, int relevant) =>
-        new(Guid.Parse(id), "fact", name, $"{name} content", importance, relevant);
+        new(Guid.Parse(id), "fact", name, [$"{name} content"], [], importance, relevant);
 }

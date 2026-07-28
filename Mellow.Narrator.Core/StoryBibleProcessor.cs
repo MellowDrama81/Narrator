@@ -119,12 +119,26 @@ public static class StoryBibleProcessor
     }
 
     private static StoryBibleEntry ToEntry(Guid id, ProposedStoryBibleEntry value, int turn) =>
-        new(id, value.Category.Trim(), value.Name.Trim(), value.Content.Trim(), value.Importance, turn);
+        new(
+            id,
+            value.Category.Trim(),
+            value.Name.Trim(),
+            TrimFacts(value.KnownFacts),
+            TrimFacts(value.SecretFacts),
+            value.Importance,
+            turn);
+
+    private static IReadOnlyList<string> TrimFacts(IReadOnlyList<string> facts) =>
+        facts.Select(x => x.Trim()).ToArray();
 
     private static void ValidateProposal(ProposedStoryBibleEntry? entry)
     {
-        if (entry is null || string.IsNullOrWhiteSpace(entry.Category) || string.IsNullOrWhiteSpace(entry.Name) || string.IsNullOrWhiteSpace(entry.Content))
+        if (entry is null || string.IsNullOrWhiteSpace(entry.Category) || string.IsNullOrWhiteSpace(entry.Name))
             throw new NarratorException("A Story Bible entry is incomplete.");
+        if (entry.KnownFacts.Count == 0 && entry.SecretFacts.Count == 0)
+            throw new NarratorException("A Story Bible entry must have at least one known or secret fact.");
+        if (entry.KnownFacts.Any(string.IsNullOrWhiteSpace) || entry.SecretFacts.Any(string.IsNullOrWhiteSpace))
+            throw new NarratorException("A Story Bible entry has an empty fact.");
         if (entry.Importance is < 1 or > 5)
             throw new NarratorException("Story Bible importance must be from 1 to 5.");
     }

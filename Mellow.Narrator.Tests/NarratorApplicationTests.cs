@@ -10,7 +10,7 @@ public sealed class NarratorApplicationTests
         var draft = new StoryPromptDraft(null, "Title", "Raw prompt mentioning today's mutable state");
         var provider = new FakeProvider
         {
-            DefinitionResponse = new("Refined immutable prompt", "Suggested Title", "Initial events", [new("fact", "Fact", "Content", 3)])
+            DefinitionResponse = new("Refined immutable prompt", "Suggested Title", "Initial events", [new("fact", "Fact", ["Content"], [], 3)])
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
 
@@ -107,7 +107,7 @@ public sealed class NarratorApplicationTests
     [Fact]
     public async Task StartStory_UsesTemporarySnapshotAndCarriesMaintenance()
     {
-        var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Fact", "Content", 3, 0);
+        var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Fact", ["Content"], [], 3, 0);
         var snapshot = new StoryDefinitionSnapshot("Snapshot title", "Snapshot prompt", new([entry]));
         var maintenance = new StoryBibleMaintenanceRecord(
             Guid.NewGuid(),
@@ -241,21 +241,21 @@ public sealed class NarratorApplicationTests
     [Fact]
     public async Task UpdateInitialStoryBible_AddsEditsAndRemovesEntries()
     {
-        var keep = new StoryBibleEntry(Guid.NewGuid(), "fact", "Keep", "Original content", 3, 0);
-        var remove = new StoryBibleEntry(Guid.NewGuid(), "fact", "Remove me", "Content", 2, 0);
+        var keep = new StoryBibleEntry(Guid.NewGuid(), "fact", "Keep", ["Original content"], [], 3, 0);
+        var remove = new StoryBibleEntry(Guid.NewGuid(), "fact", "Remove me", ["Content"], [], 2, 0);
         var definitions = new MemoryDefinitions();
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "Prompt", new([keep, remove]), [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         await definitions.SaveAsync(definition);
         var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
 
-        var edited = keep with { Content = "Updated content" };
-        var added = new StoryBibleEntry(Guid.Empty, "fact", "New entry", "New content", 4, 0);
+        var edited = keep with { KnownFacts = ["Updated content"] };
+        var added = new StoryBibleEntry(Guid.Empty, "fact", "New entry", ["New content"], [], 4, 0);
         var updated = await app.UpdateInitialStoryBibleAsync(definition.Id, new([edited, added]));
 
         Assert.Equal(2, updated.InitialStoryBible.Entries.Count);
         var keptEntry = Assert.Single(updated.InitialStoryBible.Entries, x => x.Id == keep.Id);
-        Assert.Equal("Updated content", keptEntry.Content);
+        Assert.Equal(["Updated content"], keptEntry.KnownFacts);
         var newEntry = Assert.Single(updated.InitialStoryBible.Entries, x => x.Id != keep.Id);
         Assert.NotEqual(Guid.Empty, newEntry.Id);
         Assert.Equal("New entry", newEntry.Name);
@@ -276,7 +276,7 @@ public sealed class NarratorApplicationTests
         await definitions.SaveAsync(definition);
         var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
 
-        var invalid = new StoryBibleEntry(Guid.NewGuid(), "fact", "Name", "", 3, 0);
+        var invalid = new StoryBibleEntry(Guid.NewGuid(), "fact", "Name", [], [], 3, 0);
 
         await Assert.ThrowsAsync<NarratorException>(() => app.UpdateInitialStoryBibleAsync(definition.Id, new([invalid])));
     }
@@ -291,8 +291,8 @@ public sealed class NarratorApplicationTests
         await definitions.SaveAsync(definition);
         var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
 
-        var first = new StoryBibleEntry(id, "fact", "First", "Content", 3, 0);
-        var duplicate = new StoryBibleEntry(id, "fact", "Duplicate", "Content", 3, 0);
+        var first = new StoryBibleEntry(id, "fact", "First", ["Content"], [], 3, 0);
+        var duplicate = new StoryBibleEntry(id, "fact", "Duplicate", ["Content"], [], 3, 0);
 
         await Assert.ThrowsAsync<NarratorException>(() => app.UpdateInitialStoryBibleAsync(definition.Id, new([first, duplicate])));
     }
@@ -303,12 +303,12 @@ public sealed class NarratorApplicationTests
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
         var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", StoryBible.Empty);
-        var existing = new StoryBibleEntry(Guid.NewGuid(), "fact", "Existing", "Content", 3, 2);
+        var existing = new StoryBibleEntry(Guid.NewGuid(), "fact", "Existing", ["Content"], [], 3, 2);
         var state = new StoryState(stateId, "Story", null, new(snapshot), new([existing]), [], 0, now, now, 2);
         var states = new MemoryStates(state, []);
         var app = CreateApplication(new MemoryDefinitions(), states, new FakeProvider());
 
-        var added = new StoryBibleEntry(Guid.Empty, "fact", "Added mid-play", "Content", 4, 2);
+        var added = new StoryBibleEntry(Guid.Empty, "fact", "Added mid-play", ["Content"], [], 4, 2);
         var updated = await app.UpdateCurrentStoryBibleAsync(stateId, new([existing, added]));
 
         Assert.Equal(2, updated.CurrentStoryBible.Entries.Count);

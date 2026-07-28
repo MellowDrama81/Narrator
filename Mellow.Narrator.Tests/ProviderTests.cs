@@ -12,7 +12,7 @@ public sealed class ProviderTests
     public async Task TraceLogging_IncludesBodiesButNeverCredential()
     {
         var handler = new StubHandler(_ => Task.FromResult(Response(
-            """{"refinedStoryPrompt":"PRIVATE RESPONSE TOP-SECRET-KEY","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"private","name":"Fact","content":"PRIVATE RESPONSE TOP-SECRET-KEY","importance":4}]}""")));
+            """{"refinedStoryPrompt":"PRIVATE RESPONSE TOP-SECRET-KEY","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"private","name":"Fact","knownFacts":["PRIVATE RESPONSE TOP-SECRET-KEY"],"secretFacts":[],"importance":4}]}""")));
         var informationLogger = new CaptureLogger<OpenAiCompatibleProvider>();
         var informationProvider = new OpenAiCompatibleProvider(
             new HttpClient(handler),
@@ -81,7 +81,7 @@ public sealed class ProviderTests
         {
             captured = request;
             body = request.Content is null ? null : await request.Content.ReadAsStringAsync();
-            var content = """{"refinedStoryPrompt":"A red moon story.","suggestedTitle":"Red Moon","initialEventsPrompt":"The moon glows ominously overhead.","initialStoryBibleEntries":[{"category":"world","name":"Moon","content":"The moon is red.","importance":4}]}""";
+            var content = """{"refinedStoryPrompt":"A red moon story.","suggestedTitle":"Red Moon","initialEventsPrompt":"The moon glows ominously overhead.","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["The moon is red."],"secretFacts":[],"importance":4}]}""";
             var envelope = System.Text.Json.JsonSerializer.Serialize(new
             {
                 id = "response-1",
@@ -121,8 +121,8 @@ public sealed class ProviderTests
             requests++;
             bodies.Add(await request.Content!.ReadAsStringAsync());
             var content = requests == 1
-                ? """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","content":"Red","importance":9}]}"""
-                : """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","content":"Red","importance":4}]}""";
+                ? """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["Red"],"secretFacts":[],"importance":9}]}"""
+                : """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["Red"],"secretFacts":[],"importance":4}]}""";
             return Response(content);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
@@ -159,7 +159,7 @@ public sealed class ProviderTests
     [Fact]
     public async Task GenerateTurn_RemovesBadRelevantEntryIdsWithoutRetry()
     {
-        var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Fact", "Content", 3, 0);
+        var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Fact", ["Content"], [], 3, 0);
         var unknown = Guid.NewGuid();
         var requests = 0;
         string? body = null;
@@ -418,7 +418,7 @@ public sealed class ProviderTests
             requests++;
             requestBody = await request.Content!.ReadAsStringAsync();
             return Response($$$"""
-                {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"A new place appears.","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[{"operation":"add","entryId":"{{{modelCreatedId}}}","entry":{"category":"location","name":"New Place","content":"A newly discovered place.","importance":3}}]}
+                {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"A new place appears.","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[{"operation":"add","entryId":"{{{modelCreatedId}}}","entry":{"category":"location","name":"New Place","knownFacts":["A newly discovered place."],"secretFacts":[],"importance":3}}]}
                 """);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
@@ -461,7 +461,7 @@ public sealed class ProviderTests
                 return Response("""{"ok":true}""");
             }
             generatedBody = body;
-            return Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","content":"Red","importance":4}]}""");
+            return Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["Red"],"secretFacts":[],"importance":4}]}""");
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var settings = Settings();

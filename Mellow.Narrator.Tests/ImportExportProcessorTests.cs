@@ -47,7 +47,7 @@ public sealed class ImportExportProcessorTests
     private static (StoryState State, StoryTurn Turn) CreateState()
     {
         var stateId = Guid.NewGuid();
-        var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Name", "The player is Alex.", 4, 0);
+        var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Name", ["The player is Alex."], [], 4, 0);
         var bible = new StoryBible([entry]);
         var snapshot = new StoryDefinitionSnapshot(
             "Story",
