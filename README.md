@@ -11,8 +11,6 @@ Mellow Narrator is a .NET 10 MAUI application for creating and playing durable, 
 - `Mellow.Narrator.Cli` — unreleased manual test harness that requires an isolated data directory.
 - `Mellow.Narrator.Tests` — Core unit tests plus provider and persistence integration tests.
 
-The complete behavioral and architectural specification is in [Plan.md](Plan.md).
-
 ## Example Story Definition
 
 [The Awakening AI-definition.json](examples/The%20Awakening%20AI-definition.json) is an example exported Story Definition.
