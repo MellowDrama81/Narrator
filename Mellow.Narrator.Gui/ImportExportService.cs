@@ -7,6 +7,12 @@ namespace Mellow.Narrator.Gui;
 
 internal static class ImportExportService
 {
+    private static readonly FilePickerFileType JsonFileType = new(new Dictionary<DevicePlatform, IEnumerable<string>>
+    {
+        { DevicePlatform.Android, new[] { "application/json" } },
+        { DevicePlatform.WinUI, new[] { ".json" } }
+    });
+
     private static readonly JsonSerializerOptions Json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -26,10 +32,10 @@ internal static class ImportExportService
         IStoryDefinitionRepository repository,
         INarratorApplication application)
     {
-        var picked = await FilePicker.Default.PickAsync(new PickOptions { PickerTitle = "Import Story Definition JSON" });
+        var picked = await FilePicker.Default.PickAsync(new PickOptions { PickerTitle = "Import Story Definition JSON", FileTypes = JsonFileType });
         if (picked is null) return null;
         await using var stream = await picked.OpenReadAsync();
-        var document = JsonSerializer.Deserialize<StoryDefinitionExport>(await ReadLimitedAsync(stream), Json)
+        var document = JsonSerializer.Deserialize<StoryDefinitionExport>(await ImportExportProcessor.ReadLimitedAsync(stream), Json)
             ?? throw new InvalidDataException("The Story Definition export is empty.");
         CheckVersion(document.FormatVersion);
         var settings = await application.GetSettingsAsync();
@@ -37,7 +43,8 @@ internal static class ImportExportService
         var imported = ImportExportProcessor.CopyDefinition(
             document.Definition,
             summaries.Count == 0 ? 0 : summaries.Max(x => x.SortOrder) + 1,
-            settings.ContentLimits);
+            settings.ContentLimits,
+            settings.StoryGeneration);
         await repository.SaveAsync(imported);
         return imported;
     }
@@ -99,10 +106,10 @@ internal static class ImportExportService
         IStoryStateRepository repository,
         INarratorApplication application)
     {
-        var picked = await FilePicker.Default.PickAsync(new PickOptions { PickerTitle = "Import Story State JSON" });
+        var picked = await FilePicker.Default.PickAsync(new PickOptions { PickerTitle = "Import Story State JSON", FileTypes = JsonFileType });
         if (picked is null) return null;
         await using var stream = await picked.OpenReadAsync();
-        var document = JsonSerializer.Deserialize<StoryStateExport>(await ReadLimitedAsync(stream), Json)
+        var document = JsonSerializer.Deserialize<StoryStateExport>(await ImportExportProcessor.ReadLimitedAsync(stream), Json)
             ?? throw new InvalidDataException("The Story State export is empty.");
         CheckVersion(document.FormatVersion);
         var settings = await application.GetSettingsAsync();
@@ -111,7 +118,8 @@ internal static class ImportExportService
             document.State,
             document.Turns,
             summaries.Count == 0 ? 0 : summaries.Max(x => x.SortOrder) + 1,
-            settings.ContentLimits);
+            settings.ContentLimits,
+            settings.StoryGeneration);
         await repository.ImportAsync(imported.State, imported.Turns);
         return imported.State;
     }
@@ -159,23 +167,6 @@ internal static class ImportExportService
     {
         if (version is < 0 or > ImportExportProcessor.CurrentFormatVersion)
             throw new NotSupportedException($"Export format {version} is not supported.");
-    }
-
-    private static async Task<byte[]> ReadLimitedAsync(Stream stream)
-    {
-        if (stream.CanSeek && stream.Length > ImportExportProcessor.MaximumImportBytes)
-            throw new InvalidDataException("The import file exceeds the maximum supported size.");
-        using var output = new MemoryStream();
-        var buffer = new byte[81920];
-        while (true)
-        {
-            var read = await stream.ReadAsync(buffer);
-            if (read == 0) break;
-            if (output.Length + read > ImportExportProcessor.MaximumImportBytes)
-                throw new InvalidDataException("The import file exceeds the maximum supported size.");
-            output.Write(buffer, 0, read);
-        }
-        return output.ToArray();
     }
 
     private static string Safe(string value)

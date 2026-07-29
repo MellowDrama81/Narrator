@@ -21,8 +21,9 @@ public sealed class ManageTabsPage : ContentPage
                 title.SetBinding(Label.TextProperty, nameof(Page.Title));
                 var earlier = Ui.SecondaryButton("Earlier", async (sender, _) => await MoveAsync(sender, -1));
                 var later = Ui.SecondaryButton("Later", async (sender, _) => await MoveAsync(sender, 1));
+                // earlier and later share the same DataTemplate BindingContext, so subscribing on both
+                // would run UpdateButtons twice per context change; one subscription is enough.
                 earlier.BindingContextChanged += (_, _) => UpdateButtons(earlier, later);
-                later.BindingContextChanged += (_, _) => UpdateButtons(earlier, later);
                 return new VerticalStackLayout
                 {
                     Padding = 8,

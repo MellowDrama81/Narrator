@@ -2,7 +2,7 @@ using Mellow.Narrator.Core;
 
 namespace Mellow.Narrator.Gui;
 
-public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGuardPage, IInFlightRequestPage
+public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendingOperationPage, ICloseGuardPage, IInFlightRequestPage
 {
     private readonly Guid _stateId;
     private readonly IStoryStateRepository _repository;
@@ -21,6 +21,7 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private CancellationTokenSource? _request;
     private PendingOperationState? _pendingOperation;
+    private bool _loaded;
 
     public PlayStoryPage(
         Guid stateId,
@@ -122,14 +123,14 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
         _action.Completed += Play;
     }
 
-    PlayStoryTabState? IWorkspacePayloadPage.PlayStoryTabState => new(_action.Text ?? "");
-    PendingOperationState? IWorkspacePayloadPage.PendingOperation => _pendingOperation;
+    PlayStoryTabState? IPlayStoryTabStatePage.PlayStoryTabState => new(_action.Text ?? "");
+    PendingOperationState? IPendingOperationPage.PendingOperation => _pendingOperation;
     bool IInFlightRequestPage.HasInFlightRequest => _request is not null;
     async Task IInFlightRequestPage.CancelInFlightRequestAsync(bool preserveInterruptedMarker)
     {
         var marker = preserveInterruptedMarker ? _pendingOperation : null;
         _request?.Cancel();
-        while (_request is not null) await Task.Delay(20);
+        await Ui.WaitWhileAsync(() => _request is not null, TimeSpan.FromSeconds(5));
         if (marker is not null) _pendingOperation = marker;
     }
 
@@ -147,21 +148,29 @@ public sealed class PlayStoryPage : ContentPage, IWorkspacePayloadPage, ICloseGu
     protected override async void OnAppearing()
     {
         base.OnAppearing();
-        if (_pendingOperation is not null && _request is null)
+        try
         {
-            _pendingOperation = null;
-            await _tabs.SaveWorkspaceNowAsync();
-            if (await DisplayActionSheetAsync(
-                    "The previous turn was interrupted. Your player action is preserved.",
-                    "Cancel",
-                    null,
-                    "Retry") == "Retry")
+            if (_pendingOperation is not null && _request is null)
             {
-                Play(null, EventArgs.Empty);
-                return;
+                _pendingOperation = null;
+                await _tabs.SaveWorkspaceNowAsync();
+                if (await DisplayActionSheetAsync(
+                        "The previous turn was interrupted. Your player action is preserved.",
+                        "Cancel",
+                        null,
+                        "Retry") == "Retry")
+                {
+                    Play(null, EventArgs.Empty);
+                    return;
+                }
             }
         }
-        await Refresh(scrollToLatestTurn: true);
+        catch (Exception ex) { await Ui.Error(this, ex); }
+        // Only force-scroll to the latest turn the first time this page is shown - TabbedPage raises
+        // OnAppearing on every tab switch, and a plain revisit must still refresh the content (in case
+        // it changed elsewhere) without discarding the reader's scroll position every time.
+        await Refresh(scrollToLatestTurn: !_loaded);
+        _loaded = true;
     }
 
     private async Task Refresh(bool scrollToLatestTurn = false)

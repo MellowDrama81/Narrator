@@ -6,13 +6,18 @@
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="uap rescap">
 
+  <!-- Name and Publisher below are still MAUI-template placeholders. This file is currently inert
+       (WindowsPackageType is None in Mellow.Narrator.Gui.csproj, i.e. unpackaged), but before attempting
+       MSIX packaging: set Name to a real, reserved package identity and Publisher to the exact subject
+       name (CN=...) of the certificate that will sign the package - both must match an actual
+       registered identity/certificate, not an invented value, or signing and installation will fail. -->
   <Identity Name="maui-package-name-placeholder" Publisher="CN=User Name" Version="0.0.0.0" />
 
   <mp:PhoneIdentity PhoneProductId="025747CF-DBBD-418D-B194-BDBCD542E37C" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
   <Properties>
-    <DisplayName>$placeholder$</DisplayName>
-    <PublisherDisplayName>User Name</PublisherDisplayName>
+    <DisplayName>Mellow Narrator</DisplayName>
+    <PublisherDisplayName>Mellow Narrator</PublisherDisplayName>
     <Logo>$placeholder$.png</Logo>
   </Properties>
 

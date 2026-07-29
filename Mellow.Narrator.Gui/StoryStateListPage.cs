@@ -45,27 +45,24 @@ public sealed class StoryStateListPage : ContentPage
         };
         var empty = Ui.Empty("No Story States yet. Start a story from a Story Definition.");
         _items.CollectionChanged += (_, _) => empty.IsVisible = _items.Count == 0;
+        var buttons = Ui.Buttons(
+            Ui.Button("Open", (_, _) => { if (Selected is { } x) _tabs.OpenPlay(x.Id); }),
+            Ui.SecondaryButton("Label", EditLabel),
+            Ui.SecondaryButton("Copy", Copy),
+            Ui.SecondaryButton("Import", Import),
+            Ui.SecondaryButton("Export", Export),
+            Ui.SecondaryButton("Earlier", async (_, _) => await Move(-1)),
+            Ui.SecondaryButton("Later", async (_, _) => await Move(1)),
+            Ui.DestructiveButton("Delete", Delete));
+        var listArea = new Grid { Children = { _list, empty } };
         var grid = new Grid
         {
             Padding = 16,
             RowDefinitions = { new(GridLength.Auto), new(GridLength.Auto), new(GridLength.Star) },
-            Children =
-            {
-                Ui.Heading("Story States"),
-                Ui.Buttons(
-                    Ui.Button("Open", (_, _) => { if (Selected is { } x) _tabs.OpenPlay(x.Id); }),
-                    Ui.SecondaryButton("Label", EditLabel),
-                    Ui.SecondaryButton("Copy", Copy),
-                    Ui.SecondaryButton("Import", Import),
-                    Ui.SecondaryButton("Export", Export),
-                    Ui.SecondaryButton("Earlier", async (_, _) => await Move(-1)),
-                    Ui.SecondaryButton("Later", async (_, _) => await Move(1)),
-                    Ui.DestructiveButton("Delete", Delete)),
-                new Grid { Children = { _list, empty } }
-            }
+            Children = { Ui.Heading("Story States"), buttons, listArea }
         };
-        grid.SetRow(grid.Children[1], 1);
-        grid.SetRow(grid.Children[2], 2);
+        grid.SetRow(buttons, 1);
+        grid.SetRow(listArea, 2);
         Content = grid;
     }
 
@@ -76,8 +73,10 @@ public sealed class StoryStateListPage : ContentPage
     {
         try
         {
+            var selectedId = Selected?.Id;
             _items.Clear();
             foreach (var item in await _repository.ListAsync()) _items.Add(item);
+            if (selectedId is { } id) _list.SelectedItem = _items.FirstOrDefault(x => x.Id == id);
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
@@ -117,8 +116,8 @@ public sealed class StoryStateListPage : ContentPage
         var otherIndex = index + delta;
         if (otherIndex < 0 || otherIndex >= _items.Count) return;
         var other = _items[otherIndex];
-        await _repository.SwapSortOrderAsync(selected.Id, other.Id);
-        await Refresh();
+        try { await _repository.SwapSortOrderAsync(selected.Id, other.Id); await Refresh(); }
+        catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
     private async void Delete(object? sender, EventArgs e)

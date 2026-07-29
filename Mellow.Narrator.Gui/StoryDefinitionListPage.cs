@@ -3,7 +3,7 @@ using Mellow.Narrator.Core;
 
 namespace Mellow.Narrator.Gui;
 
-public sealed class StoryDefinitionListPage : ContentPage, IWorkspacePayloadPage, IInFlightRequestPage
+public sealed class StoryDefinitionListPage : ContentPage, IPendingOperationPage, IInFlightRequestPage
 {
     private readonly IStoryDefinitionRepository _repository;
     private readonly INarratorApplication _application;
@@ -14,6 +14,7 @@ public sealed class StoryDefinitionListPage : ContentPage, IWorkspacePayloadPage
     private readonly Label _status = new() { TextColor = Colors.DarkOrange };
     private CancellationTokenSource? _request;
     private PendingOperationState? _pendingOperation;
+    private bool _clearStatusOnNextRefresh;
 
     public StoryDefinitionListPage(
         IStoryDefinitionRepository repository,
@@ -40,40 +41,36 @@ public sealed class StoryDefinitionListPage : ContentPage, IWorkspacePayloadPage
         };
         var empty = Ui.Empty("No Story Definitions yet. Click New to create one.");
         _items.CollectionChanged += (_, _) => empty.IsVisible = _items.Count == 0;
+        var buttons = Ui.Buttons(
+            Ui.Button("New", (_, _) => _tabs.OpenPrompt()),
+            Ui.SecondaryButton("Open", (_, _) => { if (Selected is { } x) _tabs.OpenDefinition(x.Id); }),
+            Ui.Button("Start", async (_, _) => await StartAsync()),
+            Ui.SecondaryButton("Import", Import),
+            Ui.SecondaryButton("Export", Export),
+            Ui.SecondaryButton("Earlier", async (_, _) => await Move(-1)),
+            Ui.SecondaryButton("Later", async (_, _) => await Move(1)),
+            Ui.DestructiveButton("Delete", Delete),
+            Ui.Busy(_startBusy, "Starting…"));
+        var listArea = new Grid { Children = { _list, empty } };
         var grid = new Grid
         {
             Padding = 16,
             RowDefinitions = { new(GridLength.Auto), new(GridLength.Auto), new(GridLength.Auto), new(GridLength.Star) },
-            Children =
-            {
-                Ui.Heading("Story Definitions"),
-                Ui.Buttons(
-                    Ui.Button("New", (_, _) => _tabs.OpenPrompt()),
-                    Ui.SecondaryButton("Open", (_, _) => { if (Selected is { } x) _tabs.OpenDefinition(x.Id); }),
-                    Ui.Button("Start", async (_, _) => await StartAsync()),
-                    Ui.SecondaryButton("Import", Import),
-                    Ui.SecondaryButton("Export", Export),
-                    Ui.SecondaryButton("Earlier", async (_, _) => await Move(-1)),
-                    Ui.SecondaryButton("Later", async (_, _) => await Move(1)),
-                    Ui.DestructiveButton("Delete", Delete),
-                    Ui.Busy(_startBusy, "Starting…")),
-                _status,
-                new Grid { Children = { _list, empty } }
-            }
+            Children = { Ui.Heading("Story Definitions"), buttons, _status, listArea }
         };
-        grid.SetRow(grid.Children[1], 1);
+        grid.SetRow(buttons, 1);
         grid.SetRow(_status, 2);
-        grid.SetRow(grid.Children[3], 3);
+        grid.SetRow(listArea, 3);
         Content = grid;
     }
 
-    PendingOperationState? IWorkspacePayloadPage.PendingOperation => _pendingOperation;
+    PendingOperationState? IPendingOperationPage.PendingOperation => _pendingOperation;
     bool IInFlightRequestPage.HasInFlightRequest => _request is not null;
     async Task IInFlightRequestPage.CancelInFlightRequestAsync(bool preserveInterruptedMarker)
     {
         var marker = preserveInterruptedMarker ? _pendingOperation : null;
         _request?.Cancel();
-        while (_request is not null) await Task.Delay(20);
+        await Ui.WaitWhileAsync(() => _request is not null, TimeSpan.FromSeconds(5));
         if (marker is not null) _pendingOperation = marker;
     }
 
@@ -82,6 +79,7 @@ public sealed class StoryDefinitionListPage : ContentPage, IWorkspacePayloadPage
         if (operation?.Type is not PendingOperationType.GenerateOpeningScene) return;
         _pendingOperation = null;
         _status.Text = "The previous story start was interrupted. Select the Story Definition and choose Start to retry.";
+        _clearStatusOnNextRefresh = false;
     }
 
     private StoryDefinitionSummary? Selected => _list.SelectedItem as StoryDefinitionSummary;
@@ -96,8 +94,15 @@ public sealed class StoryDefinitionListPage : ContentPage, IWorkspacePayloadPage
     {
         try
         {
+            // The interrupted-operation notice must survive the very first Refresh() after it's set
+            // (that's the appearance it's meant to be seen on), but must not linger forever across
+            // later tab revisits - so it's cleared starting on the *second* Refresh() since it was set.
+            if (_clearStatusOnNextRefresh) _status.Text = "";
+            _clearStatusOnNextRefresh = _status.Text.Length > 0;
+            var selectedId = Selected?.Id;
             _items.Clear();
             foreach (var item in await _repository.ListAsync()) _items.Add(item);
+            if (selectedId is { } id) _list.SelectedItem = _items.FirstOrDefault(x => x.Id == id);
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
@@ -143,12 +148,8 @@ public sealed class StoryDefinitionListPage : ContentPage, IWorkspacePayloadPage
         var otherIndex = index + delta;
         if (otherIndex < 0 || otherIndex >= _items.Count) return;
         var other = _items[otherIndex];
-        var first = await _repository.GetAsync(selected.Id);
-        var second = await _repository.GetAsync(other.Id);
-        if (first is null || second is null) return;
-        await _repository.SaveAsync(first with { SortOrder = second.SortOrder });
-        await _repository.SaveAsync(second with { SortOrder = first.SortOrder });
-        await Refresh();
+        try { await _repository.SwapSortOrderAsync(selected.Id, other.Id); await Refresh(); }
+        catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
     private async void Delete(object? sender, EventArgs e)

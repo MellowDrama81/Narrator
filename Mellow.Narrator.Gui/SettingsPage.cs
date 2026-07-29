@@ -3,7 +3,7 @@ using Mellow.Narrator.Core;
 
 namespace Mellow.Narrator.Gui;
 
-public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlightRequestPage
+public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlightRequestPage
 {
     private const string StoredCredentialIndicator = "stored-api-key";
     private static readonly IReadOnlyDictionary<string, string> Help = new Dictionary<string, string>
@@ -67,6 +67,7 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
     private bool _clearCredential;
     private CancellationTokenSource? _request;
     private PendingOperationState? _pendingOperation;
+    private bool _loaded;
 
     public SettingsPage(INarratorApplication app, ITrashStore trash, MainTabbedPage tabs)
     {
@@ -188,13 +189,13 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
         return body;
     }
 
-    PendingOperationState? IWorkspacePayloadPage.PendingOperation => _pendingOperation;
+    PendingOperationState? IPendingOperationPage.PendingOperation => _pendingOperation;
     bool IInFlightRequestPage.HasInFlightRequest => _request is not null;
     async Task IInFlightRequestPage.CancelInFlightRequestAsync(bool preserveInterruptedMarker)
     {
         var marker = preserveInterruptedMarker ? _pendingOperation : null;
         _request?.Cancel();
-        while (_request is not null) await Task.Delay(20);
+        await Ui.WaitWhileAsync(() => _request is not null, TimeSpan.FromSeconds(5));
         if (marker is not null) _pendingOperation = marker;
     }
 
@@ -210,10 +211,15 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
     protected override async void OnAppearing()
     {
         base.OnAppearing();
+        // TabbedPage raises OnAppearing on every tab switch, not just the first time this page is
+        // shown, so this must only load once - otherwise switching tabs away and back silently
+        // discards whatever the user was in the middle of typing.
+        if (_loaded) return;
         try
         {
             Load(await _app.GetSettingsAsync());
             ShowCredentialPresence(await _app.HasApiCredentialAsync());
+            _loaded = true;
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
@@ -294,10 +300,12 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
     private async Task<ApiConnectionSettings> BuildAsync()
     {
         var current = await _app.GetSettingsAsync();
+        var baseUrl = Uri.TryCreate(_baseUrl.Text?.Trim(), UriKind.Absolute, out var parsedBaseUrl) ? parsedBaseUrl : null;
+        var modelId = string.IsNullOrWhiteSpace(_model.Text) ? null : _model.Text.Trim();
         return current with
         {
-            BaseUrl = Uri.TryCreate(_baseUrl.Text?.Trim(), UriKind.Absolute, out var uri) ? uri : null,
-            ModelId = string.IsNullOrWhiteSpace(_model.Text) ? null : _model.Text.Trim(),
+            BaseUrl = baseUrl,
+            ModelId = modelId,
             RequestTimeout = TimeSpan.FromSeconds(Parse(_timeout, "timeout")),
             MaxOutputTokens = (int)Parse(_maxOutput, "maximum output tokens"),
             Parameters = new(
@@ -323,9 +331,12 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
             },
             Logging = new((NarratorLogLevel?)_logLevel.SelectedItem
                 ?? throw new NarratorException("Select a logging level.")),
-            Capabilities = current.BaseUrl?.ToString() != _baseUrl.Text?.Trim()
+            // Compare parsed Uri objects, not strings: current.BaseUrl.ToString() is normalized (trailing
+            // slash, casing, escaping) while the entered text isn't, so a string comparison would treat
+            // an unchanged URL as "changed" and reset Capabilities to Untested for no reason.
+            Capabilities = !Equals(current.BaseUrl, baseUrl)
                 ? new(false, StructuredOutputTier.Untested, null, null)
-                : current.ModelId != _model.Text?.Trim()
+                : current.ModelId != modelId
                     ? new(current.Capabilities.SupportsModelDiscovery, StructuredOutputTier.Untested, null, null)
                     : current.Capabilities
         };
@@ -428,7 +439,11 @@ public sealed class SettingsPage : ContentPage, IWorkspacePayloadPage, IInFlight
 
     private void Set(string key, object? value) => _fields[key].Text = value is null ? "" : Convert.ToString(value, CultureInfo.InvariantCulture);
     private double Number(string key) => Parse(_fields[key], key);
-    private int Int(string key) => checked((int)Number(key));
+    private int Int(string key)
+    {
+        try { return checked((int)Number(key)); }
+        catch (OverflowException) { throw new NarratorException($"Enter a valid {key}."); }
+    }
     private TimeSpan Seconds(string key) => TimeSpan.FromSeconds(Number(key));
 
     private static double Parse(Entry entry, string name) =>

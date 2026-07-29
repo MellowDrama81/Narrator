@@ -2,7 +2,7 @@ using Mellow.Narrator.Core;
 
 namespace Mellow.Narrator.Gui;
 
-public sealed class StoryPromptPage : ContentPage, IWorkspacePayloadPage, ICloseGuardPage, IInFlightRequestPage
+public sealed class StoryPromptPage : ContentPage, IStoryPromptDraftPage, IPendingOperationPage, ICloseGuardPage, IInFlightRequestPage
 {
     private readonly Guid? _sourceId;
     private readonly IStoryDefinitionRepository _repository;
@@ -13,6 +13,7 @@ public sealed class StoryPromptPage : ContentPage, IWorkspacePayloadPage, IClose
     private readonly ActivityIndicator _busy = new();
     private CancellationTokenSource? _request;
     private PendingOperationState? _pendingOperation;
+    private bool _loaded;
 
     public StoryPromptPage(
         Guid? sourceId,
@@ -42,20 +43,21 @@ public sealed class StoryPromptPage : ContentPage, IWorkspacePayloadPage, IClose
         {
             _title.Text = restoredDraft.Title;
             _prompt.Text = restoredDraft.StoryPrompt;
+            _loaded = true;
         }
         _title.TextChanged += (_, _) => _tabs.ScheduleWorkspaceSave();
         _prompt.TextChanged += (_, _) => _tabs.ScheduleWorkspaceSave();
     }
 
-    StoryPromptDraft? IWorkspacePayloadPage.StoryPromptDraft =>
+    StoryPromptDraft? IStoryPromptDraftPage.StoryPromptDraft =>
         new(_sourceId, _title.Text ?? "", _prompt.Text ?? "");
-    PendingOperationState? IWorkspacePayloadPage.PendingOperation => _pendingOperation;
+    PendingOperationState? IPendingOperationPage.PendingOperation => _pendingOperation;
     bool IInFlightRequestPage.HasInFlightRequest => _request is not null;
     async Task IInFlightRequestPage.CancelInFlightRequestAsync(bool preserveInterruptedMarker)
     {
         var marker = preserveInterruptedMarker ? _pendingOperation : null;
         _request?.Cancel();
-        while (_request is not null) await Task.Delay(20);
+        await Ui.WaitWhileAsync(() => _request is not null, TimeSpan.FromSeconds(5));
         if (marker is not null) _pendingOperation = marker;
     }
 
@@ -84,7 +86,13 @@ public sealed class StoryPromptPage : ContentPage, IWorkspacePayloadPage, IClose
                     "Retry") == "Retry")
                 Generate(null, EventArgs.Empty);
         }
-        if (_sourceId is null || !string.IsNullOrEmpty(_title.Text)) return;
+        // TabbedPage raises OnAppearing on every tab switch; only fetch the source definition's
+        // pristine title/prompt once, otherwise switching tabs away and back would silently discard
+        // the user's edits (clearing the title, for instance, previously defeated the old "is the
+        // title still empty" check used here and caused exactly that).
+        if (_loaded) return;
+        _loaded = true;
+        if (_sourceId is null) return;
         try
         {
             var source = await _repository.GetAsync(_sourceId.Value) ?? throw new NarratorException("Story Definition not found.");

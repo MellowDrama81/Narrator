@@ -80,12 +80,25 @@ internal static class Ui
         return layout;
     }
 
+    // Shared by every page's CancelInFlightRequestAsync: polls stillPending until it returns false or
+    // the timeout elapses, so a request that never observes cancellation can't hang the caller (e.g.
+    // app shutdown) indefinitely.
+    public static async Task WaitWhileAsync(Func<bool> stillPending, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (stillPending() && DateTime.UtcNow < deadline) await Task.Delay(20);
+    }
+
     public static Task Error(Page page, Exception ex)
     {
         _logger.LogError("A GUI operation failed with {ErrorType}.", ex.GetType().FullName);
         if (_logLevelSwitch?.MinimumLevel == NarratorLogLevel.Trace)
             _logger.LogTrace(ex, "GUI failure details.");
-        return page.DisplayAlertAsync("Mellow Narrator", ex.Message, "OK");
+        // Only NarratorException messages are written for the user to read; every other exception
+        // type is an unexpected .NET failure (NullReferenceException, raw IOException, etc.) whose
+        // message is an implementation detail, not something a user should see.
+        var message = ex is NarratorException ? ex.Message : "Something went wrong. Check the logs for details.";
+        return page.DisplayAlertAsync("Mellow Narrator", message, "OK");
     }
 }
 
@@ -102,7 +115,17 @@ public sealed class NarratorNavigationPage : NavigationPage
     public Guid TabId { get; }
     public TabType TabType { get; }
     public Guid? RecordId { get; }
-    public bool IsFixed => TabType is TabType.Settings or TabType.StoryDefinitionList or TabType.PlayStoryList;
+    public bool IsFixed => FixedTabTypes.Types.Contains(TabType);
+}
+
+// Single source of truth for which tabs are fixed (always present, never closable/reorderable), so
+// MainTabbedPage's tab layout can't silently drift out of sync with NarratorNavigationPage.IsFixed.
+internal static class FixedTabTypes
+{
+    public static readonly IReadOnlySet<TabType> Types = new HashSet<TabType>
+    {
+        TabType.Settings, TabType.StoryDefinitionList, TabType.PlayStoryList
+    };
 }
 
 internal sealed class LocalTimestampConverter : IValueConverter

@@ -2,11 +2,19 @@ using Mellow.Narrator.Core;
 
 namespace Mellow.Narrator.Gui;
 
-internal interface IWorkspacePayloadPage
+internal interface IStoryPromptDraftPage
 {
-    StoryPromptDraft? StoryPromptDraft => null;
-    PlayStoryTabState? PlayStoryTabState => null;
-    PendingOperationState? PendingOperation => null;
+    StoryPromptDraft? StoryPromptDraft { get; }
+}
+
+internal interface IPlayStoryTabStatePage
+{
+    PlayStoryTabState? PlayStoryTabState { get; }
+}
+
+internal interface IPendingOperationPage
+{
+    PendingOperationState? PendingOperation { get; }
 }
 
 internal interface ICloseGuardPage
