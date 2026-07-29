@@ -1,0 +1,11 @@
+<Project>
+
+  <PropertyGroup>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <!-- Safe to enable: the codebase built with 0 warnings under EnableNETAnalyzers/AnalysisLevel=latest
+         at the time this was added. Keep it that way rather than letting warnings accumulate silently. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

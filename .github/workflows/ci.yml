@@ -26,10 +26,13 @@ jobs:
         run: dotnet workload restore Mellow.Narrator.slnx
 
       - name: Restore packages
-        run: dotnet restore Mellow.Narrator.slnx
+        run: dotnet restore Mellow.Narrator.slnx --locked-mode
 
       - name: Build Windows and Android targets
         run: dotnet build Mellow.Narrator.slnx --configuration Release --no-restore
+
+      - name: Build CLI
+        run: dotnet build Mellow.Narrator.Cli/Mellow.Narrator.Cli.csproj --configuration Release --no-restore
 
       - name: Run Core, provider, and persistence tests
         run: dotnet test Mellow.Narrator.Tests/Mellow.Narrator.Tests.csproj --configuration Release --no-build --no-restore --collect:"XPlat Code Coverage"
