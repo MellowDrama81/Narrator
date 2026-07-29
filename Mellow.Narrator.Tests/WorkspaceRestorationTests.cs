@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Mellow.Narrator.Core;
 
 namespace Mellow.Narrator.Tests;
@@ -5,17 +7,24 @@ namespace Mellow.Narrator.Tests;
 public sealed class WorkspaceRestorationTests
 {
     [Fact]
-    public void WorkspaceSupportsSixTabTypes()
+    public void TabType_MembersSerializeToStableNames()
     {
-        Assert.Equal(6, Enum.GetValues<TabType>().Length);
-    }
+        // TabType is persisted in workspace.json as a camelCase string via JsonStringEnumConverter, not
+        // as its ordinal, so reordering the enum's declaration is harmless - renaming or removing a
+        // member is what would break loading an existing user's saved workspace. Pin the exact name
+        // every currently-supported member serializes to, so that regression shows up here.
+        var options = new JsonSerializerOptions { Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) } };
+        var serialized = Enum.GetValues<TabType>().ToDictionary(x => x, x => JsonSerializer.Serialize(x, options).Trim('"'));
 
-    [Fact]
-    public void FixedTabsOccupyFirstThreeLogicalTypes()
-    {
-        Assert.Equal(TabType.Settings, (TabType)0);
-        Assert.Equal(TabType.StoryDefinitionList, (TabType)1);
-        Assert.Equal(TabType.PlayStoryList, (TabType)2);
+        Assert.Equal(new Dictionary<TabType, string>
+        {
+            [TabType.Settings] = "settings",
+            [TabType.StoryDefinitionList] = "storyDefinitionList",
+            [TabType.PlayStoryList] = "playStoryList",
+            [TabType.StoryDefinition] = "storyDefinition",
+            [TabType.StoryPrompt] = "storyPrompt",
+            [TabType.PlayStory] = "playStory"
+        }, serialized);
     }
 
     [Fact]
@@ -46,6 +55,32 @@ public sealed class WorkspaceRestorationTests
             new HashSet<Guid> { settings.TabId, remaining.TabId });
 
         Assert.Equal(settings.TabId, selected);
+    }
+
+    [Fact]
+    public void SelectActiveTabId_ReturnsNullWhenNoTabsSurvivedRestoration()
+    {
+        var missingActive = Tab(TabType.PlayStory, 0);
+        var workspace = new WorkspaceState(missingActive.TabId, [missingActive]);
+
+        var selected = WorkspaceRestoration.SelectActiveTabId(workspace, new HashSet<Guid>());
+
+        Assert.Null(selected);
+    }
+
+    [Fact]
+    public void SelectActiveTabId_BreaksSameTypeTiesByPosition()
+    {
+        var missingActive = Tab(TabType.PlayStory, 5);
+        var earlier = Tab(TabType.StoryDefinition, 1);
+        var later = Tab(TabType.StoryDefinition, 2);
+        var workspace = new WorkspaceState(missingActive.TabId, [missingActive, earlier, later]);
+
+        var selected = WorkspaceRestoration.SelectActiveTabId(
+            workspace,
+            new HashSet<Guid> { earlier.TabId, later.TabId });
+
+        Assert.Equal(earlier.TabId, selected);
     }
 
     private static OpenTabState Tab(TabType type, int position) =>
