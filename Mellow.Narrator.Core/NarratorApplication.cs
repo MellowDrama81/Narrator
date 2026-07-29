@@ -18,6 +18,10 @@ public sealed class NarratorApplication(
 {
     private readonly ILogger<NarratorApplication> _logger =
         logger ?? NullLogger<NarratorApplication>.Instance;
+    // Serializes "list existing sort orders, compute the next one, save" so two concurrent creates
+    // within this process can't compute and persist the same SortOrder.
+    private readonly SemaphoreSlim _definitionCreateGate = new(1, 1);
+    private readonly SemaphoreSlim _stateCreateGate = new(1, 1);
 
     public Task<ApiConnectionSettings> GetSettingsAsync(CancellationToken cancellationToken = default) =>
         settingsStore.LoadAsync(cancellationToken);
@@ -129,20 +133,18 @@ public sealed class NarratorApplication(
         StoryGenerationSettings proposed,
         CancellationToken cancellationToken = default)
     {
-        var definitionCount = 0;
-        foreach (var summary in await definitions.ListAsync(cancellationToken))
-        {
-            var definition = await definitions.GetAsync(summary.Id, cancellationToken);
-            if (definition is not null && !StoryBibleProcessor.IsWithinLimits(definition.InitialStoryBible, proposed))
-                definitionCount++;
-        }
-        var stateCount = 0;
-        foreach (var summary in await states.ListAsync(cancellationToken))
-        {
-            var state = await states.GetAsync(summary.Id, cancellationToken);
-            if (state is not null && !StoryBibleProcessor.IsWithinLimits(state.CurrentStoryBible, proposed))
-                stateCount++;
-        }
+        var definitionSummaries = await definitions.ListAsync(cancellationToken);
+        var loadedDefinitions = await Task.WhenAll(
+            definitionSummaries.Select(x => definitions.GetAsync(x.Id, cancellationToken)));
+        var definitionCount = loadedDefinitions.Count(x =>
+            x is not null && !StoryBibleProcessor.IsWithinLimits(x.InitialStoryBible, proposed));
+
+        var stateSummaries = await states.ListAsync(cancellationToken);
+        var loadedStates = await Task.WhenAll(
+            stateSummaries.Select(x => states.GetAsync(x.Id, cancellationToken)));
+        var stateCount = loadedStates.Count(x =>
+            x is not null && !StoryBibleProcessor.IsWithinLimits(x.CurrentStoryBible, proposed));
+
         return new(definitionCount, stateCount);
     }
 
@@ -172,14 +174,15 @@ public sealed class NarratorApplication(
         }
         if (generated.InitialEventsPrompt.Length > settings.ContentLimits.MaxStoryPromptCharacters)
             throw new NarratorException("The Initial Events prompt exceeds the configured limit.");
-        if (generated.InitialStoryBibleEntries.Count > 2000)
+        if (generated.InitialStoryBibleEntries.Count > SettingsValidator.MaxStoryBibleEntriesUpperBound)
             throw new NarratorException("The generated initial Story Bible contains too many entries.");
         foreach (var entry in generated.InitialStoryBibleEntries)
             ValidateGeneratedEntry(entry, settings.ContentLimits);
         var now = timeProvider.GetUtcNow();
-        var source = overwrite && draft.SourceStoryDefinitionId is not null
-            ? await definitions.GetAsync(draft.SourceStoryDefinitionId.Value, cancellationToken)
-            : null;
+        StoryDefinition? source = null;
+        if (overwrite && draft.SourceStoryDefinitionId is { } sourceId)
+            source = await definitions.GetAsync(sourceId, cancellationToken)
+                ?? throw new NarratorException("The Story Definition to overwrite was not found.");
         var raw = new StoryBible(generated.InitialStoryBibleEntries.Select(x =>
             new StoryBibleEntry(
                 idGenerator.NewId(),
@@ -194,20 +197,26 @@ public sealed class NarratorApplication(
         if (culls.Count > 0)
             maintenance.Add(new(idGenerator.NewId(), StoryBibleMaintenanceReason.GeneratedBibleLimitCull,
                 Limits(settings), culls, now));
-        var definitionSummaries = source is null ? await definitions.ListAsync(cancellationToken) : [];
-        var definition = new StoryDefinition(
-            source?.Id ?? targetId,
-            title,
-            generated.RefinedStoryPrompt.Trim(),
-            bible,
-            maintenance,
-            source?.SortOrder ?? (definitionSummaries.Count == 0 ? 0 : definitionSummaries.Max(x => x.SortOrder) + 1),
-            source?.CreatedAtUtc ?? now,
-            now)
+        StoryDefinition definition;
+        await _definitionCreateGate.WaitAsync(cancellationToken);
+        try
         {
-            InitialEventsPrompt = generated.InitialEventsPrompt.Trim()
-        };
-        await definitions.SaveAsync(definition, cancellationToken);
+            var definitionSummaries = source is null ? await definitions.ListAsync(cancellationToken) : [];
+            definition = new StoryDefinition(
+                source?.Id ?? targetId,
+                title,
+                generated.RefinedStoryPrompt.Trim(),
+                bible,
+                maintenance,
+                source?.SortOrder ?? (definitionSummaries.Count == 0 ? 0 : definitionSummaries.Max(x => x.SortOrder) + 1),
+                source?.CreatedAtUtc ?? now,
+                now)
+            {
+                InitialEventsPrompt = generated.InitialEventsPrompt.Trim()
+            };
+            await definitions.SaveAsync(definition, cancellationToken);
+        }
+        finally { _definitionCreateGate.Release(); }
         _logger.LogInformation(
             "Story Definition {StoryDefinitionId} saved with {BibleEntryCount} initial Story Bible entries.",
             definition.Id,
@@ -225,6 +234,10 @@ public sealed class NarratorApplication(
             idGenerator.NewId(), StoryBibleMaintenanceReason.UserApprovedLimitCull, Limits(settings), changes, timeProvider.GetUtcNow())).ToArray();
         var updated = definition with { InitialStoryBible = bible, StoryBibleMaintenanceHistory = history, UpdatedAtUtc = timeProvider.GetUtcNow() };
         await definitions.SaveAsync(updated, cancellationToken);
+        _logger.LogInformation(
+            "Story Definition {StoryDefinitionId} Story Bible culled with {ChangeCount} changes.",
+            definitionId,
+            changes.Count);
         return updated;
     }
 
@@ -238,6 +251,10 @@ public sealed class NarratorApplication(
             idGenerator.NewId(), StoryBibleMaintenanceReason.UserApprovedLimitCull, Limits(settings), changes, timeProvider.GetUtcNow())).ToArray();
         var updated = state with { CurrentStoryBible = bible, StoryBibleMaintenanceHistory = history };
         await states.SaveAsync(updated, cancellationToken);
+        _logger.LogInformation(
+            "Story State {StoryStateId} Story Bible culled with {ChangeCount} changes.",
+            stateId,
+            changes.Count);
         return updated;
     }
 
@@ -290,6 +307,7 @@ public sealed class NarratorApplication(
         CancellationToken cancellationToken = default)
     {
         if (targetStateId == Guid.Empty) throw new ArgumentException("Target ID cannot be empty.", nameof(targetStateId));
+        using var requestLease = storyRequests.Enter(targetStateId);
         var (settings, credential) = await ConnectionAsync(cancellationToken);
         _logger.LogInformation(
             "Generating opening scene for Story State {StoryStateId} with model {ModelId}.",
@@ -298,29 +316,47 @@ public sealed class NarratorApplication(
         if (!StoryBibleProcessor.IsWithinLimits(draft.Definition.InitialStoryBible, settings.StoryGeneration))
             throw new NarratorException("The initial Story Bible exceeds current limits. Increase the limits or cull it first.");
 
-        var idMap = draft.Definition.InitialStoryBible.Entries.ToDictionary(x => x.Id, _ => idGenerator.NewId());
+        // Entries removed by an earlier cull can still be referenced by StoryBibleMaintenanceHistory below,
+        // so ids are mapped lazily (not just for the entries currently in the bible) to keep every reference
+        // to the same old id pointing at the same new id.
+        var idMap = new Dictionary<Guid, Guid>();
+        Guid MapId(Guid oldId) => idMap.TryGetValue(oldId, out var mapped) ? mapped : idMap[oldId] = idGenerator.NewId();
+
         var initial = new StoryBible(draft.Definition.InitialStoryBible.Entries
-            .Select(x => x with { Id = idMap[x.Id], LastRelevantTurnNumber = 0 }).ToArray());
+            .Select(x => x with { Id = MapId(x.Id), LastRelevantTurnNumber = 0 }).ToArray());
         var snapshot = draft.Definition with { InitialStoryBible = initial };
         var context = new GenerationContext(snapshot, initial, [], null, 0);
         var response = await provider.GenerateOpeningAsync(settings, credential, context, cancellationToken);
         response = ValidateGenerationResponse(response, settings.ContentLimits);
-        var mappedRelevant = response.RelevantStoryBibleEntryIds
-            .Select(x => idMap.GetValueOrDefault(x, x))
+        var relevant = response.RelevantStoryBibleEntryIds
             .Concat(initial.Entries.Select(x => x.Id))
             .Distinct()
             .ToArray();
-        var mappedUpdates = response.StoryBibleUpdates.Select(x =>
-            x.EntryId is { } oldId && idMap.TryGetValue(oldId, out var newId) ? x with { EntryId = newId } : x).ToArray();
-        var applied = StoryBibleProcessor.Apply(initial, mappedRelevant, mappedUpdates, 0, settings.StoryGeneration, idGenerator.NewId);
+        var applied = StoryBibleProcessor.Apply(initial, relevant, response.StoryBibleUpdates, 0, settings.StoryGeneration, idGenerator.NewId);
+        var maintenanceHistory = draft.StoryBibleMaintenanceHistory.Select(x => x with
+        {
+            Changes = x.Changes.Select(change => change with
+            {
+                EntryId = MapId(change.EntryId),
+                Before = change.Before is null ? null : change.Before with { Id = MapId(change.Before.Id) },
+                After = change.After is null ? null : change.After with { Id = MapId(change.After.Id) }
+            }).ToArray()
+        }).ToArray();
         var now = timeProvider.GetUtcNow();
         var stateId = targetStateId;
-        var stateSummaries = await states.ListAsync(cancellationToken);
-        var state = new StoryState(stateId, snapshot.Title, draft.SourceStoryDefinitionId,
-            new(snapshot), applied.Bible, draft.StoryBibleMaintenanceHistory,
-            stateSummaries.Count == 0 ? 0 : stateSummaries.Max(x => x.SortOrder) + 1, now, null, 0);
-        var turn = CreateTurn(stateId, 0, null, response, applied, settings.ModelId!, now);
-        await states.CreateAsync(state, turn, cancellationToken);
+        StoryState state;
+        StoryTurn turn;
+        await _stateCreateGate.WaitAsync(cancellationToken);
+        try
+        {
+            var stateSummaries = await states.ListAsync(cancellationToken);
+            state = new StoryState(stateId, snapshot.Title, draft.SourceStoryDefinitionId,
+                new(snapshot), applied.Bible, maintenanceHistory,
+                stateSummaries.Count == 0 ? 0 : stateSummaries.Max(x => x.SortOrder) + 1, now, null, 0);
+            turn = CreateTurn(stateId, 0, null, response, applied, settings.ModelId!, now);
+            await states.CreateAsync(state, turn, cancellationToken);
+        }
+        finally { _stateCreateGate.Release(); }
         _logger.LogInformation("Story State {StoryStateId} created.", state.Id);
         return (state, turn);
     }
@@ -330,6 +366,7 @@ public sealed class NarratorApplication(
         using var requestLease = storyRequests.Enter(stateId);
         var state = await states.GetAsync(stateId, cancellationToken) ?? throw new NarratorException("Story State not found.");
         var (settings, credential) = await ConnectionAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(action)) throw new NarratorException("Enter an action.");
         if (action.Length > settings.ContentLimits.MaxPlayerActionCharacters) throw new NarratorException("The action exceeds the configured limit.");
         if (!StoryBibleProcessor.IsWithinLimits(state.CurrentStoryBible, settings.StoryGeneration))
             throw new NarratorException("The Story Bible exceeds current limits. Increase the limits or cull it first.");
@@ -420,21 +457,14 @@ public sealed class NarratorApplication(
     }
 
     private static void ValidateGeneratedEntry(ProposedStoryBibleEntry entry, ContentLimitSettings limits) =>
-        ValidateEntryFields(entry.Category, entry.Name, entry.KnownFacts, entry.SecretFacts, entry.Importance, limits);
+        ValidateEntryFields(entry.Category, entry.Name, entry.KnownFacts, entry.SecretFacts, entry.Importance, null, limits);
 
     private static void ValidateEntryFields(
-        string category, string name, IReadOnlyList<string> knownFacts, IReadOnlyList<string> secretFacts, int importance, ContentLimitSettings limits)
+        string category, string name, IReadOnlyList<string> knownFacts, IReadOnlyList<string> secretFacts,
+        int importance, int? lastRelevantTurnNumber, ContentLimitSettings limits)
     {
-        if (string.IsNullOrWhiteSpace(category) || category.Length > limits.MaxStoryBibleCategoryCharacters)
-            throw new NarratorException("A Story Bible category is empty or exceeds the configured limit.");
-        if (string.IsNullOrWhiteSpace(name) || name.Length > limits.MaxStoryBibleNameCharacters)
-            throw new NarratorException("A Story Bible entry name is empty or exceeds the configured limit.");
-        if (knownFacts.Count == 0 && secretFacts.Count == 0)
-            throw new NarratorException("A Story Bible entry must have at least one known or secret fact.");
-        if (knownFacts.Any(string.IsNullOrWhiteSpace) || secretFacts.Any(string.IsNullOrWhiteSpace))
-            throw new NarratorException("A Story Bible entry has an empty fact.");
-        if (importance is < 1 or > 5)
-            throw new NarratorException("Story Bible importance must be from 1 to 5.");
+        if (StoryBibleProcessor.ValidateEntry(category, name, knownFacts, secretFacts, importance, lastRelevantTurnNumber, limits) is { } error)
+            throw new NarratorException(error);
     }
 
     private StoryBible NormalizeManualBible(StoryBible bible, ContentLimitSettings limits)
@@ -449,7 +479,7 @@ public sealed class NarratorApplication(
             var name = entry.Name.Trim();
             var knownFacts = entry.KnownFacts.Select(x => x.Trim()).ToArray();
             var secretFacts = entry.SecretFacts.Select(x => x.Trim()).ToArray();
-            ValidateEntryFields(category, name, knownFacts, secretFacts, entry.Importance, limits);
+            ValidateEntryFields(category, name, knownFacts, secretFacts, entry.Importance, entry.LastRelevantTurnNumber, limits);
             entries.Add(entry with { Id = id, Category = category, Name = name, KnownFacts = knownFacts, SecretFacts = secretFacts });
         }
         return new StoryBible(entries);
@@ -482,7 +512,11 @@ public static class CoreServiceCollectionExtensions
         services.AddSingleton<ApiConnectionCoordinator>();
         services.AddSingleton<StoryRequestCoordinator>();
         services.AddSingleton<IIdGenerator, SystemIdGenerator>();
-        services.AddTransient<INarratorApplication, NarratorApplication>();
+        // Singleton, not Transient: NarratorApplication holds no per-call mutable state beyond its
+        // injected singletons, and its sort-order-assignment gates (see _definitionCreateGate/
+        // _stateCreateGate) only serialize concurrent creates correctly if every caller shares the
+        // same instance.
+        services.AddSingleton<INarratorApplication, NarratorApplication>();
         return services;
     }
 }

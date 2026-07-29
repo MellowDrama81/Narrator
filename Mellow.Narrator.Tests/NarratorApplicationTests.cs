@@ -34,6 +34,19 @@ public sealed class NarratorApplicationTests
     }
 
     [Fact]
+    public async Task GenerateDefinition_RejectsOverwriteWhenSourceNoLongerExists()
+    {
+        var draft = new StoryPromptDraft(Guid.NewGuid(), "Title", "Raw prompt");
+        var provider = new FakeProvider
+        {
+            DefinitionResponse = new("Refined prompt", "Suggested Title", "", [])
+        };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.GenerateDefinitionAsync(draft, true, Guid.NewGuid()));
+    }
+
+    [Fact]
     public async Task GenerateDefinition_UsesSuggestedTitleWhenDraftTitleIsBlank()
     {
         var draft = new StoryPromptDraft(null, "   ", "Raw prompt");
@@ -109,11 +122,12 @@ public sealed class NarratorApplicationTests
     {
         var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Fact", ["Content"], [], 3, 0);
         var snapshot = new StoryDefinitionSnapshot("Snapshot title", "Snapshot prompt", new([entry]));
+        var change = new AppliedStoryBibleChange(StoryBibleOperation.Replace, entry.Id, entry, entry, StoryBibleChangeSource.ManualEdit);
         var maintenance = new StoryBibleMaintenanceRecord(
             Guid.NewGuid(),
             StoryBibleMaintenanceReason.UserApprovedLimitCull,
             new(200, 4000, 60000),
-            [],
+            [change],
             DateTimeOffset.UtcNow);
         var draft = new StartStoryDraft(Guid.NewGuid(), snapshot)
         {
@@ -129,11 +143,20 @@ public sealed class NarratorApplicationTests
         var result = await app.StartStoryAsync(draft, Guid.NewGuid());
 
         Assert.Equal("Snapshot title", result.State.Setup.Definition.Title);
-        Assert.Equal(maintenance, Assert.Single(result.State.StoryBibleMaintenanceHistory));
         var clonedEntry = Assert.Single(result.State.Setup.Definition.InitialStoryBible.Entries);
         Assert.NotEqual(entry.Id, clonedEntry.Id);
         Assert.Equal(clonedEntry.Id, Assert.Single(result.Opening.RelevantStoryBibleEntryIds));
         Assert.Equal("story-model", result.Opening.Generation.ModelId);
+
+        // The carried-over maintenance history must reference the entry's *new* id, matching the
+        // remapping applied to the live bible entry above, not the old id from the definition.
+        var history = Assert.Single(result.State.StoryBibleMaintenanceHistory);
+        Assert.Equal(maintenance.Id, history.Id);
+        Assert.Equal(maintenance.Reason, history.Reason);
+        var mappedChange = Assert.Single(history.Changes);
+        Assert.Equal(clonedEntry.Id, mappedChange.EntryId);
+        Assert.Equal(clonedEntry.Id, mappedChange.Before!.Id);
+        Assert.Equal(clonedEntry.Id, mappedChange.After!.Id);
     }
 
     [Fact]
@@ -201,6 +224,20 @@ public sealed class NarratorApplicationTests
     }
 
     [Fact]
+    public async Task PlayTurn_RejectsBlankAction()
+    {
+        var stateId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", StoryBible.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], 0, now, now, 0);
+        var states = new MemoryStates(state, []);
+        var provider = new FakeProvider { StoryResponse = new("Next", ["Continue"], [], [], null, null, null) };
+        var app = CreateApplication(new MemoryDefinitions(), states, provider);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.PlayTurnAsync(stateId, "   "));
+    }
+
+    [Fact]
     public async Task PlayTurn_AllowsFewerSuggestedActionsThanConfiguredMinimum()
     {
         var stateId = Guid.NewGuid();
@@ -236,6 +273,88 @@ public sealed class NarratorApplicationTests
         var result = await app.PlayTurnAsync(stateId, "Continue");
 
         Assert.Equal(["A", "B", "C"], result.Turn.SuggestedActions);
+    }
+
+    [Fact]
+    public async Task PlayTurn_RejectsEmptyNarration()
+    {
+        var stateId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", StoryBible.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], 0, now, now, 0);
+        var states = new MemoryStates(state, []);
+        var provider = new FakeProvider { StoryResponse = new("   ", ["Continue"], [], [], null, null, null) };
+        var app = CreateApplication(new MemoryDefinitions(), states, provider);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.PlayTurnAsync(stateId, "Continue"));
+    }
+
+    [Fact]
+    public async Task PlayTurn_RejectsOversizedNarration()
+    {
+        var stateId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", StoryBible.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], 0, now, now, 0);
+        var states = new MemoryStates(state, []);
+        var limits = ConfiguredSettings().ContentLimits;
+        var provider = new FakeProvider
+        {
+            StoryResponse = new(new string('x', limits.MaxNarrationCharacters + 1), ["Continue"], [], [], null, null, null)
+        };
+        var app = CreateApplication(new MemoryDefinitions(), states, provider);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.PlayTurnAsync(stateId, "Continue"));
+    }
+
+    [Fact]
+    public async Task PlayTurn_RejectsEmptySuggestedAction()
+    {
+        var stateId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", StoryBible.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], 0, now, now, 0);
+        var states = new MemoryStates(state, []);
+        var provider = new FakeProvider { StoryResponse = new("Next", ["   "], [], [], null, null, null) };
+        var app = CreateApplication(new MemoryDefinitions(), states, provider);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.PlayTurnAsync(stateId, "Continue"));
+    }
+
+    [Fact]
+    public async Task PlayTurn_RejectsOversizedSuggestedAction()
+    {
+        var stateId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", StoryBible.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], 0, now, now, 0);
+        var states = new MemoryStates(state, []);
+        var limits = ConfiguredSettings().ContentLimits;
+        var provider = new FakeProvider
+        {
+            StoryResponse = new("Next", [new string('x', limits.MaxSuggestedActionCharacters + 1)], [], [], null, null, null)
+        };
+        var app = CreateApplication(new MemoryDefinitions(), states, provider);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.PlayTurnAsync(stateId, "Continue"));
+    }
+
+    [Fact]
+    public async Task PlayTurn_RejectsTooManyStoryBibleUpdates()
+    {
+        var stateId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", StoryBible.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], 0, now, now, 0);
+        var states = new MemoryStates(state, []);
+        var limits = ConfiguredSettings().ContentLimits;
+        var updates = Enumerable.Range(0, limits.MaxStoryBibleUpdatesPerResponse + 1)
+            .Select(_ => new ProposedStoryBibleUpdate(StoryBibleOperation.Remove, Guid.NewGuid(), null))
+            .ToArray();
+        var provider = new FakeProvider { StoryResponse = new("Next", ["Continue"], [], updates, null, null, null) };
+        var app = CreateApplication(new MemoryDefinitions(), states, provider);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.PlayTurnAsync(stateId, "Continue"));
     }
 
     [Fact]
@@ -282,6 +401,20 @@ public sealed class NarratorApplicationTests
     }
 
     [Fact]
+    public async Task UpdateInitialStoryBible_RejectsNegativeLastRelevantTurnNumber()
+    {
+        var definitions = new MemoryDefinitions();
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "Prompt", StoryBible.Empty, [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        await definitions.SaveAsync(definition);
+        var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
+
+        var invalid = new StoryBibleEntry(Guid.NewGuid(), "fact", "Name", ["Content"], [], 3, -1);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.UpdateInitialStoryBibleAsync(definition.Id, new([invalid])));
+    }
+
+    [Fact]
     public async Task UpdateInitialStoryBible_RejectsDuplicateEntryIds()
     {
         var id = Guid.NewGuid();
@@ -320,13 +453,199 @@ public sealed class NarratorApplicationTests
     }
 
     [Fact]
-    public void StoryRequestCoordinator_RejectsConcurrentRequestForSameState()
+    public async Task CullDefinition_RemovesLowestImportanceEntryAndRecordsHistory()
+    {
+        var lowImportance = new StoryBibleEntry(Guid.NewGuid(), "fact", "Low", ["Content"], [], 1, 0);
+        var highImportance = new StoryBibleEntry(Guid.NewGuid(), "fact", "High", ["Content"], [], 5, 0);
+        var definitions = new MemoryDefinitions();
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "Prompt", new([lowImportance, highImportance]), [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        await definitions.SaveAsync(definition);
+        var settings = ConfiguredSettings() with { StoryGeneration = ConfiguredSettings().StoryGeneration with { MaxStoryBibleEntries = 1 } };
+        var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider(), settings);
+
+        var updated = await app.CullDefinitionAsync(definition.Id);
+
+        var remaining = Assert.Single(updated.InitialStoryBible.Entries);
+        Assert.Equal(highImportance.Id, remaining.Id);
+        var history = Assert.Single(updated.StoryBibleMaintenanceHistory);
+        Assert.Equal(StoryBibleMaintenanceReason.UserApprovedLimitCull, history.Reason);
+        Assert.Equal(StoryBibleOperation.Remove, Assert.Single(history.Changes).Operation);
+    }
+
+    [Fact]
+    public async Task CullDefinition_ReturnsUnchangedWhenNothingExceedsLimits()
+    {
+        var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Entry", ["Content"], [], 3, 0);
+        var definitions = new MemoryDefinitions();
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "Prompt", new([entry]), [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        await definitions.SaveAsync(definition);
+        var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
+
+        var updated = await app.CullDefinitionAsync(definition.Id);
+
+        Assert.Equal(definition, updated);
+    }
+
+    [Fact]
+    public async Task CullStoryState_RemovesLowestImportanceEntryAndRecordsHistory()
+    {
+        var lowImportance = new StoryBibleEntry(Guid.NewGuid(), "fact", "Low", ["Content"], [], 1, 0);
+        var highImportance = new StoryBibleEntry(Guid.NewGuid(), "fact", "High", ["Content"], [], 5, 0);
+        var stateId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", StoryBible.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), new([lowImportance, highImportance]), [], 0, now, null, 0);
+        var states = new MemoryStates(state, []);
+        var settings = ConfiguredSettings() with { StoryGeneration = ConfiguredSettings().StoryGeneration with { MaxStoryBibleEntries = 1 } };
+        var app = CreateApplication(new MemoryDefinitions(), states, new FakeProvider(), settings);
+
+        var updated = await app.CullStoryStateAsync(stateId);
+
+        var remaining = Assert.Single(updated.CurrentStoryBible.Entries);
+        Assert.Equal(highImportance.Id, remaining.Id);
+        var history = Assert.Single(updated.StoryBibleMaintenanceHistory);
+        Assert.Equal(StoryBibleMaintenanceReason.UserApprovedLimitCull, history.Reason);
+    }
+
+    [Fact]
+    public async Task CullStoryState_ReturnsUnchangedWhenNothingExceedsLimits()
+    {
+        var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Entry", ["Content"], [], 3, 0);
+        var stateId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", StoryBible.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), new([entry]), [], 0, now, null, 0);
+        var states = new MemoryStates(state, []);
+        var app = CreateApplication(new MemoryDefinitions(), states, new FakeProvider());
+
+        var updated = await app.CullStoryStateAsync(stateId);
+
+        Assert.Equal(state, updated);
+    }
+
+    [Fact]
+    public async Task SaveSettings_RejectsInvalidSettingsBeforeTouchingTheStore()
+    {
+        var original = ConfiguredSettings();
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), new FakeProvider(), original);
+        var invalid = original with { MaxOutputTokens = 1 };
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.SaveSettingsAsync(invalid, null));
+
+        Assert.Equal(original, await app.GetSettingsAsync());
+    }
+
+    [Fact]
+    public async Task TestConnection_PersistsNegotiatedCapabilitiesWhenSettingsUnchanged()
+    {
+        var settings = ConfiguredSettings();
+        var store = new MemorySettings(settings);
+        var provider = new FakeProvider
+        {
+            TestConnectionResult = new(true, [], new(false, StructuredOutputTier.StrictJsonSchema, settings.ModelId, DateTimeOffset.UtcNow), null)
+        };
+        var app = new NarratorApplication(
+            new MemoryDefinitions(), new MemoryStates(), store, new MemorySecureStorage(),
+            provider, TimeProvider.System, new ApiConnectionCoordinator(), new StoryRequestCoordinator(), new SystemIdGenerator());
+
+        await app.TestConnectionAsync();
+
+        var saved = await app.GetSettingsAsync();
+        Assert.Equal(StructuredOutputTier.StrictJsonSchema, saved.Capabilities.StructuredOutputTier);
+    }
+
+    [Fact]
+    public async Task TestConnection_SkipsPersistingCapabilitiesWhenSettingsChangedDuringTest()
+    {
+        var original = ConfiguredSettings();
+        var changed = original with { ModelId = "different-model" };
+        var store = new SettingsThatChangeAfterFirstLoad(original, changed);
+        var provider = new FakeProvider
+        {
+            TestConnectionResult = new(true, [], new(false, StructuredOutputTier.StrictJsonSchema, original.ModelId, DateTimeOffset.UtcNow), null)
+        };
+        var app = new NarratorApplication(
+            new MemoryDefinitions(), new MemoryStates(), store, new MemorySecureStorage(),
+            provider, TimeProvider.System, new ApiConnectionCoordinator(), new StoryRequestCoordinator(), new SystemIdGenerator());
+
+        await app.TestConnectionAsync();
+
+        Assert.False(store.SaveWasCalled);
+    }
+
+    [Fact]
+    public async Task GenerateDefinition_RejectsBlankModelId()
+    {
+        var draft = new StoryPromptDraft(null, "Title", "Prompt");
+        var settings = ConfiguredSettings() with { ModelId = null };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), new FakeProvider(), settings);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.GenerateDefinitionAsync(draft, false, Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task DiscoverModels_RejectsMissingBaseUrl()
+    {
+        var settings = ConfiguredSettings() with { BaseUrl = null };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), new FakeProvider(), settings);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.DiscoverModelsAsync());
+    }
+
+    [Fact]
+    public async Task GetBibleLimitImpact_CountsOnlyDefinitionsAndStatesExceedingProposedLimits()
+    {
+        var withinLimits = new StoryBibleEntry(Guid.NewGuid(), "fact", "Small", ["Content"], [], 3, 0);
+        var overLimits = new StoryBible(Enumerable.Range(0, 5)
+            .Select(i => new StoryBibleEntry(Guid.NewGuid(), "fact", $"Entry {i}", ["Content"], [], 3, 0)).ToArray());
+
+        var definitions = new MemoryDefinitions();
+        var now = DateTimeOffset.UtcNow;
+        await definitions.SaveAsync(new StoryDefinition(Guid.NewGuid(), "Fits", "Prompt", new([withinLimits]), [], 0, now, now));
+        await definitions.SaveAsync(new StoryDefinition(Guid.NewGuid(), "TooBig", "Prompt", overLimits, [], 1, now, now));
+
+        var fittingSnapshot = new StoryDefinitionSnapshot("Story", "Prompt", new([withinLimits]));
+        var overSnapshot = new StoryDefinitionSnapshot("Story", "Prompt", overLimits);
+        var states = new MemoryStates();
+        await states.CreateAsync(
+            new StoryState(Guid.NewGuid(), "Fits", null, new(fittingSnapshot), new([withinLimits]), [], 0, now, null, 0),
+            OpeningTurn());
+        await states.CreateAsync(
+            new StoryState(Guid.NewGuid(), "TooBig", null, new(overSnapshot), overLimits, [], 1, now, null, 0),
+            OpeningTurn());
+
+        var app = CreateApplication(definitions, states, new FakeProvider());
+        var proposed = ConfiguredSettings().StoryGeneration with { MaxStoryBibleEntries = 3 };
+
+        var impact = await app.GetBibleLimitImpactAsync(proposed);
+
+        Assert.Equal(1, impact.StoryDefinitionCount);
+        Assert.Equal(1, impact.StoryStateCount);
+    }
+
+    [Fact]
+    public async Task StartStory_RejectsConcurrentRequestForSameTargetState()
     {
         var coordinator = new StoryRequestCoordinator();
-        var id = Guid.NewGuid();
-        using var first = coordinator.Enter(id);
-        Assert.Throws<NarratorException>(() => coordinator.Enter(id));
-        using var other = coordinator.Enter(Guid.NewGuid());
+        var targetStateId = Guid.NewGuid();
+        using var lease = coordinator.Enter(targetStateId);
+
+        var draft = new StartStoryDraft(Guid.NewGuid(), new StoryDefinitionSnapshot("Story", "Prompt", StoryBible.Empty));
+        var provider = new FakeProvider { StoryResponse = new("Opening", ["Continue"], [], [], "id", 10, 20) };
+        var app = new NarratorApplication(
+            new MemoryDefinitions(),
+            new MemoryStates(),
+            new MemorySettings(ConfiguredSettings()),
+            new MemorySecureStorage(),
+            provider,
+            TimeProvider.System,
+            new ApiConnectionCoordinator(),
+            coordinator,
+            new SystemIdGenerator());
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.StartStoryAsync(draft, targetStateId));
     }
 
     private static NarratorApplication CreateApplication(
@@ -352,76 +671,8 @@ public sealed class NarratorApplicationTests
         Capabilities = new(false, StructuredOutputTier.PromptedJson, "story-model", DateTimeOffset.UtcNow)
     };
 
-    private sealed class MemoryDefinitions : IStoryDefinitionRepository
-    {
-        private readonly Dictionary<Guid, StoryDefinition> _values = [];
-        public Task<IReadOnlyList<StoryDefinitionSummary>> ListAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<StoryDefinitionSummary>>(_values.Values.Select(x => new StoryDefinitionSummary(x.Id, x.Title, x.SortOrder, x.UpdatedAtUtc)).ToArray());
-        public Task<StoryDefinition?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult(_values.GetValueOrDefault(id));
-        public Task SaveAsync(StoryDefinition definition, CancellationToken cancellationToken = default)
-        {
-            _values[definition.Id] = definition;
-            return Task.CompletedTask;
-        }
-        public Task MoveToTrashAsync(Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromException(new NotSupportedException());
-    }
-
-    private sealed class MemoryStates : IStoryStateRepository
-    {
-        private readonly Dictionary<Guid, StoryState> _states = [];
-        private readonly Dictionary<Guid, List<StoryTurn>> _turns = [];
-        public MemoryStates() { }
-        public MemoryStates(StoryState state, IReadOnlyList<StoryTurn> turns)
-        {
-            _states[state.Id] = state;
-            _turns[state.Id] = turns.ToList();
-        }
-        public Task<IReadOnlyList<StoryStateSummary>> ListAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<StoryStateSummary>>(_states.Values.Select(x => new StoryStateSummary(x.Id, x.Label, x.SortOrder, x.StartedAtUtc, x.LastActionAtUtc)).ToArray());
-        public Task<StoryState?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult(_states.GetValueOrDefault(id));
-        public Task<IReadOnlyList<StoryTurn>> GetTurnsAsync(Guid id, int? takeLast = null, CancellationToken cancellationToken = default)
-        {
-            var values = _turns.GetValueOrDefault(id) ?? [];
-            return Task.FromResult<IReadOnlyList<StoryTurn>>(takeLast is null ? values.ToArray() : values.TakeLast(takeLast.Value).ToArray());
-        }
-        public Task<StoryStateAggregateSnapshot?> GetSnapshotAsync(Guid id, CancellationToken cancellationToken = default)
-        {
-            var state = _states.GetValueOrDefault(id);
-            return Task.FromResult(state is null
-                ? null
-                : new StoryStateAggregateSnapshot(state, (_turns.GetValueOrDefault(id) ?? []).ToArray()));
-        }
-        public Task CreateAsync(StoryState state, StoryTurn openingTurn, CancellationToken cancellationToken = default)
-        {
-            _states[state.Id] = state;
-            _turns[state.Id] = [openingTurn];
-            return Task.CompletedTask;
-        }
-        public Task ImportAsync(StoryState state, IReadOnlyList<StoryTurn> turns, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-        public Task CommitTurnAsync(StoryState state, StoryTurn turn, CancellationToken cancellationToken = default)
-        {
-            _states[state.Id] = state;
-            _turns[state.Id].Add(turn);
-            return Task.CompletedTask;
-        }
-        public Task SaveAsync(StoryState state, CancellationToken cancellationToken = default)
-        {
-            _states[state.Id] = state;
-            return Task.CompletedTask;
-        }
-        public Task UpdateLabelAsync(Guid id, string label, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-        public Task SwapSortOrderAsync(Guid firstId, Guid secondId, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-        public Task<StoryState> CopyAsync(Guid id, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-        public Task MoveToTrashAsync(Guid id, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-    }
+    private static StoryTurn OpeningTurn() => new(
+        Guid.NewGuid(), Guid.NewGuid(), 0, null, "Opening", ["Continue"], [], [], DateTimeOffset.UtcNow, new("model", null, null, null));
 
     private sealed class MemorySettings(ApiConnectionSettings value) : IApiConnectionSettingsStore
     {
@@ -430,6 +681,22 @@ public sealed class NarratorApplicationTests
         public Task SaveAsync(ApiConnectionSettings settings, CancellationToken cancellationToken = default)
         {
             _value = settings;
+            return Task.CompletedTask;
+        }
+    }
+
+    // Simulates settings changing between TestConnectionAsync's initial read and its post-test
+    // "are settings still what I tested" check: returns `first` on the first LoadAsync call (the
+    // initial read) and `subsequent` on every call after (the post-test check).
+    private sealed class SettingsThatChangeAfterFirstLoad(ApiConnectionSettings first, ApiConnectionSettings subsequent) : IApiConnectionSettingsStore
+    {
+        private int _loadCount;
+        public bool SaveWasCalled { get; private set; }
+        public Task<ApiConnectionSettings> LoadAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(_loadCount++ == 0 ? first : subsequent);
+        public Task SaveAsync(ApiConnectionSettings settings, CancellationToken cancellationToken = default)
+        {
+            SaveWasCalled = true;
             return Task.CompletedTask;
         }
     }
@@ -453,8 +720,9 @@ public sealed class NarratorApplicationTests
             DiscoverySettings = settings;
             return Task.FromResult<IReadOnlyList<string>>(["model-a", "model-b"]);
         }
+        public ConnectionTestResult? TestConnectionResult { get; set; }
         public Task<ConnectionTestResult> TestConnectionAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            Task.FromResult(TestConnectionResult ?? throw new NotSupportedException());
         public Task<StoryDefinitionGenerationResponse> GenerateStoryDefinitionAsync(ApiConnectionSettings settings, string? credential, string storyPrompt, CancellationToken cancellationToken = default) =>
             Task.FromResult(DefinitionResponse);
         public Task<StoryGenerationResponse> GenerateOpeningAsync(ApiConnectionSettings settings, string? credential, GenerationContext context, CancellationToken cancellationToken = default)

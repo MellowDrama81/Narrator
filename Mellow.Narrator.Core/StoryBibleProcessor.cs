@@ -66,7 +66,10 @@ public static class StoryBibleProcessor
             entries[id] = entry with { LastRelevantTurnNumber = turnNumber };
         }
 
-        CullCount(entries, limits.MaxStoryBibleEntries, changes);
+        // Cull by both entry count and character size (not just count) so a completed LLM turn that
+        // pushed the bible over a size limit is auto-trimmed instead of being discarded by the
+        // ValidateSize check below.
+        Cull(entries, limits, changes);
         var bible = new StoryBible(entries.Values.OrderBy(x => x.Category).ThenBy(x => x.Name).ToArray());
         ValidateSize(bible, limits);
         return new(bible, relevant.Where(entries.ContainsKey).Order().ToArray(), changes);
@@ -78,14 +81,7 @@ public static class StoryBibleProcessor
     {
         var entries = current.Entries.ToDictionary(x => x.Id);
         var changes = new List<AppliedStoryBibleChange>();
-        foreach (var entry in entries.Values.Where(x => SerializedLength(x) > limits.MaxStoryBibleEntryCharacters).ToArray())
-            Remove(entries, entry, changes);
-        while (entries.Count > limits.MaxStoryBibleEntries || SerializedLength(new StoryBible(entries.Values.ToArray())) > limits.MaxStoryBibleCharacters)
-        {
-            var candidate = entries.Values.OrderBy(x => x.Importance).ThenBy(x => x.LastRelevantTurnNumber).ThenBy(x => x.Id).FirstOrDefault();
-            if (candidate is null) break;
-            Remove(entries, candidate, changes);
-        }
+        Cull(entries, limits, changes);
         return (new(entries.Values.OrderBy(x => x.Category).ThenBy(x => x.Name).ToArray()), changes);
     }
 
@@ -103,11 +99,43 @@ public static class StoryBibleProcessor
             SerializedLength(bible) >= limits.MaxStoryBibleCharacters * threshold;
     }
 
-    private static void CullCount(IDictionary<Guid, StoryBibleEntry> entries, int max, ICollection<AppliedStoryBibleChange> changes)
+    // Shared field-level validation for a materialized Story Bible entry, used by both manual edits
+    // (NarratorApplication) and import/copy (ImportExportProcessor) so the two paths can't drift out of
+    // sync on what counts as a valid entry. Returns null when valid, or a message describing the first
+    // violation found. lastRelevantTurnNumber is optional because callers validating an entry that has no
+    // turn number yet (e.g. an LLM-proposed entry) have nothing meaningful to pass.
+    public static string? ValidateEntry(
+        string category,
+        string name,
+        IReadOnlyList<string> knownFacts,
+        IReadOnlyList<string> secretFacts,
+        int importance,
+        int? lastRelevantTurnNumber,
+        ContentLimitSettings limits)
     {
-        while (entries.Count > max)
+        if (string.IsNullOrWhiteSpace(category) || category.Length > limits.MaxStoryBibleCategoryCharacters)
+            return "A Story Bible category is empty or exceeds the configured limit.";
+        if (string.IsNullOrWhiteSpace(name) || name.Length > limits.MaxStoryBibleNameCharacters)
+            return "A Story Bible entry name is empty or exceeds the configured limit.";
+        if (knownFacts.Count == 0 && secretFacts.Count == 0)
+            return "A Story Bible entry must have at least one known or secret fact.";
+        if (knownFacts.Any(string.IsNullOrWhiteSpace) || secretFacts.Any(string.IsNullOrWhiteSpace))
+            return "A Story Bible entry has an empty fact.";
+        if (importance is < 1 or > 5)
+            return "Story Bible importance must be from 1 to 5.";
+        if (lastRelevantTurnNumber < 0)
+            return "A Story Bible entry's last-relevant turn number cannot be negative.";
+        return null;
+    }
+
+    private static void Cull(IDictionary<Guid, StoryBibleEntry> entries, StoryGenerationSettings limits, ICollection<AppliedStoryBibleChange> changes)
+    {
+        foreach (var entry in entries.Values.Where(x => SerializedLength(x) > limits.MaxStoryBibleEntryCharacters).ToArray())
+            Remove(entries, entry, changes);
+        while (entries.Count > limits.MaxStoryBibleEntries || SerializedLength(new StoryBible(entries.Values.ToArray())) > limits.MaxStoryBibleCharacters)
         {
-            var candidate = entries.Values.OrderBy(x => x.Importance).ThenBy(x => x.LastRelevantTurnNumber).ThenBy(x => x.Id).First();
+            var candidate = entries.Values.OrderBy(x => x.Importance).ThenBy(x => x.LastRelevantTurnNumber).ThenBy(x => x.Id).FirstOrDefault();
+            if (candidate is null) break;
             Remove(entries, candidate, changes);
         }
     }
@@ -151,5 +179,9 @@ public static class StoryBibleProcessor
             throw new NarratorException("The Story Bible exceeds the configured total character limit.");
     }
 
+    // Measures the JSON-serialized length (including property names, quoting, and escaping), not the
+    // raw character count of the entry's text - the MaxStoryBibleEntryCharacters/MaxStoryBibleCharacters
+    // settings are budgets against this serialized form, so the usable text budget is smaller than the
+    // configured number suggests, and shifts if this record's shape ever changes.
     private static int SerializedLength<T>(T value) => JsonSerializer.Serialize(value).Length;
 }

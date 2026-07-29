@@ -7,30 +7,41 @@ public static class ImportExportProcessor
     public const int CurrentFormatVersion = 1;
     public const int MaximumImportBytes = 16 * 1024 * 1024;
 
+    // Reads at most MaximumImportBytes from an import stream, rejecting anything larger instead of
+    // buffering an arbitrarily large file into memory.
+    public static async Task<byte[]> ReadLimitedAsync(Stream stream, CancellationToken cancellationToken = default)
+    {
+        if (stream.CanSeek && stream.Length > MaximumImportBytes)
+            throw new InvalidDataException("The import file exceeds the maximum supported size.");
+        using var output = new MemoryStream();
+        var buffer = new byte[81920];
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer, cancellationToken);
+            if (read == 0) break;
+            if (output.Length + read > MaximumImportBytes)
+                throw new InvalidDataException("The import file exceeds the maximum supported size.");
+            output.Write(buffer, 0, read);
+        }
+        return output.ToArray();
+    }
+
     public static StoryDefinition CopyDefinition(
         StoryDefinition source,
         int sortOrder,
-        ContentLimitSettings limits)
+        ContentLimitSettings limits,
+        StoryGenerationSettings storyGeneration)
     {
-        ValidateDefinition(source, limits);
-        var entryIds = new Dictionary<Guid, Guid>();
-        Guid MapEntryId(Guid oldId) =>
-            entryIds.TryGetValue(oldId, out var mapped) ? mapped : entryIds[oldId] = Guid.NewGuid();
-        StoryBibleEntry MapEntry(StoryBibleEntry entry) => entry with { Id = MapEntryId(entry.Id) };
-        AppliedStoryBibleChange MapChange(AppliedStoryBibleChange change) => change with
-        {
-            EntryId = MapEntryId(change.EntryId),
-            Before = change.Before is null ? null : MapEntry(change.Before),
-            After = change.After is null ? null : MapEntry(change.After)
-        };
+        ValidateDefinition(source, limits, storyGeneration);
+        var remap = new EntryIdRemapper();
         return source with
         {
             Id = Guid.NewGuid(),
-            InitialStoryBible = new(source.InitialStoryBible.Entries.Select(MapEntry).ToArray()),
+            InitialStoryBible = remap.MapBible(source.InitialStoryBible),
             StoryBibleMaintenanceHistory = source.StoryBibleMaintenanceHistory.Select(x => x with
             {
                 Id = Guid.NewGuid(),
-                Changes = x.Changes.Select(MapChange).ToArray()
+                Changes = x.Changes.Select(remap.MapChange).ToArray()
             }).ToArray(),
             SortOrder = sortOrder
         };
@@ -40,21 +51,12 @@ public static class ImportExportProcessor
         StoryState source,
         IReadOnlyList<StoryTurn> turns,
         int sortOrder,
-        ContentLimitSettings limits)
+        ContentLimitSettings limits,
+        StoryGenerationSettings storyGeneration)
     {
-        ValidateState(source, turns, limits);
+        ValidateState(source, turns, limits, storyGeneration);
         var newStateId = Guid.NewGuid();
-        var entryIds = new Dictionary<Guid, Guid>();
-        Guid MapEntryId(Guid oldId) =>
-            entryIds.TryGetValue(oldId, out var mapped) ? mapped : entryIds[oldId] = Guid.NewGuid();
-        StoryBibleEntry MapEntry(StoryBibleEntry entry) => entry with { Id = MapEntryId(entry.Id) };
-        StoryBible MapBible(StoryBible bible) => new(bible.Entries.Select(MapEntry).ToArray());
-        AppliedStoryBibleChange MapChange(AppliedStoryBibleChange change) => change with
-        {
-            EntryId = MapEntryId(change.EntryId),
-            Before = change.Before is null ? null : MapEntry(change.Before),
-            After = change.After is null ? null : MapEntry(change.After)
-        };
+        var remap = new EntryIdRemapper();
         var state = source with
         {
             Id = newStateId,
@@ -62,14 +64,14 @@ public static class ImportExportProcessor
             {
                 Definition = source.Setup.Definition with
                 {
-                    InitialStoryBible = MapBible(source.Setup.Definition.InitialStoryBible)
+                    InitialStoryBible = remap.MapBible(source.Setup.Definition.InitialStoryBible)
                 }
             },
-            CurrentStoryBible = MapBible(source.CurrentStoryBible),
+            CurrentStoryBible = remap.MapBible(source.CurrentStoryBible),
             StoryBibleMaintenanceHistory = source.StoryBibleMaintenanceHistory.Select(x => x with
             {
                 Id = Guid.NewGuid(),
-                Changes = x.Changes.Select(MapChange).ToArray()
+                Changes = x.Changes.Select(remap.MapChange).ToArray()
             }).ToArray(),
             SortOrder = sortOrder
         };
@@ -77,19 +79,42 @@ public static class ImportExportProcessor
         {
             Id = Guid.NewGuid(),
             StoryStateId = newStateId,
-            RelevantStoryBibleEntryIds = x.RelevantStoryBibleEntryIds.Select(MapEntryId).ToArray(),
-            StoryBibleChanges = x.StoryBibleChanges.Select(MapChange).ToArray()
+            RelevantStoryBibleEntryIds = x.RelevantStoryBibleEntryIds.Select(remap.MapEntryId).ToArray(),
+            StoryBibleChanges = x.StoryBibleChanges.Select(remap.MapChange).ToArray()
         }).ToArray();
         return new(state, mappedTurns);
     }
 
-    public static void ValidateDefinition(StoryDefinition value, ContentLimitSettings limits)
+    // Consistently remaps every Story Bible entry ID a single Copy call touches (bible entries,
+    // maintenance-history change snapshots, turn relevant-entry lists) to a fresh ID, reusing the same
+    // mapping wherever the same old ID recurs. Shared by CopyDefinition and CopyState so the two don't
+    // duplicate identical remapping logic.
+    private sealed class EntryIdRemapper
+    {
+        private readonly Dictionary<Guid, Guid> _entryIds = [];
+
+        public Guid MapEntryId(Guid oldId) =>
+            _entryIds.TryGetValue(oldId, out var mapped) ? mapped : _entryIds[oldId] = Guid.NewGuid();
+
+        public StoryBibleEntry MapEntry(StoryBibleEntry entry) => entry with { Id = MapEntryId(entry.Id) };
+
+        public StoryBible MapBible(StoryBible bible) => new(bible.Entries.Select(MapEntry).ToArray());
+
+        public AppliedStoryBibleChange MapChange(AppliedStoryBibleChange change) => change with
+        {
+            EntryId = MapEntryId(change.EntryId),
+            Before = change.Before is null ? null : MapEntry(change.Before),
+            After = change.After is null ? null : MapEntry(change.After)
+        };
+    }
+
+    public static void ValidateDefinition(StoryDefinition value, ContentLimitSettings limits, StoryGenerationSettings storyGeneration)
     {
         if (value.Id == Guid.Empty) throw new InvalidDataException("The Story Definition ID is invalid.");
         ValidateText(value.Title, limits.MaxStoryTitleCharacters, "Story Definition title");
         ValidateText(value.StoryPrompt, limits.MaxStoryPromptCharacters, "Story Prompt");
         ValidateOptionalText(value.InitialEventsPrompt, limits.MaxStoryPromptCharacters, "Initial Events prompt");
-        ValidateBible(value.InitialStoryBible, limits);
+        ValidateBible(value.InitialStoryBible, limits, storyGeneration);
         ValidateMaintenance(value.StoryBibleMaintenanceHistory);
         ValidateUtc(value.CreatedAtUtc, "created timestamp");
         ValidateUtc(value.UpdatedAtUtc, "updated timestamp");
@@ -98,15 +123,16 @@ public static class ImportExportProcessor
     public static void ValidateState(
         StoryState state,
         IReadOnlyList<StoryTurn> turns,
-        ContentLimitSettings limits)
+        ContentLimitSettings limits,
+        StoryGenerationSettings storyGeneration)
     {
         if (state.Id == Guid.Empty) throw new InvalidDataException("The Story State ID is invalid.");
         ValidateText(state.Label, limits.MaxStoryLabelCharacters, "Story State label");
         ValidateText(state.Setup.Definition.Title, limits.MaxStoryTitleCharacters, "snapshot title");
         ValidateText(state.Setup.Definition.StoryPrompt, limits.MaxStoryPromptCharacters, "snapshot Story Prompt");
         ValidateOptionalText(state.Setup.Definition.InitialEventsPrompt, limits.MaxStoryPromptCharacters, "snapshot Initial Events prompt");
-        ValidateBible(state.Setup.Definition.InitialStoryBible, limits);
-        ValidateBible(state.CurrentStoryBible, limits);
+        ValidateBible(state.Setup.Definition.InitialStoryBible, limits, storyGeneration);
+        ValidateBible(state.CurrentStoryBible, limits, storyGeneration);
         ValidateMaintenance(state.StoryBibleMaintenanceHistory);
         ValidateUtc(state.StartedAtUtc, "started timestamp");
         if (state.LastActionAtUtc is { } lastAction) ValidateUtc(lastAction, "last-action timestamp");
@@ -138,22 +164,20 @@ public static class ImportExportProcessor
         }
     }
 
-    private static void ValidateBible(StoryBible bible, ContentLimitSettings limits)
+    private static void ValidateBible(StoryBible bible, ContentLimitSettings limits, StoryGenerationSettings storyGeneration)
     {
         if (bible.Entries.Select(x => x.Id).Any(x => x == Guid.Empty) ||
             bible.Entries.Select(x => x.Id).Distinct().Count() != bible.Entries.Count)
             throw new InvalidDataException("Story Bible entry IDs are invalid.");
         foreach (var entry in bible.Entries)
         {
-            ValidateText(entry.Category, limits.MaxStoryBibleCategoryCharacters, "Story Bible category");
-            ValidateText(entry.Name, limits.MaxStoryBibleNameCharacters, "Story Bible entry name");
-            if (entry.KnownFacts.Count == 0 && entry.SecretFacts.Count == 0)
-                throw new InvalidDataException("A Story Bible entry has no known or secret facts.");
-            if (entry.KnownFacts.Any(string.IsNullOrWhiteSpace) || entry.SecretFacts.Any(string.IsNullOrWhiteSpace))
-                throw new InvalidDataException("A Story Bible entry has an empty fact.");
-            if (entry.Importance is < 1 or > 5 || entry.LastRelevantTurnNumber < 0)
-                throw new InvalidDataException("Story Bible metadata is invalid.");
+            if (StoryBibleProcessor.ValidateEntry(
+                    entry.Category, entry.Name, entry.KnownFacts, entry.SecretFacts,
+                    entry.Importance, entry.LastRelevantTurnNumber, limits) is { } error)
+                throw new InvalidDataException(error);
         }
+        if (!StoryBibleProcessor.IsWithinLimits(bible, storyGeneration))
+            throw new InvalidDataException("The Story Bible exceeds the configured Story Bible limits.");
     }
 
     private static void ValidateMaintenance(IReadOnlyList<StoryBibleMaintenanceRecord> records)

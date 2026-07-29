@@ -67,8 +67,8 @@ public sealed class SecureSettingsTests
         ApiConnectionCoordinator coordinator,
         ILanguageModelProvider? provider = null) =>
         new(
-            new EmptyDefinitions(),
-            new EmptyStates(),
+            new NotSupportedDefinitions(),
+            new NotSupportedStates(),
             settings,
             secureStorage,
             provider ?? new RecordingProvider(),
@@ -159,43 +159,4 @@ public sealed class SecureSettingsTests
             throw new NotSupportedException();
     }
 
-    private sealed class EmptyDefinitions : IStoryDefinitionRepository
-    {
-        public Task<IReadOnlyList<StoryDefinitionSummary>> ListAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<StoryDefinitionSummary>>([]);
-        public Task<StoryDefinition?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult<StoryDefinition?>(null);
-        public Task SaveAsync(StoryDefinition definition, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-        public Task MoveToTrashAsync(Guid id, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-    }
-
-    private sealed class EmptyStates : IStoryStateRepository
-    {
-        public Task<IReadOnlyList<StoryStateSummary>> ListAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<StoryStateSummary>>([]);
-        public Task<StoryState?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult<StoryState?>(null);
-        public Task<IReadOnlyList<StoryTurn>> GetTurnsAsync(Guid id, int? takeLast = null, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<StoryTurn>>([]);
-        public Task<StoryStateAggregateSnapshot?> GetSnapshotAsync(Guid id, CancellationToken cancellationToken = default) =>
-            Task.FromResult<StoryStateAggregateSnapshot?>(null);
-        public Task CreateAsync(StoryState state, StoryTurn openingTurn, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-        public Task ImportAsync(StoryState state, IReadOnlyList<StoryTurn> turns, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-        public Task CommitTurnAsync(StoryState state, StoryTurn turn, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-        public Task SaveAsync(StoryState state, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-        public Task UpdateLabelAsync(Guid id, string label, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-        public Task SwapSortOrderAsync(Guid firstId, Guid secondId, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-        public Task<StoryState> CopyAsync(Guid id, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-        public Task MoveToTrashAsync(Guid id, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-    }
 }

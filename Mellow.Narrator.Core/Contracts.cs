@@ -5,6 +5,7 @@ public interface IStoryDefinitionRepository
     Task<IReadOnlyList<StoryDefinitionSummary>> ListAsync(CancellationToken cancellationToken = default);
     Task<StoryDefinition?> GetAsync(Guid id, CancellationToken cancellationToken = default);
     Task SaveAsync(StoryDefinition definition, CancellationToken cancellationToken = default);
+    Task SwapSortOrderAsync(Guid firstId, Guid secondId, CancellationToken cancellationToken = default);
     Task MoveToTrashAsync(Guid id, CancellationToken cancellationToken = default);
 }
 

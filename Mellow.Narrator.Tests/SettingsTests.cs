@@ -107,4 +107,38 @@ public sealed class SettingsTests
         Assert.Contains(nameof(ContentLimitSettings.MinSuggestedActions), SettingsValidator.Validate(value).Keys);
     }
 
+    [Fact]
+    public void Validator_RejectsRelativeBaseUrl()
+    {
+        var value = NarratorDefaults.Create() with { BaseUrl = new Uri("/v1", UriKind.Relative) };
+        Assert.Contains(nameof(ApiConnectionSettings.BaseUrl), SettingsValidator.Validate(value).Keys);
+    }
+
+    [Fact]
+    public void Validator_RejectsNonHttpBaseUrlScheme()
+    {
+        var value = NarratorDefaults.Create() with { BaseUrl = new Uri("ftp://provider.example/v1") };
+        Assert.Contains(nameof(ApiConnectionSettings.BaseUrl), SettingsValidator.Validate(value).Keys);
+    }
+
+    [Fact]
+    public void Validator_AcceptsAbsoluteHttpsBaseUrl()
+    {
+        var value = NarratorDefaults.Create() with { BaseUrl = new Uri("https://provider.example/v1") };
+        Assert.Empty(SettingsValidator.Validate(value));
+    }
+
+    [Fact]
+    public void Validator_RejectsEntryCharacterLimitAboveTotalLimit()
+    {
+        var value = NarratorDefaults.Create() with
+        {
+            StoryGeneration = NarratorDefaults.Create().StoryGeneration with
+            {
+                MaxStoryBibleEntryCharacters = 2000,
+                MaxStoryBibleCharacters = 1000
+            }
+        };
+        Assert.Contains("MaxStoryBibleEntryCharacters", SettingsValidator.Validate(value).Keys);
+    }
 }

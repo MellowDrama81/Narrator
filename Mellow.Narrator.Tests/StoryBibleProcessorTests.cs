@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mellow.Narrator.Core;
 
 namespace Mellow.Narrator.Tests;
@@ -66,6 +67,60 @@ public sealed class StoryBibleProcessorTests
     }
 
     [Fact]
+    public void Apply_RejectsUpdateReferencingUnknownEntry()
+    {
+        var entry = Entry("00000000-0000-0000-0000-000000000001", "fact", 3, 0);
+        var updates = new[] { new ProposedStoryBibleUpdate(StoryBibleOperation.Replace, Guid.NewGuid(), new("fact", "x", ["x"], [], 3)) };
+        Assert.Throws<NarratorException>(() => StoryBibleProcessor.Apply(new([entry]), [], updates, 1, new(8, 10, 4000, 60000, 80)));
+    }
+
+    [Fact]
+    public void Apply_RejectsRemovalThatAlsoContainsAReplacement()
+    {
+        var entry = Entry("00000000-0000-0000-0000-000000000001", "fact", 3, 0);
+        var updates = new[] { new ProposedStoryBibleUpdate(StoryBibleOperation.Remove, entry.Id, new("fact", "x", ["x"], [], 3)) };
+        Assert.Throws<NarratorException>(() => StoryBibleProcessor.Apply(new([entry]), [], updates, 1, new(8, 10, 4000, 60000, 80)));
+    }
+
+    [Fact]
+    public void Apply_RejectsIncompleteProposedEntry()
+    {
+        var updates = new[] { new ProposedStoryBibleUpdate(StoryBibleOperation.Add, null, new("fact", "", ["x"], [], 3)) };
+        Assert.Throws<NarratorException>(() => StoryBibleProcessor.Apply(StoryBible.Empty, [], updates, 1, new(8, 10, 4000, 60000, 80)));
+    }
+
+    [Fact]
+    public void Apply_AutomaticallyCullsAnEntryThatExceedsTheCharacterLimitInsteadOfThrowing()
+    {
+        var updates = new[]
+        {
+            new ProposedStoryBibleUpdate(StoryBibleOperation.Add, null, new("fact", "Large", [new string('x', 500)], [], 3))
+        };
+        var result = StoryBibleProcessor.Apply(StoryBible.Empty, [], updates, 1, new(8, 10, 200, 60000, 80));
+        Assert.Empty(result.Bible.Entries);
+        Assert.Equal(StoryBibleChangeSource.AutomaticCull, Assert.Single(result.Changes, x => x.Operation == StoryBibleOperation.Remove).Source);
+    }
+
+    [Fact]
+    public void Apply_AutomaticallyCullsToStayWithinTheTotalCharacterLimitInsteadOfThrowing()
+    {
+        var existing = Entry("00000000-0000-0000-0000-000000000001", "old", 1, 0);
+        var updates = new[]
+        {
+            new ProposedStoryBibleUpdate(StoryBibleOperation.Add, null, new("fact", "new", ["new fact"], [], 5))
+        };
+        var withNew = new StoryBibleEntry(Guid.NewGuid(), "fact", "new", ["new fact"], [], 5, 1);
+        var combinedLength = JsonSerializer.Serialize(new StoryBible([existing, withNew])).Length;
+        var newOnlyLength = JsonSerializer.Serialize(new StoryBible([withNew])).Length;
+        var limits = new StoryGenerationSettings(8, 10, 4000, (combinedLength + newOnlyLength) / 2, 80);
+
+        var result = StoryBibleProcessor.Apply(new([existing]), [], updates, 1, limits);
+
+        Assert.DoesNotContain(result.Bible.Entries, x => x.Id == existing.Id);
+        Assert.Contains(result.Bible.Entries, x => x.Name == "new");
+    }
+
+    [Fact]
     public void Apply_UsesInjectedIdAndMarksAdditionRelevant()
     {
         var id = Guid.Parse("00000000-0000-0000-0000-000000000099");
@@ -97,6 +152,29 @@ public sealed class StoryBibleProcessorTests
         var entries = Enumerable.Range(0, 8)
             .Select(i => new StoryBibleEntry(Guid.NewGuid(), "fact", $"F{i}", ["x"], [], 3, 0)).ToArray();
         Assert.True(StoryBibleProcessor.IsApproachingLimits(new(entries), new(8, 10, 4000, 60000, 80)));
+    }
+
+    [Fact]
+    public void StoryBibleEntry_TreatsContentIdenticalFactListsAsEqual()
+    {
+        var id = Guid.NewGuid();
+        var first = new StoryBibleEntry(id, "fact", "Name", ["Known"], ["Secret"], 3, 1);
+        // Deliberately fresh, non-reference-identical arrays with the same content - the default record
+        // equality would compare these by reference and treat the entries as unequal.
+        var second = new StoryBibleEntry(id, "fact", "Name", new List<string> { "Known" }.ToArray(), new List<string> { "Secret" }.ToArray(), 3, 1);
+
+        Assert.Equal(first, second);
+        Assert.Equal(first.GetHashCode(), second.GetHashCode());
+    }
+
+    [Fact]
+    public void StoryBibleEntry_TreatsDifferentFactsAsUnequal()
+    {
+        var id = Guid.NewGuid();
+        var first = new StoryBibleEntry(id, "fact", "Name", ["Known"], [], 3, 1);
+        var second = new StoryBibleEntry(id, "fact", "Name", ["Different"], [], 3, 1);
+
+        Assert.NotEqual(first, second);
     }
 
     private static StoryBibleEntry Entry(string id, string name, int importance, int relevant) =>

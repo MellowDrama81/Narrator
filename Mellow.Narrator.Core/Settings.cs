@@ -156,30 +156,62 @@ public sealed record ApiConnectionSettings(
 public static class NarratorDefaults
 {
     public static ApiConnectionSettings Create() => new(
-        null,
-        null,
-        TimeSpan.FromSeconds(120),
-        4096,
-        new(null, null, null),
-        new(8, 200, 4000, 60000, 80),
-        new(2, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(60)),
-        new(200, 200, 20000, 4000, 20000, 3, 500, 100, 200, 100, 2 * 1024 * 1024),
-        new(false, StructuredOutputTier.Untested, null, null));
+        BaseUrl: null,
+        ModelId: null,
+        RequestTimeout: TimeSpan.FromSeconds(120),
+        MaxOutputTokens: 4096,
+        Parameters: new ModelParameters(Temperature: null, TopP: null, ReasoningEffort: null),
+        StoryGeneration: new StoryGenerationSettings(
+            RecentTurnCount: 8,
+            MaxStoryBibleEntries: 200,
+            MaxStoryBibleEntryCharacters: 4000,
+            MaxStoryBibleCharacters: 60000,
+            StoryBibleWarningPercent: 80),
+        Retry: new RetrySettings(
+            MaxAutomaticRetries: 2,
+            InitialDelay: TimeSpan.FromSeconds(1),
+            MaxDelay: TimeSpan.FromSeconds(10),
+            MaxRetryAfter: TimeSpan.FromSeconds(60)),
+        ContentLimits: new ContentLimitSettings(
+            MaxStoryTitleCharacters: 200,
+            MaxStoryLabelCharacters: 200,
+            MaxStoryPromptCharacters: 20000,
+            MaxPlayerActionCharacters: 4000,
+            MaxNarrationCharacters: 20000,
+            MaxSuggestedActions: 3,
+            MaxSuggestedActionCharacters: 500,
+            MaxStoryBibleCategoryCharacters: 100,
+            MaxStoryBibleNameCharacters: 200,
+            MaxStoryBibleUpdatesPerResponse: 100,
+            MaxResponseBodyBytes: 2 * 1024 * 1024),
+        Capabilities: new ConnectionCapabilities(
+            SupportsModelDiscovery: false,
+            StructuredOutputTier: StructuredOutputTier.Untested,
+            TestedModelId: null,
+            TestedAtUtc: null));
 }
 
 public static class SettingsValidator
 {
+    // Shared with NarratorApplication's sanity check on LLM-generated initial Story Bible entry counts,
+    // so the two can't silently diverge.
+    public const int MaxStoryBibleEntriesUpperBound = 2000;
+
     public static IReadOnlyDictionary<string, string> Validate(ApiConnectionSettings value)
     {
         var errors = new Dictionary<string, string>();
+        if (value.BaseUrl is { } baseUrl && (!baseUrl.IsAbsoluteUri || baseUrl.Scheme is not ("http" or "https")))
+            errors[nameof(value.BaseUrl)] = "Must be an absolute http or https URL.";
         Range(errors, nameof(value.RequestTimeout), value.RequestTimeout.TotalSeconds, 10, 900);
         Range(errors, nameof(value.MaxOutputTokens), value.MaxOutputTokens, 256, 131072);
         OptionalRange(errors, "Temperature", value.Parameters.Temperature, 0, 2);
         OptionalRange(errors, "TopP", value.Parameters.TopP, 0, 1);
         Range(errors, "RecentTurnCount", value.StoryGeneration.RecentTurnCount, 0, 100);
-        Range(errors, "MaxStoryBibleEntries", value.StoryGeneration.MaxStoryBibleEntries, 1, 2000);
+        Range(errors, "MaxStoryBibleEntries", value.StoryGeneration.MaxStoryBibleEntries, 1, MaxStoryBibleEntriesUpperBound);
         Range(errors, "MaxStoryBibleEntryCharacters", value.StoryGeneration.MaxStoryBibleEntryCharacters, 100, 50000);
         Range(errors, "MaxStoryBibleCharacters", value.StoryGeneration.MaxStoryBibleCharacters, 1000, 1000000);
+        if (value.StoryGeneration.MaxStoryBibleEntryCharacters > value.StoryGeneration.MaxStoryBibleCharacters)
+            errors["MaxStoryBibleEntryCharacters"] = "Must not exceed the maximum total Story Bible characters.";
         Range(errors, "StoryBibleWarningPercent", value.StoryGeneration.StoryBibleWarningPercent, 50, 95);
         Range(errors, "MaxAutomaticRetries", value.Retry.MaxAutomaticRetries, 0, 5);
         Range(errors, "InitialDelay", value.Retry.InitialDelay.TotalSeconds, .25, 30);
