@@ -1,6 +1,151 @@
 # Mellow Narrator
 
-Mellow Narrator is a .NET 10 MAUI application for creating and playing durable, LLM-driven interactive stories on Windows and Android. Application-wide LLM prompt templates and rolling structured logging are configurable from Settings.
+Mellow Narrator is a .NET 10 MAUI application for creating and playing durable, LLM-driven interactive
+stories on Windows and Android. You describe a premise, the LLM turns it into a structured Story
+Definition (a refined premise plus a Story Bible of durable facts), and from there you play through the
+story turn by turn: you describe what your character does, the LLM narrates what happens next and offers
+a few suggested actions, and the Story Bible is kept up to date automatically as the plot develops. Story
+Definitions and Story States are saved locally and durably, independent of any specific LLM provider, so
+you can switch providers or models mid-story without losing anything.
+
+Mellow Narrator talks to any OpenAI-compatible Chat Completions endpoint — the hosted OpenAI API, Azure
+OpenAI, or a local server such as Ollama, LM Studio, or text-generation-webui in OpenAI-compatible mode.
+Application-wide LLM prompt templates and rolling structured logging are configurable from Settings.
+
+## Core concepts
+
+- **Story Definition** — the reusable template for a story: a title, a refined Story Prompt (the
+  immutable setting, premise, tone, and narration rules that are sent with every request for the entire
+  story), an optional Initial Events prompt (guidance used only for the earliest scenes, then dropped),
+  and an initial Story Bible. You can start any number of independent Story States from the same
+  definition.
+- **Story Bible** — the durable, structured memory for a story: a set of named entries, each with a
+  category, an importance level from 1 (least) to 5 (most), and two lists of short facts —
+  **known facts** (things the player character already knows or could plainly observe) and
+  **secret facts** (hidden facts — schemes, true motives — the character doesn't know yet, but the
+  narrator does, for consistency). As the story progresses, the LLM proposes incremental updates to the
+  Bible (add, replace, or remove an entry) and moves facts from secret to known as the character
+  genuinely learns them in-story. If a Story Bible grows past its configured size limits, the
+  least-important, least-recently-relevant entries are culled automatically (with your confirmation) to
+  make room.
+- **Story State** — one playthrough of a Story Definition: its own copy of the Story Bible (which
+  diverges from the definition's as the story evolves) plus the full turn-by-turn history of player
+  actions and narration. You can have several Story States running from the same Story Definition at
+  once, and you can branch a Story State at any point with **Copy Story**.
+- **Turn** — one exchange: the player's action (blank for the opening scene) and the LLM's narration,
+  suggested actions, and any Story Bible updates that resulted from it.
+
+## Getting started
+
+1. Open **Settings** (one of the three fixed tabs) and configure the API connection — see
+   [Configuring the LLM connection](#configuring-the-llm-connection) below — then **Save**.
+2. Open the **Definitions** tab and either:
+   - click **New**, enter a short premise as the Story Prompt, and click **Generate Story Definition**
+     to have the LLM refine it into a title, a polished Story Prompt, an Initial Events prompt, and a
+     starting Story Bible; or
+   - click **Import** and choose an exported `*-definition.json` file — for example,
+     [The Awakening AI-definition.json](examples/The%20Awakening%20AI-definition.json), an example
+     Story Definition included in this repository.
+3. Review the generated (or imported) definition — you can edit the title, Story Prompt, Initial Events,
+   and Story Bible entries directly — then click **Start Story**.
+4. You're now on a **Play Story** tab: type what your character does into the action box (or click one
+   of the suggested actions) and click **Submit**. Repeat for as long as you like.
+
+## Configuring the LLM connection
+
+All connection settings live under **Settings → API Connection**:
+
+- **Base URL** — the root of an OpenAI-compatible API, *without* a trailing path segment like
+  `/chat/completions`. Examples: `https://api.openai.com/v1` for OpenAI, or `http://localhost:11434/v1`
+  for a local Ollama/LM Studio/text-generation-webui server running in OpenAI-compatible mode. A base
+  URL that already has a query string (as some Azure OpenAI deployment URLs do) is preserved correctly.
+- **Model ID** — enter one directly, or click **Load Models** first to query the provider's `/models`
+  endpoint and choose from a dropdown. Changing the model applies to every subsequent request, including
+  requests made from stories that are already in progress.
+- **API key** — optional (leave it blank for a local server that doesn't require one). Once saved, it's
+  stored using the operating system's secure credential storage (Credential Locker on Windows, Keystore
+  on Android) — never in a plain settings file, and never written to the logs regardless of log level.
+  A masked placeholder means a key is already stored; focus the field to type a replacement, or use
+  **Clear stored API key** to remove it.
+- **Test Connection** — saves your current settings, then probes the provider with progressively less
+  demanding request styles (strict JSON Schema, JSON mode, then a plain prompted-JSON fallback for
+  providers without native structured output) and reports which one worked. Do this once after changing
+  the base URL or model, since a story generation request retries only once on a malformed response and
+  benefits from Mellow Narrator already knowing which structured-output style your provider supports.
+
+**Generation** settings, also under Settings, control how each request is made and how much of the
+story is sent as context: request timeout, maximum output tokens, temperature, top-p, reasoning effort
+(for reasoning models that support it — leave blank to use the provider's default), how many recent
+turns of narration are included as context on each request, and the maximum number of Story Bible
+entries a definition or state is allowed to hold. The collapsible **Story Bible & Retries** and
+**Content Limits** sections expose finer limits (character limits per field, automatic retry/backoff
+behavior on transient HTTP errors, number and length of suggested actions, narration paragraph/sentence
+counts, and more) — each field shows its default and valid range beneath it, and **Reset defaults**
+restores every setting on the page to its shipped defaults in one click.
+
+**Logging** (collapsible, under Settings) controls a rolling JSON-lines log written to the app's private
+data folder. The default level, Information, is safe to leave on. **Trace** additionally records
+complete LLM request and response bodies — full Story Bibles, player actions, and narration — so only
+enable it while diagnosing a specific problem; API credentials are excluded at every log level.
+
+## Using the app
+
+The app window is a set of tabs. Three are fixed and always present — **Settings**, **Definitions**, and
+**Stories** — plus any number of tabs you open for editing a specific definition or playing a specific
+story. The toolbar on every page has **Manage Tabs** (reorder or review your open dynamic tabs) and,
+on dynamic tabs, **Close**. Your open tabs, their contents (including an unsaved draft or a pending
+player action), and even an in-progress LLM request that gets interrupted by closing the app are all
+saved automatically and restored the next time you open Mellow Narrator, with an offer to retry
+whatever was interrupted.
+
+### Definitions tab
+
+Lists every Story Definition you've created or imported. **New** opens a blank prompt-drafting tab;
+**Open** opens the selected definition for editing; **Start** begins a new Story State from the selected
+definition without leaving the list. **Earlier**/**Later** reorder the list. **Import**/**Export**
+read and write a Story Definition as a single JSON file. **Delete** moves a definition to Trash — any
+Story States already started from it keep playing normally, since each has its own independent copy of
+the Story Bible.
+
+Opening a definition shows its title, Story Prompt, and Initial Events prompt as editable fields (click
+**Save Definition** to keep changes), its Story Bible, and buttons to **Start Story** or **Export** it.
+
+### Playing a story
+
+A Play Story tab shows the narration so far, the current suggested actions as clickable buttons, and a
+text box for typing your own action instead. The book icon in the top-right corner opens a side panel
+with the story's current Story Bible. While a request is in flight, the page is covered by a
+translucent "Writing…" overlay and controls are disabled until the LLM responds; if a request fails,
+you're offered a retry with the same action.
+
+- **Copy Story** branches the story: it creates an independent copy of the current Story State (Bible
+  and full history included) and opens it in a new tab, leaving the original untouched.
+- **Export** saves the complete Story State (Bible and turn history) as a JSON file that can be
+  re-imported later, on this device or another. **Export Full History** saves just the narration as
+  readable plain text. **Export Bible History** (in the side panel) saves a plain-text log of every
+  Story Bible change and why it happened.
+
+### Stories tab
+
+Lists every Story State. **Open** switches to (or opens) its Play Story tab. **Label** lets you rename
+it to something more memorable than the default. **Copy** branches it without opening the source first.
+**Earlier**/**Later** reorder the list. **Import**/**Export** work the same way as on the Definitions
+tab. **Delete** closes any open tab for that story and moves it to Trash.
+
+### Story Bible editor
+
+Wherever a Story Bible is shown (a definition's initial Bible, or a story's current Bible), you get a
+search box, and filters by category and importance, plus **Add Entry**. Clicking an entry's title
+expands it for editing: category, name, known facts, secret facts (one per line each), and importance;
+**Save** applies changes immediately, **Remove** deletes the entry after confirmation. Each entry also
+shows its last-relevant turn number, so you can see at a glance which entries the LLM still considers
+active in the story versus ones that have gone stale and may eventually be culled.
+
+### Trash
+
+Settings → **Manage Trash** opens a list of everything moved to Trash (deleted Story Definitions and
+Story States). **Restore** puts an item back where it was; **Delete Permanently** or **Empty Trash**
+remove it for good — both actions ask for confirmation first, since they cannot be undone.
 
 ## Projects
 
@@ -10,11 +155,6 @@ Mellow Narrator is a .NET 10 MAUI application for creating and playing durable, 
 - `Mellow.Narrator.Gui` — standard MAUI `TabbedPage` UI and secure-storage adapter.
 - `Mellow.Narrator.Cli` — unreleased manual test harness that requires an isolated data directory.
 - `Mellow.Narrator.Tests` — Core unit tests plus provider and persistence integration tests.
-
-## Example Story Definition
-
-[The Awakening AI-definition.json](examples/The%20Awakening%20AI-definition.json) is an example exported Story Definition.
-To use it, open the **Story Definitions** page in Mellow Narrator, select **Import**, and choose the downloaded JSON file.
 
 ## Build and test
 
