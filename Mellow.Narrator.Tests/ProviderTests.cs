@@ -282,7 +282,7 @@ public sealed class ProviderTests
         Assert.Equal(1, requests);
         Assert.Equal(entry.Id, Assert.Single(result.RelevantStoryBibleEntryIds));
         Assert.Contains("You narrate an interactive story", body);
-        Assert.Contains("Never invent or return any other ID", body);
+        Assert.Contains("use only IDs copied exactly from the current Story", body);
         Assert.Contains("currentPlayerAction", body);
         Assert.Contains("Continue", body);
         Assert.Contains("turnNumber", body);
@@ -313,7 +313,7 @@ public sealed class ProviderTests
 
         await provider.GenerateTurnAsync(settings, null, context);
 
-        Assert.Contains("offer between 4 and 7 concise suggested actions", body);
+        Assert.Contains("Offer between 4 and 7 concise suggested actions", body);
         Assert.DoesNotContain(PromptTemplateDefaults.MinSuggestedActionsPlaceholder, body);
         Assert.DoesNotContain(PromptTemplateDefaults.MaxSuggestedActionsPlaceholder, body);
         Assert.Contains("minItems\\u0022:4", body);

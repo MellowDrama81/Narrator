@@ -166,10 +166,9 @@ public sealed class OpenAiCompatibleProvider(
     {
         RequireConnection(settings);
         var requestMessages = tier == StructuredOutputTier.PromptedJson
-            ? messages.Concat([Message("system", Templates.PromptedJsonInstruction.Replace(
-                PromptTemplateDefaults.SchemaPlaceholder,
-                schema.ToJsonString(Json),
-                StringComparison.Ordinal))]).ToArray()
+            ? messages.Concat([Message("system", Templates.PromptedJsonInstruction
+                .Replace(PromptTemplateDefaults.SchemaPlaceholder, schema.ToJsonString(Json), StringComparison.Ordinal)
+                .Replace(PromptTemplateDefaults.ExamplePlaceholder, ExampleFor(schema)?.ToJsonString(Json) ?? "{}", StringComparison.Ordinal))]).ToArray()
             : messages;
         requestContract ??= new(
             settings.Capabilities.OutputTokenParameter,
@@ -518,19 +517,14 @@ public sealed class OpenAiCompatibleProvider(
             .Replace(PromptTemplateDefaults.MinSentencesPlaceholder, limits.MinSentencesPerParagraph.ToString(), StringComparison.Ordinal)
             .Replace(PromptTemplateDefaults.MaxSentencesPlaceholder, limits.MaxSentencesPerParagraph.ToString(), StringComparison.Ordinal);
         var messages = new List<JsonObject> { Message("system", narrationInstruction) };
+        // The add/replace/remove ID rules and the relevant-entry ID rule live only in the system prompt
+        // (StoryNarrationInstruction) - they're static across every turn, so repeating them here would
+        // just burn tokens on every single request without adding any information.
         messages.Add(Message("user", JsonSerializer.Serialize(new
         {
             contextType = "storyContext",
             storyPrompt = context.Definition.StoryPrompt,
-            storyBible = context.StoryBible.Entries,
-            storyBibleUpdateRules = new
-            {
-                add = "Set entryId to null. The application assigns the new ID; never invent one.",
-                replace = "Use only the ID of an existing Story Bible entry supplied above.",
-                remove = "Use only the ID of an existing Story Bible entry supplied above."
-            },
-            relevantStoryBibleEntryRules =
-                "Include only IDs copied exactly from the current Story Bible supplied above. Never invent or return any other ID."
+            storyBible = context.StoryBible.Entries
         }, Json)));
         if (context.RecentTurns.Count < recentTurnCount && !string.IsNullOrWhiteSpace(context.Definition.InitialEventsPrompt))
             messages.Add(Message("user", JsonSerializer.Serialize(new
@@ -849,6 +843,43 @@ public sealed class OpenAiCompatibleProvider(
         ["secretFacts"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } },
         ["importance"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 5 }
     }, ["category", "name", "knownFacts", "secretFacts", "importance"]);
+
+    // Weak models handling the PromptedJson fallback tier tend to follow a concrete example far more
+    // reliably than raw JSON Schema syntax (nullable-as-type-array, anyOf, format:uuid). This walks any
+    // of our schemas generically to synthesize a structurally-correct (not semantically meaningful)
+    // example instance to show alongside the schema.
+    private static JsonNode? ExampleFor(JsonNode? schema)
+    {
+        if (schema is not JsonObject obj) return null;
+        if (obj["enum"] is JsonArray { Count: > 0 } enumValues) return enumValues[0]?.DeepClone();
+        if (obj["anyOf"] is JsonArray anyOf)
+            return ExampleFor(anyOf.FirstOrDefault(x => (x as JsonObject)?["type"]?.GetValue<string>() != "null") ?? anyOf.FirstOrDefault());
+        var type = obj["type"] switch
+        {
+            JsonArray typeArray => typeArray.Select(x => x?.GetValue<string>()).FirstOrDefault(x => x != "null"),
+            JsonValue value => value.GetValue<string>(),
+            _ => null
+        };
+        return type switch
+        {
+            "object" => ExampleObject(obj),
+            "array" => new JsonArray(ExampleFor(obj["items"])),
+            "string" => JsonValue.Create(obj["format"]?.GetValue<string>() == "uuid" ? Guid.Empty.ToString() : "string"),
+            "integer" => JsonValue.Create(obj["minimum"]?.GetValue<int?>() ?? 0),
+            "number" => JsonValue.Create(obj["minimum"]?.GetValue<double?>() ?? 0),
+            "boolean" => JsonValue.Create(true),
+            _ => null
+        };
+    }
+
+    private static JsonObject ExampleObject(JsonObject schema)
+    {
+        var result = new JsonObject();
+        if (schema["properties"] is JsonObject properties)
+            foreach (var (key, value) in properties)
+                result[key] = ExampleFor(value);
+        return result;
+    }
 
     private static JsonObject ObjectSchema(IReadOnlyDictionary<string, JsonNode?> properties, IEnumerable<string> required) => new()
     {
