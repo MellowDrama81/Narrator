@@ -28,6 +28,23 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task Definition_SwapSortOrderExchangesBothValues()
+    {
+        var repository = (IStoryDefinitionRepository)_store;
+        var first = Definition() with { SortOrder = 0 };
+        var second = Definition() with { SortOrder = 1 };
+        await repository.SaveAsync(first);
+        await repository.SaveAsync(second);
+
+        await repository.SwapSortOrderAsync(first.Id, second.Id);
+
+        var loadedFirst = await repository.GetAsync(first.Id);
+        var loadedSecond = await repository.GetAsync(second.Id);
+        Assert.Equal(1, loadedFirst!.SortOrder);
+        Assert.Equal(0, loadedSecond!.SortOrder);
+    }
+
+    [Fact]
     public async Task ConnectionCapabilities_RoundTripNegotiatedRequestContract()
     {
         var repository = (IApiConnectionSettingsStore)_store;
@@ -75,6 +92,23 @@ public sealed class PersistenceTests : IDisposable
         var loaded = await repository.GetAsync(state.Id);
         Assert.Equal(0, loaded!.LastCommittedTurnSequence);
         Assert.Single(await repository.GetTurnsAsync(state.Id));
+    }
+
+    [Fact]
+    public async Task StoryTurn_AllOrphansPastCommitBoundaryAreRolledBack()
+    {
+        var repository = (IStoryStateRepository)_store;
+        var (state, opening) = State();
+        await repository.CreateAsync(state, opening);
+        var turns = Path.Combine(_root, "Mellow.Narrator", "story-states", state.Id.ToString("D"), "turns");
+        await File.WriteAllTextAsync(Path.Combine(turns, $"00000001-{Guid.NewGuid():D}.json"), "{}");
+        await File.WriteAllTextAsync(Path.Combine(turns, $"00000002-{Guid.NewGuid():D}.json"), "{}");
+
+        var loaded = await repository.GetAsync(state.Id);
+
+        Assert.Equal(0, loaded!.LastCommittedTurnSequence);
+        Assert.Single(await repository.GetTurnsAsync(state.Id));
+        Assert.Single(Directory.EnumerateFiles(turns, "*.json"));
     }
 
     [Fact]
@@ -318,6 +352,27 @@ public sealed class PersistenceTests : IDisposable
         await Assert.ThrowsAsync<NotSupportedException>(() => repository.GetAsync(definition.Id));
 
         Assert.Contains("\"formatVersion\":2", (await File.ReadAllTextAsync(path)).Replace(" ", ""));
+    }
+
+    [Fact]
+    public async Task NegativeFormatVersionPrimary_FallsBackToBackup()
+    {
+        var repository = (IStoryDefinitionRepository)_store;
+        var definition = Definition();
+        await repository.SaveAsync(definition);
+        await repository.SaveAsync(definition with { Title = "Updated" });
+        var path = Path.Combine(_root, "Mellow.Narrator", "story-definitions", $"{definition.Id:D}.json");
+        var options = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+        };
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new { formatVersion = -1, data = definition }, options));
+
+        var loaded = await repository.GetAsync(definition.Id);
+
+        Assert.Equal(definition.Id, loaded!.Id);
+        Assert.Equal(definition.Title, loaded.Title);
     }
 
     [Fact]

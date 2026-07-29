@@ -68,15 +68,32 @@ internal static class JsonFileStore
         {
             await WriteRawAsync(temp, bytes, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            if (File.Exists(path))
-                File.Replace(temp, path, path + ".bak", true);
-            else
-                File.Move(temp, path);
-            _ = await TryReadRequiredAsync<T>(path, CancellationToken.None);
+            // Verify the staged file before committing it, not after: verifying path only after the
+            // swap means the new data is already persisted by the time a verification failure would be
+            // reported, misleadingly implying the write itself failed when it actually succeeded.
+            _ = await TryReadRequiredAsync<T>(temp, CancellationToken.None);
+            // Reading temp right before replacing it can transiently race a lingering OS/AV file handle
+            // on Windows; retry briefly rather than surface a spurious failure for an already-valid write.
+            await RetryTransientIoAsync(() =>
+            {
+                if (File.Exists(path))
+                    File.Replace(temp, path, path + ".bak", true);
+                else
+                    File.Move(temp, path);
+            });
         }
         finally
         {
             if (File.Exists(temp)) File.Delete(temp);
+        }
+    }
+
+    private static async Task RetryTransientIoAsync(Action action)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try { action(); return; }
+            catch (IOException) when (attempt < 3) { await Task.Delay(25 * attempt); }
         }
     }
 
@@ -85,10 +102,20 @@ internal static class JsonFileStore
         var bytes = JsonSerializer.SerializeToUtf8Bytes(new PersistenceDocument<T>(CurrentFormatVersion, value), Options);
         _ = Deserialize<T>(bytes);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        await using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous);
-        await stream.WriteAsync(bytes, cancellationToken);
-        await stream.FlushAsync(cancellationToken);
-        stream.Flush(true);
+        // Stage to a temp file and rename into place, like WriteAsync, so a write interrupted mid-flight
+        // (crash, cancellation) never leaves a partial file at `path` — File.Move without overwrite still
+        // throws if `path` already exists, preserving the "never rewritten" guarantee callers rely on.
+        var temp = path + $".{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await WriteRawAsync(temp, bytes, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(temp, path);
+        }
+        finally
+        {
+            if (File.Exists(temp)) File.Delete(temp);
+        }
     }
 
     private static async Task<T> TryReadRequiredAsync<T>(string path, CancellationToken cancellationToken)
@@ -120,7 +147,13 @@ internal static class JsonFileStore
     {
         var document = JsonSerializer.Deserialize<PersistenceDocument<T>>(bytes, Options)
             ?? throw new JsonException("The persistence document is empty.");
-        if (document.FormatVersion is < 0 or > CurrentFormatVersion)
+        // A negative version is malformed data - treat it like any other corruption so it can fall
+        // back to the backup or get quarantined. A version newer than this app supports is different:
+        // it means a newer app version legitimately wrote this file, and silently reverting to an
+        // older backup would downgrade/lose that data, so that case must keep propagating uncaught.
+        if (document.FormatVersion < 0)
+            throw new JsonException($"Persistence format {document.FormatVersion} is invalid.");
+        if (document.FormatVersion > CurrentFormatVersion)
             throw new NotSupportedException($"Persistence format {document.FormatVersion} is not supported.");
         return (document.Data ?? throw new JsonException("The persistence document has no data."), document.FormatVersion);
     }

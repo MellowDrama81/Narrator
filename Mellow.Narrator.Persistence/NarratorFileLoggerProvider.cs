@@ -37,6 +37,10 @@ public sealed class NarratorFileLoggerProvider : ILoggerProvider, INarratorLogLe
 
     private bool IsEnabled(string category, LogLevel level)
     {
+        // The framework's own HttpClientFactory logging handlers write raw request/response traffic
+        // (headers included) at this category. OpenAiCompatibleProvider already logs what's useful
+        // itself with credential redaction; letting this category through here would duplicate that
+        // and risk writing an unredacted Authorization header to disk at Trace level.
         if (category.StartsWith("System.Net.Http.HttpClient", StringComparison.Ordinal))
             return false;
         var configured = _minimumLevel;

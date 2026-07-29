@@ -37,13 +37,15 @@ public sealed class OpenAiCompatibleProvider(
             credential,
             () => CreateRequest(HttpMethod.Get, settings, "models", credential),
             cancellationToken);
-        return root["data"]?.AsArray()
-            .Select(x => x?["id"]?.GetValue<string>())
+        if (root["data"] is not { } data) return [];
+        var models = data as JsonArray ?? throw new JsonException("'data' must be an array.");
+        return models
+            .Select(x => (x as JsonObject)?["id"] is { } id ? StringValue(id, "A model 'id'") : null)
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Cast<string>()
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
-            .ToArray() ?? [];
+            .ToArray();
     }
 
     public async Task<ConnectionTestResult> TestConnectionAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default)
@@ -209,7 +211,9 @@ public sealed class OpenAiCompatibleProvider(
             request.Content = new StringContent(body.ToJsonString(Json), Encoding.UTF8, "application/json");
             return request;
         }, cancellationToken);
-        var choice = envelope["choices"]?[0] as JsonObject ?? throw new JsonException("The provider returned no choices.");
+        var choice = envelope["choices"] is JsonArray { Count: > 0 } choices
+            ? choices[0] as JsonObject ?? throw new JsonException("The provider returned no choices.")
+            : throw new JsonException("The provider returned no choices.");
         var refusal = choice["message"]?["refusal"]?.GetValue<string>();
         if (!string.IsNullOrWhiteSpace(refusal)) throw new ProviderException("The model refused the request.", null);
         var content = choice["message"]?["content"]?.GetValue<string>() ?? throw new JsonException("The provider returned no message content.");
@@ -264,7 +268,8 @@ public sealed class OpenAiCompatibleProvider(
                     LogResponseBody(requestId, request.Method, endpoint, bytes, credential);
                 if (!response.IsSuccessStatusCode)
                 {
-                    var retryable = response.StatusCode == HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500;
+                    var retryable = response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.RequestTimeout
+                        || (int)response.StatusCode >= 500;
                     var error = Error(response, bytes, credential);
                     if (retryable && attempt < settings.Retry.MaxAutomaticRetries)
                     {
@@ -329,7 +334,8 @@ public sealed class OpenAiCompatibleProvider(
         var text = Encoding.UTF8.GetString(bytes);
         try
         {
-            var content = (JsonNode.Parse(text) as JsonObject)?["choices"]?[0]?["message"]?["content"]?.GetValue<string>();
+            var choices = (JsonNode.Parse(text) as JsonObject)?["choices"] as JsonArray;
+            var content = choices is { Count: > 0 } ? choices[0]?["message"]?["content"]?.GetValue<string>() : null;
             if (content is not null && LogStoryResponse(requestId, method, endpoint, content, credential)) return;
         }
         catch (JsonException) { }
@@ -488,8 +494,12 @@ public sealed class OpenAiCompatibleProvider(
 
     private static HttpRequestMessage CreateRequest(HttpMethod method, ApiConnectionSettings settings, string relative, string? credential)
     {
-        var baseUrl = settings.BaseUrl!.ToString().TrimEnd('/') + "/";
-        var request = new HttpRequestMessage(method, new Uri(new Uri(baseUrl), relative));
+        // Append to the path via UriBuilder rather than string-concatenating settings.BaseUrl.ToString(),
+        // so a base URL with a query string (e.g. Azure-OpenAI-style endpoints) keeps that query string
+        // instead of it being silently swallowed by the path merge.
+        var baseUri = settings.BaseUrl!;
+        var uri = new UriBuilder(baseUri) { Path = baseUri.AbsolutePath.TrimEnd('/') + "/" + relative }.Uri;
+        var request = new HttpRequestMessage(method, uri);
         if (!string.IsNullOrWhiteSpace(credential)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential);
         return request;
     }
@@ -556,7 +566,7 @@ public sealed class OpenAiCompatibleProvider(
         ApiConnectionSettings settings)
     {
         node.Remove("_transport");
-        RequireProperties(node, "refinedStoryPrompt", "suggestedTitle", "initialEventsPrompt", "initialStoryBibleEntries");
+        RequireProperties(node, settings, "refinedStoryPrompt", "suggestedTitle", "initialEventsPrompt", "initialStoryBibleEntries");
         var refinedStoryPrompt = RequiredString(node, "refinedStoryPrompt");
         if (string.IsNullOrWhiteSpace(refinedStoryPrompt) || refinedStoryPrompt.Length > settings.ContentLimits.MaxStoryPromptCharacters)
             throw new JsonException("The refined Story Prompt is empty or exceeds the configured limit.");
@@ -585,6 +595,7 @@ public sealed class OpenAiCompatibleProvider(
         node.Remove("_transport");
         RequireProperties(
             node,
+            settings,
             "turnNumber",
             "acknowledgedPlayerAction",
             "narration",
@@ -621,6 +632,10 @@ public sealed class OpenAiCompatibleProvider(
             if (string.IsNullOrWhiteSpace(text) || text.Length > settings.ContentLimits.MaxSuggestedActionCharacters)
                 throw new JsonException("A suggested action is empty or exceeds the configured limit.");
         }
+        // Unlike every other violation in this method, an unknown, malformed, or duplicate relevant-entry
+        // ID is silently dropped rather than thrown as a JsonException. This is deliberate: the model
+        // getting a stray ID wrong here doesn't corrupt story data - it just under-marks relevance - so
+        // it isn't worth spending the one corrective retry on, unlike a bad narration or update shape.
         var relevantNodes = RequiredArray(node, "relevantStoryBibleEntryIds");
         var currentEntryIds = context.StoryBible.Entries.Select(entry => entry.Id).ToHashSet();
         var seenRelevantIds = new HashSet<Guid>();
@@ -643,10 +658,13 @@ public sealed class OpenAiCompatibleProvider(
         foreach (var item in updates)
         {
             var update = item as JsonObject ?? throw new JsonException("A Story Bible update must be an object.");
-            RequireProperties(update, "operation", "entryId", "entry");
+            RequireProperties(update, settings, "operation", "entryId", "entry");
             var operation = RequiredString(update, "operation");
             if (operation is not ("add" or "replace" or "remove"))
                 throw new JsonException("A Story Bible update has an invalid operation.");
+            // A stray entryId on an "add" is silently cleared rather than rejected - same reasoning as
+            // the relevant-IDs leniency above: the model ignoring "always set entryId to null for add" is
+            // a harmless formatting slip, not a data-corrupting mistake worth a corrective retry over.
             if (operation == "add")
                 update["entryId"] = null;
             if (operation != "add" && (update["entryId"] is null || !Guid.TryParse(StringValue(update["entryId"], "An entry ID"), out _)))
@@ -684,7 +702,7 @@ public sealed class OpenAiCompatibleProvider(
 
     private static void ValidateProposedEntry(JsonObject entry, ApiConnectionSettings settings)
     {
-        RequireProperties(entry, "category", "name", "knownFacts", "secretFacts", "importance");
+        RequireProperties(entry, settings, "category", "name", "knownFacts", "secretFacts", "importance");
         var category = RequiredString(entry, "category");
         var name = RequiredString(entry, "name");
         if (string.IsNullOrWhiteSpace(category) || category.Length > settings.ContentLimits.MaxStoryBibleCategoryCharacters)
@@ -701,10 +719,16 @@ public sealed class OpenAiCompatibleProvider(
         if (importance is < 1 or > 5) throw new JsonException("Story Bible importance must be from 1 to 5.");
     }
 
-    private static void RequireProperties(JsonObject value, params string[] expected)
+    private static void RequireProperties(JsonObject value, ApiConnectionSettings settings, params string[] expected)
     {
         var actual = value.Select(x => x.Key).ToHashSet(StringComparer.Ordinal);
-        if (!actual.SetEquals(expected))
+        // PromptedJson has no schema enforcing "no additional properties" like the strict tiers do, so a
+        // model that adds one harmless extra property shouldn't fail the whole response and burn the one
+        // corrective retry over it - only missing required properties matter for that tier.
+        var ok = settings.Capabilities.StructuredOutputTier == StructuredOutputTier.PromptedJson
+            ? expected.All(actual.Contains)
+            : actual.SetEquals(expected);
+        if (!ok)
             throw new JsonException($"Expected properties: {string.Join(", ", expected)}.");
     }
 

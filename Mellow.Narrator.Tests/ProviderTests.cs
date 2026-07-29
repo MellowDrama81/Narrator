@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Mellow.Narrator.Core;
 using Mellow.Narrator.OpenAiCompatible;
 using Microsoft.Extensions.Logging;
@@ -73,6 +74,84 @@ public sealed class ProviderTests
     }
 
     [Fact]
+    public async Task DiscoverModels_BaseUrlWithoutTrailingSlashStillAppendsPathCorrectly()
+    {
+        HttpRequestMessage? captured = null;
+        var handler = new StubHandler(request =>
+        {
+            captured = request;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"data":[]}""", Encoding.UTF8, "application/json")
+            });
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var settings = Settings() with { BaseUrl = new("https://example.test/v1"), ModelId = null };
+
+        await provider.DiscoverModelsAsync(settings, "secret");
+
+        Assert.Equal("https://example.test/v1/models", captured!.RequestUri!.ToString());
+    }
+
+    [Fact]
+    public async Task DiscoverModels_BaseUrlWithQueryStringIsPreserved()
+    {
+        HttpRequestMessage? captured = null;
+        var handler = new StubHandler(request =>
+        {
+            captured = request;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"data":[]}""", Encoding.UTF8, "application/json")
+            });
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var settings = Settings() with { BaseUrl = new("https://example.test/v1?api-version=2024"), ModelId = null };
+
+        await provider.DiscoverModelsAsync(settings, "secret");
+
+        Assert.Equal("https://example.test/v1/models?api-version=2024", captured!.RequestUri!.ToString());
+    }
+
+    [Fact]
+    public async Task DiscoverModels_NonArrayDataThrowsJsonException()
+    {
+        var handler = new StubHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"data":{"id":"model-a"}}""", Encoding.UTF8, "application/json")
+        }));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+
+        await Assert.ThrowsAsync<JsonException>(() => provider.DiscoverModelsAsync(Settings() with { ModelId = null }, "secret"));
+    }
+
+    [Fact]
+    public async Task DiscoverModels_NonStringIdThrowsJsonException()
+    {
+        var handler = new StubHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"data":[{"id":42}]}""", Encoding.UTF8, "application/json")
+        }));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+
+        await Assert.ThrowsAsync<JsonException>(() => provider.DiscoverModelsAsync(Settings() with { ModelId = null }, "secret"));
+    }
+
+    [Fact]
+    public async Task DiscoverModels_SkipsArrayElementsWithoutAnId()
+    {
+        var handler = new StubHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"data":["not-an-object",{"id":"model-a"}]}""", Encoding.UTF8, "application/json")
+        }));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+
+        var models = await provider.DiscoverModelsAsync(Settings() with { ModelId = null }, "secret");
+
+        Assert.Equal(["model-a"], models);
+    }
+
+    [Fact]
     public async Task GenerateDefinition_SendsBearerModelAndPrompt()
     {
         HttpRequestMessage? captured = null;
@@ -134,6 +213,24 @@ public sealed class ProviderTests
         Assert.Equal(4, Assert.Single(result.InitialStoryBibleEntries).Importance);
         Assert.Contains("failed validation", bodies[1]);
         Assert.Contains("importance", bodies[1], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PromptedJsonTier_ToleratesExtraPropertyWithoutRetrying()
+    {
+        var requests = 0;
+        var handler = new StubHandler(_ =>
+        {
+            requests++;
+            var content = """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"note":"unexpected extra field"}""";
+            return Task.FromResult(Response(content));
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+
+        var result = await provider.GenerateStoryDefinitionAsync(Settings(), null, "Story");
+
+        Assert.Equal(1, requests);
+        Assert.Equal("Story", result.RefinedStoryPrompt);
     }
 
     [Fact]
@@ -437,6 +534,26 @@ public sealed class ProviderTests
     }
 
     [Fact]
+    public async Task RequestTimeoutStatus_IsRetried()
+    {
+        var requests = 0;
+        var handler = new StubHandler(_ =>
+        {
+            requests++;
+            return Task.FromResult(requests == 1
+                ? new HttpResponseMessage(HttpStatusCode.RequestTimeout)
+                : Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[]}"""));
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var settings = Settings() with { Retry = Settings().Retry with { InitialDelay = TimeSpan.FromMilliseconds(1) } };
+
+        var result = await provider.GenerateStoryDefinitionAsync(settings, null, "Story");
+
+        Assert.Equal(2, requests);
+        Assert.Equal("Story", result.RefinedStoryPrompt);
+    }
+
+    [Fact]
     public async Task ConnectionTest_NegotiatesLegacyTokenFieldAndSystemRole()
     {
         var acceptedProbe = false;
@@ -483,19 +600,35 @@ public sealed class ProviderTests
     [Fact]
     public async Task CancellationWhileReadingErrorBody_RemainsCancellation()
     {
+        // Deterministic instead of a wall-clock race: the stream signals readStarted the moment its
+        // ReadAsync is entered, so cancellation is triggered exactly once the read is actually in
+        // flight rather than after some fixed delay that could fire too early or too late under load.
+        var readStarted = new TaskCompletionSource();
         var handler = new StubHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)
         {
-            Content = new StreamContent(new CancellationOnlyStream())
+            Content = new StreamContent(new CancellationOnlyStream(readStarted))
         }));
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        using var cancellation = new CancellationTokenSource();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            provider.GenerateStoryDefinitionAsync(
-                Settings(),
-                null,
-                "Story",
-                cancellation.Token));
+        var generateTask = provider.GenerateStoryDefinitionAsync(Settings(), null, "Story", cancellation.Token);
+        await readStarted.Task;
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => generateTask);
+    }
+
+    [Fact]
+    public async Task EmptyChoicesArray_ThrowsJsonExceptionInsteadOfCrashing()
+    {
+        var handler = new StubHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"choices":[]}""", Encoding.UTF8, "application/json")
+        }));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+
+        await Assert.ThrowsAnyAsync<JsonException>(() =>
+            provider.GenerateStoryDefinitionAsync(Settings(), null, "Story"));
     }
 
     private static ApiConnectionSettings Settings() => NarratorDefaults.Create() with
@@ -534,7 +667,7 @@ public sealed class ProviderTests
             Messages.Add(formatter(state, exception));
     }
 
-    private sealed class CancellationOnlyStream : Stream
+    private sealed class CancellationOnlyStream(TaskCompletionSource readStarted) : Stream
     {
         public override bool CanRead => true;
         public override bool CanSeek => false;
@@ -548,6 +681,7 @@ public sealed class ProviderTests
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
+            readStarted.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return 0;
         }
@@ -557,6 +691,7 @@ public sealed class ProviderTests
             int count,
             CancellationToken cancellationToken)
         {
+            readStarted.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return 0;
         }
