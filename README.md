@@ -1,7 +1,8 @@
 # Mellow Narrator
 
-Mellow Narrator is a .NET 10 MAUI application for creating and playing durable, LLM-driven interactive
-stories on Windows and Android. You describe a premise, the LLM turns it into a structured Story
+Mellow Narrator is available as both a .NET 10 MAUI application for Windows and Android and a
+client-side Angular web application. Both versions create and play durable, LLM-driven interactive
+stories. You describe a premise, the LLM turns it into a structured Story
 Definition (a refined premise plus a Story Bible of durable facts), and from there you play through the
 story turn by turn: you describe what your character does, the LLM narrates what happens next and offers
 a few suggested actions, and the Story Bible is kept up to date automatically as the plot develops. Story
@@ -88,6 +89,58 @@ data folder. The default level, Information, is safe to leave on. **Trace** addi
 complete LLM request and response bodies — full Story Bibles, player actions, and narration — so only
 enable it while diagnosing a specific problem; API credentials are excluded at every log level.
 
+## Web application
+
+`Mellow.Narrator.Web` is a completely client-side Angular 22 application using Angular Material and
+TypeScript. It provides the core definition, Story Bible, story-playing, import/export, copying, and
+trash workflows in a browser. There is no application backend: LLM requests are sent directly from the
+browser to the configured OpenAI-compatible endpoint, and settings, definitions, stories, turns, drafts,
+and trash are persisted in IndexedDB.
+
+Browser storage is scoped to the page's origin. Data created at `http://localhost:4200` is therefore
+separate from data stored by a deployed copy of the application. Use the JSON import/export controls to
+move definitions or stories between installations.
+
+### Run the web application locally
+
+Prerequisites:
+
+- Node.js `22.22.3` or later in the Node 22 line, Node.js `24.15.0` or later, or Node.js 26+.
+- pnpm 11.9.0. Corepack is the recommended way to activate the version recorded by the project.
+
+From the repository root:
+
+```powershell
+cd Mellow.Narrator.Web
+corepack enable
+corepack prepare pnpm@11.9.0 --activate
+pnpm install --frozen-lockfile
+pnpm start
+```
+
+Open [http://localhost:4200](http://localhost:4200). The development server reloads the page when source
+files change.
+
+To run the web tests or create an optimized production bundle:
+
+```powershell
+pnpm test
+pnpm run build
+```
+
+The production output is written under `Mellow.Narrator.Web/dist/`.
+
+### Configure an LLM in the browser
+
+Open **Settings**, enter the provider's base URL and API key, select **Load models**, choose a model from
+the resulting list, then select **Save settings** or **Test connection**. The API key is stored in that
+browser profile's IndexedDB, so use the web application only from a trusted browser profile and device.
+
+Because requests originate in the browser, the provider must allow cross-origin requests from the web
+application's origin. For local development, allow `http://localhost:4200`. A local OpenAI-compatible
+server must also be reachable by the browser; an HTTPS-hosted deployment may be prevented by browser
+mixed-content rules from calling an unsecured HTTP endpoint.
+
 ## Using the app
 
 The app window is a set of tabs. Three are fixed and always present — **Settings**, **Definitions**, and
@@ -153,6 +206,7 @@ remove it for good — both actions ask for confirmation first, since they canno
 - `Mellow.Narrator.OpenAiCompatible` — non-streaming Chat Completions adapter with structured JSON output and retry handling.
 - `Mellow.Narrator.Persistence` — versioned folder-of-JSON persistence, backups, recovery, staging, copying, and trash.
 - `Mellow.Narrator.Gui` — standard MAUI `TabbedPage` UI and secure-storage adapter.
+- `Mellow.Narrator.Web` — client-side Angular Material UI with IndexedDB persistence.
 - `Mellow.Narrator.Cli` — unreleased manual test harness that requires an isolated data directory.
 - `Mellow.Narrator.Tests` — Core unit tests plus provider and persistence integration tests.
 
