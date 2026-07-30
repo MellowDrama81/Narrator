@@ -27,6 +27,20 @@ body {
 }
 
 button, input, textarea, select { font: inherit; }
+.mat-mdc-form-field .mat-mdc-input-element:not(:disabled) {
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
+  opacity: 1;
+}
+.mat-mdc-form-field .mat-mdc-input-element::placeholder {
+  color: #6f6370;
+  -webkit-text-fill-color: #6f6370;
+  opacity: 1;
+}
+.mat-mdc-form-field:not(.mat-form-field-disabled) .mat-mdc-floating-label,
+.mat-mdc-select:not(.mat-mdc-select-disabled) .mat-mdc-select-value {
+  color: #554956;
+}
 h1, h2, h3, p { overflow-wrap:anywhere; }
 h1 {
   margin: .15rem 0 .55rem;
