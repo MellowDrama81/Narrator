@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -70,6 +70,7 @@ export class DefinitionsComponent implements OnInit {
     private readonly narrator: NarratorService,
     private readonly router: Router,
     private readonly snack: MatSnackBar,
+    private readonly changeDetector: ChangeDetectorRef,
   ) {}
 
   async ngOnInit(): Promise<void> { await this.reload(); }
@@ -124,10 +125,10 @@ export class DefinitionsComponent implements OnInit {
 
   private async reload(): Promise<void> {
     this.definitions = (await this.db.definitions()).sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title));
+    this.changeDetector.markForCheck();
   }
 
   private error(error: unknown): void {
     this.snack.open(error instanceof Error ? error.message : 'Something went wrong.', 'Dismiss', { duration: 7000 });
   }
 }
-

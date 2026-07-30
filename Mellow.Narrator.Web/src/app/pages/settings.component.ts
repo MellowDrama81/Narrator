@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -118,6 +118,7 @@ export class SettingsComponent implements OnInit {
     private readonly db: DbService,
     private readonly llm: LlmService,
     private readonly snack: MatSnackBar,
+    private readonly changeDetector: ChangeDetectorRef,
   ) {}
 
   async ngOnInit(): Promise<void> {
@@ -125,6 +126,8 @@ export class SettingsComponent implements OnInit {
       this.settings = await this.db.settings();
     } catch {
       this.storageError = 'Browser storage could not be opened. You can configure this session, but settings may not persist until IndexedDB access is available.';
+    } finally {
+      this.changeDetector.markForCheck();
     }
   }
 
@@ -142,6 +145,7 @@ export class SettingsComponent implements OnInit {
       if (!this.settings.modelId && this.models.length > 0) {
         this.settings.modelId = this.models[0];
       }
+      this.changeDetector.markForCheck();
       this.snack.open(`Loaded ${this.models.length} models. Choose one from the Model list.`, 'Dismiss', { duration: 3500 });
     });
   }
@@ -166,6 +170,7 @@ export class SettingsComponent implements OnInit {
       this.snack.open(error instanceof Error ? error.message : 'Something went wrong.', 'Dismiss', { duration: 7000 });
     } finally {
       this.busy = false;
+      this.changeDetector.markForCheck();
     }
   }
 }
