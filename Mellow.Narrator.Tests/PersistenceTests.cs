@@ -381,6 +381,41 @@ public sealed class PersistenceTests : IDisposable
         Assert.Throws<ArgumentException>(() => new PersistenceOptions("relative-path").GetValidatedRoot());
     }
 
+    [Fact]
+    public void LegacyWindowsIdentityMigration_CopiesMissingStateAndSecureStorageWithoutOverwritingCurrentFiles()
+    {
+        var legacy = Path.Combine(_root, "legacy-package");
+        var current = Path.Combine(_root, "current-package");
+        var legacySettings = Path.Combine(legacy, "Data", "Mellow.Narrator", "settings");
+        var legacySecureStorage = Path.Combine(legacy, "Settings");
+        var legacyWorkspace = Path.Combine(legacy, "Data", "Mellow.Narrator", "workspace");
+        var currentWorkspace = Path.Combine(current, "Data", "Mellow.Narrator", "workspace");
+        Directory.CreateDirectory(legacySettings);
+        Directory.CreateDirectory(legacySecureStorage);
+        Directory.CreateDirectory(legacyWorkspace);
+        Directory.CreateDirectory(currentWorkspace);
+        File.WriteAllText(Path.Combine(legacySettings, "api-connection.json"), "legacy settings");
+        File.WriteAllText(Path.Combine(legacySecureStorage, "securestorage.dat"), "legacy credential");
+        File.WriteAllText(Path.Combine(currentWorkspace, "workspace.json"), "current workspace");
+        File.WriteAllText(
+            Path.Combine(legacyWorkspace, "workspace.json"),
+            "legacy workspace");
+
+        var migrated = ApplicationDataMigration.CopyMissingLegacyWindowsIdentityData(legacy, current);
+        var repeated = ApplicationDataMigration.CopyMissingLegacyWindowsIdentityData(legacy, current);
+
+        Assert.True(migrated);
+        Assert.False(repeated);
+        Assert.Equal(
+            "legacy settings",
+            File.ReadAllText(Path.Combine(current, "Data", "Mellow.Narrator", "settings", "api-connection.json")));
+        Assert.Equal(
+            "legacy credential",
+            File.ReadAllText(Path.Combine(current, "Settings", "securestorage.dat")));
+        Assert.Equal("current workspace", File.ReadAllText(Path.Combine(currentWorkspace, "workspace.json")));
+        Assert.True(File.Exists(Path.Combine(legacySettings, "api-connection.json")));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, true);

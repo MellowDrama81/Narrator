@@ -271,7 +271,28 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
             y += element.Y;
             current = current.Parent;
         }
-        await _story.ScrollToAsync(0, Math.Max(0, y), true);
+        var scroll = _story.ScrollToAsync(0, Math.Max(0, y), false);
+        try
+        {
+            await scroll.WaitAsync(TimeSpan.FromSeconds(1));
+        }
+        catch (TimeoutException)
+        {
+            // Auto-scrolling is presentational only. A platform scroll task must never retain the
+            // refresh gate or keep a completed story request looking active indefinitely.
+            Ui.Warning("Timed out while scrolling to the latest story turn.");
+            _ = ObserveLateScrollFailureAsync(scroll);
+        }
+        catch (Exception ex)
+        {
+            Ui.Warning(ex, "Could not scroll to the latest story turn.");
+        }
+    }
+
+    private static async Task ObserveLateScrollFailureAsync(Task scroll)
+    {
+        try { await scroll; }
+        catch (Exception ex) { Ui.Warning(ex, "The delayed story scroll failed."); }
     }
 
     private async Task SaveBibleAsync(StoryBible next)
@@ -284,6 +305,7 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
     {
         if (string.IsNullOrWhiteSpace(_action.Text) || _request is not null) return;
         var retry = false;
+        var committed = false;
         try
         {
             _request = new();
@@ -304,7 +326,7 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
             await _tabs.SaveWorkspaceNowAsync();
             await _app.PlayTurnAsync(_stateId, action, _request.Token);
             _action.Text = "";
-            await Refresh(scrollToLatestTurn: true);
+            committed = true;
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -328,6 +350,9 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
             _request = null;
             await _tabs.SaveWorkspaceNowAsync();
         }
+        // The request is complete as soon as the turn is durably committed. Rebuilding and scrolling
+        // the page is presentation work, so it runs only after the busy/request state has been cleared.
+        if (committed) await Refresh(scrollToLatestTurn: true);
         if (retry) Play(null, EventArgs.Empty);
     }
 

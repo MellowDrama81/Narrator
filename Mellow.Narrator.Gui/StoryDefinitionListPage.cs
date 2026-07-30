@@ -11,7 +11,7 @@ public sealed class StoryDefinitionListPage : ContentPage, IPendingOperationPage
     private readonly ObservableCollection<StoryDefinitionSummary> _items = [];
     private readonly CollectionView _list;
     private readonly ActivityIndicator _startBusy = new();
-    private readonly Label _status = new() { TextColor = Colors.DarkOrange };
+    private readonly Label _status = new() { Text = "", TextColor = Colors.DarkOrange };
     private CancellationTokenSource? _request;
     private PendingOperationState? _pendingOperation;
     private bool _clearStatusOnNextRefresh;
@@ -98,7 +98,7 @@ public sealed class StoryDefinitionListPage : ContentPage, IPendingOperationPage
             // (that's the appearance it's meant to be seen on), but must not linger forever across
             // later tab revisits - so it's cleared starting on the *second* Refresh() since it was set.
             if (_clearStatusOnNextRefresh) _status.Text = "";
-            _clearStatusOnNextRefresh = _status.Text.Length > 0;
+            _clearStatusOnNextRefresh = !string.IsNullOrEmpty(_status.Text);
             var selectedId = Selected?.Id;
             _items.Clear();
             foreach (var item in await _repository.ListAsync()) _items.Add(item);

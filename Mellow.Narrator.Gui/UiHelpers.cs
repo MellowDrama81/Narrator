@@ -100,6 +100,11 @@ internal static class Ui
         var message = ex is NarratorException ? ex.Message : "Something went wrong. Check the logs for details.";
         return page.DisplayAlertAsync("Mellow Narrator", message, "OK");
     }
+
+    public static void Warning(string message) => _logger.LogWarning("{WarningMessage}", message);
+
+    public static void Warning(Exception ex, string message) =>
+        _logger.LogWarning(ex, "{WarningMessage}", message);
 }
 
 public sealed class NarratorNavigationPage : NavigationPage

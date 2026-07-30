@@ -12,6 +12,10 @@ public static class MauiProgram
 {
     public static MauiApp CreateMauiApp()
     {
+        var appDataDirectory = FileSystem.AppDataDirectory;
+#if WINDOWS
+        RestoreLegacyWindowsAppData(appDataDirectory);
+#endif
         var builder = MauiApp.CreateBuilder();
         builder.UseMauiApp<App>()
             .ConfigureFonts(fonts =>
@@ -23,7 +27,7 @@ public static class MauiProgram
         builder.Services
             .AddMellowNarratorCore()
             .AddMellowNarratorOpenAiCompatible()
-            .AddMellowNarratorPersistence(new PersistenceOptions(FileSystem.AppDataDirectory));
+            .AddMellowNarratorPersistence(new PersistenceOptions(appDataDirectory));
         builder.Services.AddSingleton<ISecureStorage>(SecureStorage.Default);
         builder.Services.AddSingleton<ISecureStorageService, MauiSecureStorageService>();
         builder.Services.AddSingleton<MainTabbedPage>();
@@ -34,4 +38,17 @@ public static class MauiProgram
             app.Services.GetRequiredService<INarratorLogLevelSwitch>());
         return app;
     }
+
+#if WINDOWS
+    private static void RestoreLegacyWindowsAppData(string appDataDirectory)
+    {
+        var currentPackageRoot = Directory.GetParent(appDataDirectory)
+            ?? throw new InvalidOperationException("The Windows application-data directory has no package root.");
+        var localApplicationData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var legacyPackageRoot = Path.Combine(localApplicationData, "User Name", currentPackageRoot.Name);
+        ApplicationDataMigration.CopyMissingLegacyWindowsIdentityData(
+            legacyPackageRoot,
+            currentPackageRoot.FullName);
+    }
+#endif
 }
