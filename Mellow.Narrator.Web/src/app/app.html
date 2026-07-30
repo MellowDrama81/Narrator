@@ -1,0 +1,19 @@
+<div class="app-shell">
+  <mat-toolbar class="topbar">
+    <a class="brand" routerLink="/definitions" aria-label="Mellow Narrator home">
+      <span class="brand-mark">M</span>
+      <span><strong>Mellow</strong> Narrator</span>
+    </a>
+    <nav aria-label="Primary navigation">
+      <a mat-button routerLink="/definitions" routerLinkActive="active">Definitions</a>
+      <a mat-button routerLink="/stories" routerLinkActive="active">Stories</a>
+      <a mat-button routerLink="/settings" routerLinkActive="active">Settings</a>
+    </nav>
+    <span class="local-badge">Local-first</span>
+  </mat-toolbar>
+  <main class="page"><router-outlet></router-outlet></main>
+  <footer>
+    <span>Mellow Narrator</span>
+    <span>Your stories stay in this browser unless you export them.</span>
+  </footer>
+</div>
