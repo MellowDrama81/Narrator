@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -65,6 +65,7 @@ export class StoriesComponent implements OnInit {
     private readonly narrator: NarratorService,
     private readonly router: Router,
     private readonly snack: MatSnackBar,
+    private readonly changeDetector: ChangeDetectorRef,
   ) {}
 
   async ngOnInit(): Promise<void> { await this.reload(); }
@@ -141,6 +142,6 @@ export class StoriesComponent implements OnInit {
 
   private async reload(): Promise<void> {
     this.stories = (await this.db.stories()).sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label));
+    this.changeDetector.markForCheck();
   }
 }
-

@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -89,6 +89,7 @@ export class DefinitionEditorComponent implements OnInit {
     private readonly db: DbService,
     private readonly narrator: NarratorService,
     private readonly snack: MatSnackBar,
+    private readonly changeDetector: ChangeDetectorRef,
   ) {}
 
   async ngOnInit(): Promise<void> {
@@ -102,6 +103,7 @@ export class DefinitionEditorComponent implements OnInit {
       this.definition = await this.db.definition(id);
       if (!this.definition) await this.router.navigate(['/definitions']);
     }
+    this.changeDetector.markForCheck();
   }
 
   saveDraft(): void { void this.db.saveMeta('definition-draft', { title: this.draftTitle, prompt: this.draftPrompt }); }
@@ -113,7 +115,10 @@ export class DefinitionEditorComponent implements OnInit {
       await this.db.saveMeta('definition-draft', { title: '', prompt: '' });
       await this.router.navigate(['/definitions', value.id]);
     } catch (error) { this.error(error); }
-    finally { this.busy = false; }
+    finally {
+      this.busy = false;
+      this.changeDetector.markForCheck();
+    }
   }
 
   async save(): Promise<void> {
@@ -132,7 +137,10 @@ export class DefinitionEditorComponent implements OnInit {
       const story = await this.narrator.startStory(this.definition);
       await this.router.navigate(['/stories', story.id]);
     } catch (error) { this.error(error); }
-    finally { this.busy = false; }
+    finally {
+      this.busy = false;
+      this.changeDetector.markForCheck();
+    }
   }
 
   export(): void {
@@ -158,4 +166,3 @@ export class DefinitionEditorComponent implements OnInit {
     this.snack.open(error instanceof Error ? error.message : 'Something went wrong.', 'Dismiss', { duration: 7000 });
   }
 }
-

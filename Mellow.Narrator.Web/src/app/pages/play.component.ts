@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -106,6 +106,7 @@ export class PlayComponent implements OnInit {
     private readonly db: DbService,
     private readonly narrator: NarratorService,
     private readonly snack: MatSnackBar,
+    private readonly changeDetector: ChangeDetectorRef,
   ) {}
 
   async ngOnInit(): Promise<void> {
@@ -114,6 +115,7 @@ export class PlayComponent implements OnInit {
     if (!this.story) { await this.router.navigate(['/stories']); return; }
     this.pendingKey = `pending-action-${id}`;
     this.action = await this.db.meta<string>(this.pendingKey) ?? '';
+    this.changeDetector.markForCheck();
   }
 
   get suggestions(): string[] { return this.story?.turns.at(-1)?.suggestedActions ?? []; }
@@ -132,7 +134,10 @@ export class PlayComponent implements OnInit {
       setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }));
     } catch (error) {
       this.snack.open(error instanceof Error ? error.message : 'The story request failed.', 'Dismiss', { duration: 8000 });
-    } finally { this.busy = false; }
+    } finally {
+      this.busy = false;
+      this.changeDetector.markForCheck();
+    }
   }
 
   async saveBible(entries: StoryBibleEntry[]): Promise<void> {
@@ -165,4 +170,3 @@ export class PlayComponent implements OnInit {
     await this.router.navigate(['/stories']);
   }
 }
-
