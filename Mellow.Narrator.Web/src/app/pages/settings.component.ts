@@ -41,11 +41,26 @@ import { AppSettings } from '../core/models';
             <mat-label>Base URL</mat-label>
             <input matInput [(ngModel)]="settings.baseUrl" placeholder="https://api.openai.com/v1">
           </mat-form-field>
-          <mat-form-field appearance="outline">
-            <mat-label>Model ID</mat-label>
-            <input matInput [(ngModel)]="settings.modelId" list="models">
-            <datalist id="models">@for (model of models; track model) { <option [value]="model"></option> }</datalist>
-          </mat-form-field>
+          @if (models.length > 0) {
+            <mat-form-field appearance="outline">
+              <mat-label>Model</mat-label>
+              <mat-select [(ngModel)]="settings.modelId">
+                @if (settings.modelId && !models.includes(settings.modelId)) {
+                  <mat-option [value]="settings.modelId">{{ settings.modelId }} (current)</mat-option>
+                }
+                @for (model of models; track model) {
+                  <mat-option [value]="model">{{ model }}</mat-option>
+                }
+              </mat-select>
+              <mat-hint>{{ models.length }} models available</mat-hint>
+            </mat-form-field>
+          } @else {
+            <mat-form-field appearance="outline">
+              <mat-label>Model ID</mat-label>
+              <input matInput [(ngModel)]="settings.modelId" placeholder="Enter a model ID">
+              <mat-hint>Enter manually or load models from the provider.</mat-hint>
+            </mat-form-field>
+          }
           <mat-form-field appearance="outline">
             <mat-label>API key</mat-label>
             <input matInput type="password" [(ngModel)]="settings.apiKey" autocomplete="off">
@@ -124,7 +139,10 @@ export class SettingsComponent implements OnInit {
   async loadModels(): Promise<void> {
     await this.run(async () => {
       this.models = await this.llm.loadModels(this.settings);
-      this.snack.open(`Loaded ${this.models.length} models.`, 'Dismiss', { duration: 2500 });
+      if (!this.settings.modelId && this.models.length > 0) {
+        this.settings.modelId = this.models[0];
+      }
+      this.snack.open(`Loaded ${this.models.length} models. Choose one from the Model list.`, 'Dismiss', { duration: 3500 });
     });
   }
 
