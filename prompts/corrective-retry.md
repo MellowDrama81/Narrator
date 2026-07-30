@@ -1,0 +1,1 @@
+Your previous response failed validation: {validationError}. This is your final attempt — fix only what caused this error and keep everything else consistent with your previous response. Return a corrected JSON object only.

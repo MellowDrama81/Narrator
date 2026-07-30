@@ -1,59 +1,47 @@
-# MellowNarratorWeb
+# Mellow Narrator Web
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 22.0.8.
+The web version of Mellow Narrator is a completely client-side Angular 22 application using Angular
+Material, TypeScript, and IndexedDB. LLM requests are sent directly from the browser to the configured
+OpenAI-compatible endpoint.
 
-## Development server
+## Local development
 
-To start a local development server, run:
+Install Node.js 22.22.3+, Node.js 24.15.0+, or Node.js 26+, pnpm 11.9.0, and the .NET 10 SDK. From this
+directory:
 
-```bash
-ng serve
+```powershell
+corepack enable
+corepack prepare pnpm@11.9.0 --activate
+pnpm install --frozen-lockfile
+pnpm start
 ```
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+Open [http://localhost:4200](http://localhost:4200).
 
-## Code scaffolding
+## Tests and production build
 
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
-
-```bash
-ng generate component component-name
+```powershell
+pnpm test
+pnpm run build
 ```
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+The production output is written to `dist/`.
 
-```bash
-ng generate --help
+## Shared prompt templates
+
+The authored prompt templates live in the repository-level `prompts/` directory. The web app imports
+the generated `src/app/core/prompt-templates.generated.ts` module. It is regenerated automatically
+before development, tests, and production builds:
+
+```powershell
+pnpm prompts:generate
+pnpm prompts:check
 ```
 
-## Building
+Do not edit the generated TypeScript module directly.
 
-To build the project run:
+## Browser storage and LLM access
 
-```bash
-ng build
-```
-
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
-
-## Running unit tests
-
-To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
-
-```bash
-ng test
-```
-
-## Running end-to-end tests
-
-For end-to-end (e2e) testing, run:
-
-```bash
-ng e2e
-```
-
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
-
-## Additional Resources
-
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+Settings, definitions, stories, and trash are stored in IndexedDB and are scoped to the page's origin.
+The provider must allow browser CORS requests from the development or deployed origin. An HTTPS-hosted
+copy may also be blocked from calling an unsecured HTTP model endpoint by browser mixed-content rules.

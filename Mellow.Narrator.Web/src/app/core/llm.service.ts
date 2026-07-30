@@ -1,9 +1,6 @@
 import { Injectable } from '@angular/core';
 import { AppSettings, DefinitionGeneration, StoryDefinition, StoryState, TurnGeneration } from './models';
-
-const definitionInstruction = `You design durable interactive stories. Refine the user's premise into immutable setting, tone, and narration rules. Move mutable character, place, relationship, inventory, and objective facts into Story Bible entries. Each entry has category, name, knownFacts, secretFacts, and importance from 1 to 5. Return JSON only with refinedStoryPrompt, suggestedTitle, initialEventsPrompt, and initialStoryBibleEntries.`;
-
-const narrationInstruction = `You narrate an interactive story in second-person present tense. The Story Bible is authoritative. Secret facts must not be revealed until story events make the player character aware of them. Advance the scene, resolve the player's attempted action plausibly, stop at the next meaningful decision, and return JSON only. Return turnNumber, acknowledgedPlayerAction, narration, suggestedActions, relevantStoryBibleEntryIds, and incremental storyBibleUpdates. Each update is add, replace, or remove; add uses a null entryId, while replace/remove use an existing ID.`;
+import { promptTemplates } from './prompt-templates.generated';
 
 @Injectable({ providedIn: 'root' })
 export class LlmService {
@@ -24,7 +21,7 @@ export class LlmService {
 
   async generateDefinition(settings: AppSettings, storyPrompt: string): Promise<DefinitionGeneration> {
     const value = await this.complete(settings, [
-      { role: 'system', content: definitionInstruction },
+      { role: 'system', content: promptTemplates.storyDefinitionInstruction },
       { role: 'user', content: storyPrompt },
     ]);
     const result = value as Partial<DefinitionGeneration>;
@@ -79,7 +76,7 @@ export class LlmService {
       },
     };
     const value = await this.complete(settings, [
-      { role: 'system', content: narrationInstruction },
+      { role: 'system', content: this.renderNarrationInstruction(settings, turns.length === 0) },
       { role: 'user', content: JSON.stringify(context) },
     ]) as Partial<TurnGeneration>;
     if (!value.narration || !Array.isArray(value.suggestedActions))
@@ -92,6 +89,25 @@ export class LlmService {
       relevantStoryBibleEntryIds: Array.isArray(value.relevantStoryBibleEntryIds) ? value.relevantStoryBibleEntryIds.map(String) : [],
       storyBibleUpdates: Array.isArray(value.storyBibleUpdates) ? value.storyBibleUpdates : [],
     };
+  }
+
+  private renderNarrationInstruction(settings: AppSettings, opening: boolean): string {
+    const replacements: Record<string, string | number> = {
+      minSuggestedActions: settings.minSuggestedActions,
+      maxSuggestedActions: settings.maxSuggestedActions,
+      minParagraphs: settings.minParagraphs,
+      maxParagraphs: settings.maxParagraphs,
+      minSentences: 2,
+      maxSentences: 5,
+    };
+    let instruction: string = promptTemplates.storyNarrationInstruction;
+    for (const [name, value] of Object.entries(replacements))
+      instruction = instruction.replaceAll(`{${name}}`, String(value));
+
+    const phase = opening
+      ? `${promptTemplates.openingSceneInstruction} Copy turnNumber exactly into the response and set acknowledgedPlayerAction to null.`
+      : `${promptTemplates.continueStoryInstruction} Resolve currentPlayerAction now and copy it exactly into acknowledgedPlayerAction.`;
+    return `${instruction}\n\n${phase}`;
   }
 
   private async complete(settings: AppSettings, messages: Array<{ role: string; content: string }>): Promise<unknown> {
@@ -139,4 +155,3 @@ export class LlmService {
     }
   }
 }
-

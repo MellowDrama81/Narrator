@@ -1,0 +1,41 @@
+{
+  "templates": [
+    {
+      "key": "storyDefinitionInstruction",
+      "file": "story-definition.md",
+      "placeholders": []
+    },
+    {
+      "key": "storyNarrationInstruction",
+      "file": "story-narration.md",
+      "placeholders": [
+        "minSuggestedActions",
+        "maxSuggestedActions",
+        "minParagraphs",
+        "maxParagraphs",
+        "minSentences",
+        "maxSentences"
+      ]
+    },
+    {
+      "key": "correctiveRetryInstruction",
+      "file": "corrective-retry.md",
+      "placeholders": ["validationError"]
+    },
+    {
+      "key": "promptedJsonInstruction",
+      "file": "prompted-json.md",
+      "placeholders": ["schema", "example"]
+    },
+    {
+      "key": "openingSceneInstruction",
+      "file": "opening-scene.md",
+      "placeholders": []
+    },
+    {
+      "key": "continueStoryInstruction",
+      "file": "continue-story.md",
+      "placeholders": []
+    }
+  ]
+}

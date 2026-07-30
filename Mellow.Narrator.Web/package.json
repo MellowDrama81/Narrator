@@ -3,6 +3,11 @@
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
+    "prompts:generate": "dotnet run --project ../tools/Mellow.Narrator.PromptGenerator -- --root .. --target typescript",
+    "prompts:check": "dotnet run --project ../tools/Mellow.Narrator.PromptGenerator -- --root .. --target all --check",
+    "prestart": "pnpm prompts:generate",
+    "prebuild": "pnpm prompts:generate",
+    "pretest": "pnpm prompts:generate",
     "start": "ng serve",
     "build": "ng build && node scripts/prepare-hosting.mjs",
     "watch": "ng build --watch --configuration development",

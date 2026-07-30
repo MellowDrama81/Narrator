@@ -17,7 +17,7 @@ public sealed class SettingsTests
     }
 
     [Fact]
-    public void PromptTemplateDefaults_AreHardCoded()
+    public void PromptTemplateDefaults_AreGeneratedFromSharedTemplates()
     {
         var templates = PromptTemplateDefaults.Create();
         Assert.Contains("Story Bible", templates.StoryDefinitionInstruction);

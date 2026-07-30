@@ -107,6 +107,7 @@ Prerequisites:
 
 - Node.js `22.22.3` or later in the Node 22 line, Node.js `24.15.0` or later, or Node.js 26+.
 - pnpm 11.9.0. Corepack is the recommended way to activate the version recorded by the project.
+- .NET 10 SDK, used by the shared prompt-template generator before web development, tests, and builds.
 
 From the repository root:
 
@@ -129,6 +130,10 @@ pnpm run build
 ```
 
 The production output is written under `Mellow.Narrator.Web/dist/`.
+
+The `prestart`, `pretest`, and `prebuild` hooks regenerate the TypeScript prompt constants from the
+canonical files under `prompts/`. Run `pnpm prompts:check` to verify that both the C# and TypeScript
+generated outputs are current without changing them.
 
 ### Configure an LLM in the browser
 
@@ -207,6 +212,8 @@ remove it for good — both actions ask for confirmation first, since they canno
 - `Mellow.Narrator.Persistence` — versioned folder-of-JSON persistence, backups, recovery, staging, copying, and trash.
 - `Mellow.Narrator.Gui` — standard MAUI `TabbedPage` UI and secure-storage adapter.
 - `Mellow.Narrator.Web` — client-side Angular Material UI with IndexedDB persistence.
+- `prompts` — canonical Markdown prompt templates and their manifest, shared by both applications.
+- `tools/Mellow.Narrator.PromptGenerator` — build-time generator for typed C# and TypeScript prompt constants.
 - `Mellow.Narrator.Cli` — unreleased manual test harness that requires an isolated data directory.
 - `Mellow.Narrator.Tests` — Core unit tests plus provider and persistence integration tests.
 

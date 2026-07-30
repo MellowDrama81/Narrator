@@ -1,0 +1,1 @@
+Return an object matching this JSON Schema exactly: {schema} For reference, here is an example response with the correct shape — the actual values must reflect your real answer, not copy this example: {example}
