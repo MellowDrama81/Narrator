@@ -131,10 +131,6 @@ pnpm run build
 
 The production output is written under `Mellow.Narrator.Web/dist/`.
 
-The `prestart`, `pretest`, and `prebuild` hooks regenerate the TypeScript prompt constants from the
-canonical files under `prompts/`. Run `pnpm prompts:check` to verify that both the C# and TypeScript
-generated outputs are current without changing them.
-
 ### Configure an LLM in the browser
 
 Open **Settings**, enter the provider's base URL and API key, select **Load models**, choose a model from
@@ -145,6 +141,42 @@ Because requests originate in the browser, the provider must allow cross-origin 
 application's origin. For local development, allow `http://localhost:4200`. A local OpenAI-compatible
 server must also be reachable by the browser; an HTTPS-hosted deployment may be prevented by browser
 mixed-content rules from calling an unsecured HTTP endpoint.
+
+## Shared prompt templates
+
+The .NET and web applications use the same LLM prompt templates. The canonical source is the `prompts/`
+directory:
+
+- `manifest.json` maps each template key to a Markdown file and declares the placeholders that the
+  template may contain.
+- The `.md` files contain the prompt text. Edit these files when changing a prompt; do not edit either
+  generated source file directly.
+
+The generator validates that every placeholder in a prompt is declared in the manifest, then produces
+the language-specific constants used by each application:
+
+- `Mellow.Narrator.Core/Generated/PromptTemplates.g.cs` for .NET.
+- `Mellow.Narrator.Web/src/app/core/prompt-templates.generated.ts` for Angular.
+
+Generation is part of both build processes. Building `Mellow.Narrator.Core` runs the C# generator
+incrementally before compilation. In the web project, the `prestart`, `pretest`, and `prebuild` hooks
+regenerate the TypeScript output before `pnpm start`, `pnpm test`, and `pnpm run build`.
+
+To regenerate both outputs explicitly from the repository root:
+
+```powershell
+dotnet run --project tools/Mellow.Narrator.PromptGenerator -- --root . --target all
+```
+
+To verify that the checked-in generated files match the canonical templates without modifying files:
+
+```powershell
+dotnet run --project tools/Mellow.Narrator.PromptGenerator -- --root . --target all --check
+```
+
+The equivalent check from `Mellow.Narrator.Web` is `pnpm prompts:check`. Use `--target csharp` or
+`--target typescript` instead of `--target all` when only one output is needed. Commit changes to the
+canonical prompt files, the manifest when applicable, and the regenerated outputs together.
 
 ## Using the app
 
