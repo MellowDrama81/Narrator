@@ -85,6 +85,10 @@ describe('LlmService', () => {
       requestType: 'storyTurn',
       currentPlayerAction: 'Search for a light',
     });
+    expect(JSON.parse(messages.at(-1)!.content).resolutionRoll).toBeGreaterThanOrEqual(1);
+    expect(JSON.parse(messages.at(-1)!.content).resolutionRoll).toBeLessThanOrEqual(100);
+    expect(messages[0].content).toContain('Choose the difficulty before considering resolutionRoll');
+    expect(messages[0].content).toContain('ordinary human attempting to levitate');
   });
 
   it('remembers when a provider requires JSON mode instead', async () => {

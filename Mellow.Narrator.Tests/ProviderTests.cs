@@ -321,6 +321,50 @@ public sealed class ProviderTests
     }
 
     [Fact]
+    public async Task GenerateTurn_IncludesRandomResolutionRollAndDifficultyRules()
+    {
+        string? body = null;
+        var handler = new StubHandler(async request =>
+        {
+            body = await request.Content!.ReadAsStringAsync();
+            return Response("""
+                {"turnNumber":1,"acknowledgedPlayerAction":"Leap over the hole","narration":"You catch the far edge.","suggestedActions":["Pull yourself up","Call for help"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+                """);
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", new([])),
+            new([]),
+            [],
+            "Leap over the hole",
+            1);
+
+        await provider.GenerateTurnAsync(Settings(), null, context);
+
+        using var request = JsonDocument.Parse(body!);
+        var messages = request.RootElement.GetProperty("messages");
+        Assert.Contains("Choose the difficulty before considering resolutionRoll",
+            messages[0].GetProperty("content").GetString());
+        Assert.Contains("ordinary human attempting to levitate",
+            messages[0].GetProperty("content").GetString());
+
+        string? action = null;
+        int? roll = null;
+        foreach (var message in messages.EnumerateArray())
+        {
+            var content = message.GetProperty("content").GetString();
+            if (content is null || !content.StartsWith('{')) continue;
+            using var candidate = JsonDocument.Parse(content);
+            if (!candidate.RootElement.TryGetProperty("currentPlayerAction", out var currentAction)) continue;
+            action = currentAction.GetString();
+            roll = candidate.RootElement.GetProperty("resolutionRoll").GetInt32();
+        }
+
+        Assert.Equal("Leap over the hole", action);
+        Assert.InRange(roll!.Value, 1, 100);
+    }
+
+    [Fact]
     public async Task GenerateTurn_IncludesInitialEventsPromptWhileRecentTurnsWindowIsNotFull()
     {
         string? body = null;

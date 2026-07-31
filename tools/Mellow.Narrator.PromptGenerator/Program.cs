@@ -101,7 +101,7 @@ static string GenerateCSharp(IReadOnlyList<PromptTemplate> templates)
         builder.AppendLine(" = \"\"\"");
         foreach (var line in template.Content.Split('\n'))
         {
-            builder.Append("        ");
+            if (line.Length > 0) builder.Append("        ");
             builder.AppendLine(line);
         }
         builder.AppendLine("        \"\"\";");

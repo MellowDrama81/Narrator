@@ -106,6 +106,7 @@ export class LlmService {
         requestType: turns.length === 0 ? 'openingScene' : 'storyTurn',
         turnNumber: next,
         currentPlayerAction: action,
+        resolutionRoll: action === null ? null : this.resolutionRoll(),
         instruction: turns.length === 0
           ? `${promptTemplates.openingSceneInstruction} Copy turnNumber exactly into the response and set acknowledgedPlayerAction to null.`
           : `${promptTemplates.continueStoryInstruction} Resolve currentPlayerAction now. Do not answer an action from the preceding history and do not repeat an earlier scene. Advance beyond the last assistant narration. Copy turnNumber and currentPlayerAction exactly into the response fields.`,
@@ -246,6 +247,15 @@ export class LlmService {
       properties,
       required: Object.keys(properties),
     };
+  }
+
+  private resolutionRoll(): number {
+    const values = new Uint32Array(1);
+    const firstRejectedValue = 0x1_0000_0000 - (0x1_0000_0000 % 100);
+    do {
+      crypto.getRandomValues(values);
+    } while (values[0] >= firstRejectedValue);
+    return (values[0] % 100) + 1;
   }
 
   private async fetch(settings: AppSettings, relative: string, init: RequestInit): Promise<Response> {

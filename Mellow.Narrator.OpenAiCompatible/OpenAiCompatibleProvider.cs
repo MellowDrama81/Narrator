@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -545,6 +546,7 @@ public sealed class OpenAiCompatibleProvider(
             requestType = opening ? "openingScene" : "storyTurn",
             turnNumber = context.NextTurnNumber,
             currentPlayerAction = opening ? null : context.PlayerAction,
+            resolutionRoll = opening ? (int?)null : RandomNumberGenerator.GetInt32(1, 101),
             instruction = opening
                 ? $"{Templates.OpeningSceneInstruction} Copy turnNumber exactly into the response and set acknowledgedPlayerAction to null."
                 : $"{Templates.ContinueStoryInstruction} Resolve currentPlayerAction now. " +
