@@ -27,6 +27,20 @@ pnpm run build
 
 The production output is written to `dist/`.
 
+## GitHub Pages
+
+The production web application is hosted at
+[https://mellowdrama81.github.io](https://mellowdrama81.github.io). Build the root-site artifact with:
+
+```powershell
+pnpm run build:github-pages
+```
+
+The resulting static site is written to `dist/github-pages/`. It includes a `.nojekyll` marker and a
+`404.html` fallback for Angular routes and has production social-card URLs resolved to the GitHub Pages
+origin. Publish the directory's contents to the `main` branch of
+`MellowDrama81/mellowdrama81.github.io`.
+
 ## Shared prompt templates
 
 The authored prompt templates live in the repository-level `prompts/` directory. The web app imports

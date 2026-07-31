@@ -7,9 +7,11 @@
     "prompts:check": "dotnet run --project ../tools/Mellow.Narrator.PromptGenerator -- --root .. --target all --check",
     "prestart": "pnpm prompts:generate",
     "prebuild": "pnpm prompts:generate",
+    "prebuild:github-pages": "pnpm prompts:generate",
     "pretest": "pnpm prompts:generate",
     "start": "ng serve",
     "build": "ng build && node scripts/prepare-hosting.mjs",
+    "build:github-pages": "ng build --base-href / && node scripts/prepare-github-pages.mjs",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
   },

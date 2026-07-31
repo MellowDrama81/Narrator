@@ -131,6 +131,21 @@ pnpm run build
 
 The production output is written under `Mellow.Narrator.Web/dist/`.
 
+### GitHub Pages deployment
+
+The Angular application is published at [https://mellowdrama81.github.io](https://mellowdrama81.github.io)
+from the separate `MellowDrama81/mellowdrama81.github.io` repository. Create the static Pages artifact
+from `Mellow.Narrator.Web` with:
+
+```powershell
+pnpm run build:github-pages
+```
+
+The deployable files are written to `Mellow.Narrator.Web/dist/github-pages/`. This build uses the root
+base path, replaces social-card placeholders with the production origin, adds `.nojekyll`, and creates
+`404.html` as an Angular routing fallback. Publish the contents of that directory to the `main` branch
+of `MellowDrama81/mellowdrama81.github.io`.
+
 ### Configure an LLM in the browser
 
 Open **Settings**, enter the provider's base URL and API key, select **Load models**, choose a model from
