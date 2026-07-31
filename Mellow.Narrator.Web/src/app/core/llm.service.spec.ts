@@ -89,6 +89,8 @@ describe('LlmService', () => {
     expect(JSON.parse(messages.at(-1)!.content).resolutionRoll).toBeLessThanOrEqual(100);
     expect(messages[0].content).toContain('Choose the difficulty before considering resolutionRoll');
     expect(messages[0].content).toContain('ordinary human attempting to levitate');
+    expect(messages[0].content).toContain('the player controls only their own character');
+    expect(messages[0].content).toContain('the guard gives me the key');
   });
 
   it('remembers when a provider requires JSON mode instead', async () => {

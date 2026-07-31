@@ -347,6 +347,10 @@ public sealed class ProviderTests
             messages[0].GetProperty("content").GetString());
         Assert.Contains("ordinary human attempting to levitate",
             messages[0].GetProperty("content").GetString());
+        Assert.Contains("the player controls only their own character",
+            messages[0].GetProperty("content").GetString());
+        Assert.Contains("the guard gives me the key",
+            messages[0].GetProperty("content").GetString());
 
         string? action = null;
         int? roll = null;
