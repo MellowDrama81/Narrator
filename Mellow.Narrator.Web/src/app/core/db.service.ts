@@ -30,9 +30,20 @@ export class DbService {
     return new Promise<T>((resolve, reject) => {
       const transaction = db.transaction(storeName, mode);
       const request = action(transaction.objectStore(storeName));
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-      transaction.onabort = () => reject(transaction.error);
+      let requestSucceeded = false;
+      let result!: T;
+
+      request.onsuccess = () => {
+        requestSucceeded = true;
+        result = request.result;
+      };
+      request.onerror = () => reject(request.error ?? new Error(`IndexedDB request failed for ${storeName}.`));
+      transaction.oncomplete = () => {
+        if (requestSucceeded) resolve(result);
+        else reject(new Error(`IndexedDB transaction completed before its ${storeName} request succeeded.`));
+      };
+      transaction.onerror = () => reject(transaction.error ?? new Error(`IndexedDB transaction failed for ${storeName}.`));
+      transaction.onabort = () => reject(transaction.error ?? new Error(`IndexedDB transaction was aborted for ${storeName}.`));
     });
   }
 
@@ -71,4 +82,3 @@ export class DbService {
   meta<T>(key: string): Promise<T | undefined> { return this.get<{ key: string; value: T }>('meta', key).then(x => x?.value); }
   saveMeta<T>(key: string, value: T): Promise<void> { return this.put('meta', { key, value }); }
 }
-
