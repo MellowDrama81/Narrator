@@ -57,7 +57,7 @@ public sealed class JsonNarratorStore :
         {
             var id = Path.GetFileNameWithoutExtension(file);
             var item = await LockedAsync($"definition:{id}",
-                () => JsonFileStore.ReadAsync<StoryDefinition>(file, cancellationToken, ReportRecovery), cancellationToken);
+                async () => Normalize(await JsonFileStore.ReadAsync<StoryDefinition>(file, cancellationToken, ReportRecovery)), cancellationToken);
             if (item is not null) result.Add(new(item.Id, item.Title, item.SortOrder, item.UpdatedAtUtc));
         }
         return result.OrderBy(x => x.SortOrder).ThenBy(x => x.Title).ToArray();
@@ -65,7 +65,7 @@ public sealed class JsonNarratorStore :
 
     Task<StoryDefinition?> IStoryDefinitionRepository.GetAsync(Guid id, CancellationToken cancellationToken) =>
         LockedAsync($"definition:{id}",
-            () => JsonFileStore.ReadAsync<StoryDefinition>(DefinitionFile(DefinitionsPath, id), cancellationToken, ReportRecovery), cancellationToken);
+            async () => Normalize(await JsonFileStore.ReadAsync<StoryDefinition>(DefinitionFile(DefinitionsPath, id), cancellationToken, ReportRecovery)), cancellationToken);
 
     async Task IStoryDefinitionRepository.SaveAsync(StoryDefinition definition, CancellationToken cancellationToken)
     {
@@ -86,9 +86,9 @@ public sealed class JsonNarratorStore :
         {
             var firstFile = DefinitionFile(DefinitionsPath, firstId);
             var secondFile = DefinitionFile(DefinitionsPath, secondId);
-            var first = await JsonFileStore.ReadAsync<StoryDefinition>(firstFile, cancellationToken, ReportRecovery)
+            var first = Normalize(await JsonFileStore.ReadAsync<StoryDefinition>(firstFile, cancellationToken, ReportRecovery))
                 ?? throw new FileNotFoundException("First Story Definition not found.");
-            var second = await JsonFileStore.ReadAsync<StoryDefinition>(secondFile, cancellationToken, ReportRecovery)
+            var second = Normalize(await JsonFileStore.ReadAsync<StoryDefinition>(secondFile, cancellationToken, ReportRecovery))
                 ?? throw new FileNotFoundException("Second Story Definition not found.");
             await JsonFileStore.WriteAsync(firstFile, first with { SortOrder = second.SortOrder }, cancellationToken);
             await JsonFileStore.WriteAsync(secondFile, second with { SortOrder = first.SortOrder }, cancellationToken);
@@ -313,8 +313,40 @@ public sealed class JsonNarratorStore :
         var normalized = loaded ?? NarratorDefaults.Create();
         if (normalized.Logging is null)
             normalized = normalized with { Logging = LoggingDefaults.Create() };
+        normalized = NormalizePlannedEventSettings(normalized);
         if (_logLevelSwitch is not null) _logLevelSwitch.MinimumLevel = normalized.Logging.MinimumLevel;
         return normalized;
+    }
+
+    // The Planned Event limit fields on StoryGenerationSettings/ContentLimitSettings were added after
+    // ApiConnectionSettings first shipped, as required constructor parameters with no C# default -
+    // unlike Logging above, these are value types, so a settings document saved before they existed
+    // deserializes them as 0 rather than null. 0 is outside every one of their valid ranges (each has a
+    // minimum of at least 1), so it can never be a legitimately saved value; SettingsValidator would
+    // reject it on the very next save, citing fields the user never touched. Treat a 0 as "missing from
+    // an older document" and backfill it from defaults, the same way Logging is backfilled above.
+    private static ApiConnectionSettings NormalizePlannedEventSettings(ApiConnectionSettings settings)
+    {
+        var defaults = NarratorDefaults.Create();
+        var generation = settings.StoryGeneration with
+        {
+            MaxPlannedEvents = settings.StoryGeneration.MaxPlannedEvents == 0
+                ? defaults.StoryGeneration.MaxPlannedEvents : settings.StoryGeneration.MaxPlannedEvents,
+            MaxPlannedEventCharacters = settings.StoryGeneration.MaxPlannedEventCharacters == 0
+                ? defaults.StoryGeneration.MaxPlannedEventCharacters : settings.StoryGeneration.MaxPlannedEventCharacters,
+            MaxPlannedEventsCharacters = settings.StoryGeneration.MaxPlannedEventsCharacters == 0
+                ? defaults.StoryGeneration.MaxPlannedEventsCharacters : settings.StoryGeneration.MaxPlannedEventsCharacters,
+            PlannedEventsWarningPercent = settings.StoryGeneration.PlannedEventsWarningPercent == 0
+                ? defaults.StoryGeneration.PlannedEventsWarningPercent : settings.StoryGeneration.PlannedEventsWarningPercent
+        };
+        var contentLimits = settings.ContentLimits with
+        {
+            MaxPlannedEventDescriptionCharacters = settings.ContentLimits.MaxPlannedEventDescriptionCharacters == 0
+                ? defaults.ContentLimits.MaxPlannedEventDescriptionCharacters : settings.ContentLimits.MaxPlannedEventDescriptionCharacters,
+            MaxPlannedEventUpdatesPerResponse = settings.ContentLimits.MaxPlannedEventUpdatesPerResponse == 0
+                ? defaults.ContentLimits.MaxPlannedEventUpdatesPerResponse : settings.ContentLimits.MaxPlannedEventUpdatesPerResponse
+        };
+        return settings with { StoryGeneration = generation, ContentLimits = contentLimits };
     }
 
     async Task IApiConnectionSettingsStore.SaveAsync(ApiConnectionSettings settings, CancellationToken cancellationToken)
@@ -338,7 +370,7 @@ public sealed class JsonNarratorStore :
         foreach (var file in Directory.EnumerateFiles(TrashDefinitionsPath, "*.json")
                      .Where(x => !x.EndsWith(".bak", StringComparison.OrdinalIgnoreCase)))
         {
-            var definition = await JsonFileStore.ReadAsync<StoryDefinition>(file, cancellationToken);
+            var definition = Normalize(await JsonFileStore.ReadAsync<StoryDefinition>(file, cancellationToken));
             items.Add(ToTrashItem(file, TrashItemType.StoryDefinition, definition?.Title));
         }
         foreach (var folder in Directory.EnumerateDirectories(TrashStatesPath))
@@ -359,7 +391,7 @@ public sealed class JsonNarratorStore :
         var source = Path.Combine(item.Type == TrashItemType.StoryDefinition ? TrashDefinitionsPath : TrashStatesPath, trashId);
         if (item.Type == TrashItemType.StoryDefinition)
         {
-            var definition = await JsonFileStore.ReadAsync<StoryDefinition>(source, cancellationToken) ?? throw new InvalidDataException();
+            var definition = Normalize(await JsonFileStore.ReadAsync<StoryDefinition>(source, cancellationToken)) ?? throw new InvalidDataException();
             var destination = DefinitionFile(DefinitionsPath, definition.Id);
             if (!File.Exists(destination))
             {
@@ -444,11 +476,11 @@ public sealed class JsonNarratorStore :
     private async Task<StoryState?> LoadStateAndRecoverAsync(string folder, CancellationToken cancellationToken)
     {
         var path = StateFile(folder);
-        var state = await JsonFileStore.ReadAsync<StoryState>(path, cancellationToken, ReportRecovery);
+        var state = Normalize(await JsonFileStore.ReadAsync<StoryState>(path, cancellationToken, ReportRecovery));
         if (state is null) return null;
         if (!await IsCommitBoundaryConsistentAsync(folder, state, cancellationToken))
         {
-            var backup = await JsonFileStore.ReadExactAsync<StoryState>(path + ".bak", cancellationToken);
+            var backup = Normalize(await JsonFileStore.ReadExactAsync<StoryState>(path + ".bak", cancellationToken));
             if (backup is null || !await IsCommitBoundaryConsistentAsync(folder, backup, cancellationToken))
             {
                 JsonFileStore.Quarantine(path);
@@ -571,7 +603,7 @@ public sealed class JsonNarratorStore :
         int lastCommittedSequence,
         CancellationToken cancellationToken)
     {
-        var state = await JsonFileStore.ReadExactAsync<StoryState>(StateFile(folder), cancellationToken)
+        var state = Normalize(await JsonFileStore.ReadExactAsync<StoryState>(StateFile(folder), cancellationToken))
             ?? throw new InvalidDataException("The Story State document is unavailable.");
         if (state.LastCommittedTurnSequence != lastCommittedSequence)
             throw new InvalidDataException("The Story State changed while its turns were being read.");
@@ -603,7 +635,7 @@ public sealed class JsonNarratorStore :
         var matches = Directory.EnumerateFiles(TurnsFolder(folder), $"{sequence:D8}-*.json").ToArray();
         if (matches.Length != 1)
             throw new InvalidDataException($"Story Turn {sequence} is missing or duplicated.");
-        var turn = await JsonFileStore.ReadExactAsync<StoryTurn>(matches[0], cancellationToken)
+        var turn = Normalize(await JsonFileStore.ReadExactAsync<StoryTurn>(matches[0], cancellationToken))
             ?? throw new InvalidDataException($"Story Turn {sequence} is invalid.");
         var idText = Path.GetFileNameWithoutExtension(matches[0]).AsSpan(9);
         if (turn.StoryStateId != stateId ||
@@ -661,6 +693,45 @@ public sealed class JsonNarratorStore :
             Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).Sum(x => new FileInfo(x).Length);
         return new(name, type, id, string.IsNullOrWhiteSpace(displayName) ? id.ToString("D") : displayName, deleted, size);
     }
+
+    // Fields added to StoryDefinition/StoryState/StoryTurn/PlannedEvent after they first shipped (the
+    // Planned Events feature itself, then Urgency, then PrerequisiteEventIds) are required constructor
+    // parameters in code, so every in-memory construction path is compiler-checked to supply them. A
+    // document written to disk before one of those fields existed has no matching JSON property for it
+    // though, and System.Text.Json leaves a missing reference-type constructor parameter as null rather
+    // than failing - so loading old data can hand the rest of the app a StoryDefinition/StoryState/
+    // StoryTurn whose newer collection-typed properties are null despite the compile-time guarantee
+    // everywhere else. Backfilling those nulls here, once, at the single boundary where on-disk data
+    // re-enters the app, keeps that guarantee true in practice for callers like
+    // PlannedEventProcessor.IsWithinLimits that dereference these collections unconditionally.
+    private static StoryDefinition? Normalize(StoryDefinition? value) => value is null ? null : value with
+    {
+        InitialEventsPrompt = value.InitialEventsPrompt ?? "",
+        InitialPlannedEvents = NormalizePlannedEvents(value.InitialPlannedEvents),
+        PlannedEventMaintenanceHistory = value.PlannedEventMaintenanceHistory ?? []
+    };
+
+    private static StoryState? Normalize(StoryState? value) => value is null ? null : value with
+    {
+        Setup = value.Setup with { Definition = NormalizeSnapshot(value.Setup.Definition) },
+        CurrentPlannedEvents = NormalizePlannedEvents(value.CurrentPlannedEvents),
+        PlannedEventMaintenanceHistory = value.PlannedEventMaintenanceHistory ?? []
+    };
+
+    private static StoryTurn? Normalize(StoryTurn? value) => value is null ? null : value with
+    {
+        RelevantPlannedEventIds = value.RelevantPlannedEventIds ?? [],
+        PlannedEventChanges = value.PlannedEventChanges ?? []
+    };
+
+    private static StoryDefinitionSnapshot NormalizeSnapshot(StoryDefinitionSnapshot value) => value with
+    {
+        InitialEventsPrompt = value.InitialEventsPrompt ?? "",
+        InitialPlannedEvents = NormalizePlannedEvents(value.InitialPlannedEvents)
+    };
+
+    private static PlannedEvents NormalizePlannedEvents(PlannedEvents? value) => new(
+        (value?.Entries ?? []).Select(entry => entry with { PrerequisiteEventIds = entry.PrerequisiteEventIds ?? [] }).ToArray());
 
     private static string Stamp() => DateTimeOffset.UtcNow.ToString("yyyyMMdd'T'HHmmssfff'Z'");
     private static void ValidateId(Guid id) { if (id == Guid.Empty) throw new ArgumentException("ID cannot be empty."); }

@@ -94,3 +94,50 @@ Initial events: a message with contextType "initialEvents", when present, descri
 starting state and early scenes; it is only supplied for the earliest turns and will silently stop
 appearing once enough real history has accumulated, so never treat its absence as something having
 changed.
+
+Planned Events: the plannedEvents array supplied with every request lists future plot points chosen
+for this story, each with a description and two independent ratings from 1 through 5, importance and
+urgency. They are never known to the player character and their content must never be stated,
+implied, or hinted at directly in the narration — only the ordinary in-scene events that make them
+happen may appear, exactly as any other story development would.
+
+Importance controls whether the event can be dropped. Importance 5 is mandatory: treat it as a
+required destination for the story and actively steer events, NPC choices, and complications toward
+making it happen, adapting the path as needed to fit whatever the player has done, rather than
+letting player choices carry the story away from it indefinitely. Once a planned event has genuinely
+occurred in the narration, issue a remove update with outcome fulfilled; a mandatory (importance 5)
+planned event can only be removed this way and never as abandoned, and its importance can never be
+lowered — the only way to be rid of one is to narrate it into happening. A lower-importance planned
+event may instead be removed with outcome abandoned once the player's choices have made it
+implausible or moot.
+
+Urgency controls how directly and soon to work toward the event, independent of importance. Urgency
+5 means introduce complications, NPC actions, or opportunities in the very next scene(s) that push
+directly toward the event; urgency 1 means let it emerge only opportunistically, when the player's
+own choices happen to lead there, without engineering the scene around it. A mandatory event with low
+urgency is still guaranteed to happen eventually but should not be rushed; a minor (low-importance)
+event with high urgency should be pursued promptly if it is to happen at all, since it is not
+protected from being abandoned once its moment passes. Weave the current scene toward whichever
+planned events fit naturally given how the player has actually acted and how urgently each is rated;
+do not force a low-urgency event into a scene it has no plausible way to reach yet.
+
+Prerequisites: a planned event's prerequisiteEventIds lists other planned events (by ID, copied
+exactly from the current plannedEvents) that must occur before this one is pursued. Never steer a
+scene toward an event while any ID in its prerequisiteEventIds still names an event currently present
+in plannedEvents — that prerequisite has not happened yet, so the event is not yet reachable and must
+wait, no matter how important or urgent it is. Once every one of its prerequisites has been removed
+from plannedEvents (because each was fulfilled, or because the story moved past it), the event is
+free to be pursued according to its own importance and urgency. Do not manually strip a satisfied
+prerequisite's ID out of prerequisiteEventIds when replacing an event for an unrelated reason (for
+example, rewording its description); leave the list exactly as it was unless you are deliberately
+adding a new prerequisite or the event's dependencies have genuinely changed. A new prerequisite may
+only reference an ID currently present in plannedEvents, never one you invent, and an event can never
+list itself.
+
+Add new planned events sparingly as the story develops and replace an existing one (same rules as
+Story Bible replace) when its description, importance, urgency, or prerequisiteEventIds needs
+updating without changing what event it represents — for example, raising urgency as the story
+approaches the point where the event must occur, or adding a prerequisite once it becomes clear this
+event should not happen before another. In relevantPlannedEventIds, use only IDs copied exactly from
+the current planned events; mark any planned event the current scene is actively working toward or
+that meaningfully constrains it.

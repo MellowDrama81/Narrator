@@ -34,6 +34,7 @@ public static class ImportExportProcessor
     {
         ValidateDefinition(source, limits, storyGeneration);
         var remap = new EntryIdRemapper();
+        var plannedEventRemap = new PlannedEventIdRemapper();
         return source with
         {
             Id = Guid.NewGuid(),
@@ -42,6 +43,12 @@ public static class ImportExportProcessor
             {
                 Id = Guid.NewGuid(),
                 Changes = x.Changes.Select(remap.MapChange).ToArray()
+            }).ToArray(),
+            InitialPlannedEvents = plannedEventRemap.MapEvents(source.InitialPlannedEvents),
+            PlannedEventMaintenanceHistory = source.PlannedEventMaintenanceHistory.Select(x => x with
+            {
+                Id = Guid.NewGuid(),
+                Changes = x.Changes.Select(plannedEventRemap.MapChange).ToArray()
             }).ToArray(),
             SortOrder = sortOrder
         };
@@ -57,6 +64,7 @@ public static class ImportExportProcessor
         ValidateState(source, turns, limits, storyGeneration);
         var newStateId = Guid.NewGuid();
         var remap = new EntryIdRemapper();
+        var plannedEventRemap = new PlannedEventIdRemapper();
         var state = source with
         {
             Id = newStateId,
@@ -64,7 +72,8 @@ public static class ImportExportProcessor
             {
                 Definition = source.Setup.Definition with
                 {
-                    InitialStoryBible = remap.MapBible(source.Setup.Definition.InitialStoryBible)
+                    InitialStoryBible = remap.MapBible(source.Setup.Definition.InitialStoryBible),
+                    InitialPlannedEvents = plannedEventRemap.MapEvents(source.Setup.Definition.InitialPlannedEvents)
                 }
             },
             CurrentStoryBible = remap.MapBible(source.CurrentStoryBible),
@@ -73,6 +82,12 @@ public static class ImportExportProcessor
                 Id = Guid.NewGuid(),
                 Changes = x.Changes.Select(remap.MapChange).ToArray()
             }).ToArray(),
+            CurrentPlannedEvents = plannedEventRemap.MapEvents(source.CurrentPlannedEvents),
+            PlannedEventMaintenanceHistory = source.PlannedEventMaintenanceHistory.Select(x => x with
+            {
+                Id = Guid.NewGuid(),
+                Changes = x.Changes.Select(plannedEventRemap.MapChange).ToArray()
+            }).ToArray(),
             SortOrder = sortOrder
         };
         var mappedTurns = turns.OrderBy(x => x.SequenceNumber).Select(x => x with
@@ -80,7 +95,9 @@ public static class ImportExportProcessor
             Id = Guid.NewGuid(),
             StoryStateId = newStateId,
             RelevantStoryBibleEntryIds = x.RelevantStoryBibleEntryIds.Select(remap.MapEntryId).ToArray(),
-            StoryBibleChanges = x.StoryBibleChanges.Select(remap.MapChange).ToArray()
+            StoryBibleChanges = x.StoryBibleChanges.Select(remap.MapChange).ToArray(),
+            RelevantPlannedEventIds = x.RelevantPlannedEventIds.Select(plannedEventRemap.MapEntryId).ToArray(),
+            PlannedEventChanges = x.PlannedEventChanges.Select(plannedEventRemap.MapChange).ToArray()
         }).ToArray();
         return new(state, mappedTurns);
     }
@@ -108,6 +125,35 @@ public static class ImportExportProcessor
         };
     }
 
+    // Parallel to EntryIdRemapper above, but for Planned Event IDs - a separate ID space with its own
+    // mapping, kept in its own instance so a Copy call remaps initial/current Planned Events and their
+    // maintenance history/turn references consistently, the same way EntryIdRemapper does for the bible.
+    private sealed class PlannedEventIdRemapper
+    {
+        private readonly Dictionary<Guid, Guid> _entryIds = [];
+
+        public Guid MapEntryId(Guid oldId) =>
+            _entryIds.TryGetValue(oldId, out var mapped) ? mapped : _entryIds[oldId] = Guid.NewGuid();
+
+        // A prerequisite id is remapped through the same dictionary as entry ids, so a reference to
+        // another entry (live or already resolved and only surviving in maintenance-history snapshots)
+        // keeps pointing at that same entry's new id after the copy.
+        public PlannedEvent MapEntry(PlannedEvent entry) => entry with
+        {
+            Id = MapEntryId(entry.Id),
+            PrerequisiteEventIds = entry.PrerequisiteEventIds.Select(MapEntryId).ToArray()
+        };
+
+        public PlannedEvents MapEvents(PlannedEvents events) => new(events.Entries.Select(MapEntry).ToArray());
+
+        public AppliedPlannedEventChange MapChange(AppliedPlannedEventChange change) => change with
+        {
+            EntryId = MapEntryId(change.EntryId),
+            Before = change.Before is null ? null : MapEntry(change.Before),
+            After = change.After is null ? null : MapEntry(change.After)
+        };
+    }
+
     public static void ValidateDefinition(StoryDefinition value, ContentLimitSettings limits, StoryGenerationSettings storyGeneration)
     {
         if (value.Id == Guid.Empty) throw new InvalidDataException("The Story Definition ID is invalid.");
@@ -116,6 +162,8 @@ public static class ImportExportProcessor
         ValidateOptionalText(value.InitialEventsPrompt, limits.MaxStoryPromptCharacters, "Initial Events prompt");
         ValidateBible(value.InitialStoryBible, limits, storyGeneration);
         ValidateMaintenance(value.StoryBibleMaintenanceHistory);
+        ValidatePlannedEvents(value.InitialPlannedEvents, limits, storyGeneration);
+        ValidatePlannedEventMaintenance(value.PlannedEventMaintenanceHistory);
         ValidateUtc(value.CreatedAtUtc, "created timestamp");
         ValidateUtc(value.UpdatedAtUtc, "updated timestamp");
     }
@@ -134,6 +182,9 @@ public static class ImportExportProcessor
         ValidateBible(state.Setup.Definition.InitialStoryBible, limits, storyGeneration);
         ValidateBible(state.CurrentStoryBible, limits, storyGeneration);
         ValidateMaintenance(state.StoryBibleMaintenanceHistory);
+        ValidatePlannedEvents(state.Setup.Definition.InitialPlannedEvents, limits, storyGeneration);
+        ValidatePlannedEvents(state.CurrentPlannedEvents, limits, storyGeneration);
+        ValidatePlannedEventMaintenance(state.PlannedEventMaintenanceHistory);
         ValidateUtc(state.StartedAtUtc, "started timestamp");
         if (state.LastActionAtUtc is { } lastAction) ValidateUtc(lastAction, "last-action timestamp");
 
@@ -159,6 +210,9 @@ public static class ImportExportProcessor
             if (turn.RelevantStoryBibleEntryIds.Distinct().Count() != turn.RelevantStoryBibleEntryIds.Count)
                 throw new InvalidDataException("A turn contains duplicate relevant-entry IDs.");
             ValidateChanges(turn.StoryBibleChanges);
+            if (turn.RelevantPlannedEventIds.Distinct().Count() != turn.RelevantPlannedEventIds.Count)
+                throw new InvalidDataException("A turn contains duplicate relevant Planned Event IDs.");
+            ValidatePlannedEventChanges(turn.PlannedEventChanges);
             ValidateUtc(turn.CompletedAtUtc, "turn timestamp");
             ValidateText(turn.Generation.ModelId, 1000, "generation model ID");
         }
@@ -206,6 +260,53 @@ public static class ImportExportProcessor
                 change.Operation == StoryBibleOperation.Replace && (change.Before is null || change.After is null) ||
                 change.Operation == StoryBibleOperation.Remove && (change.Before is null || change.After is not null))
                 throw new InvalidDataException("A Story Bible change has an invalid before/after shape.");
+        }
+    }
+
+    private static void ValidatePlannedEvents(PlannedEvents events, ContentLimitSettings limits, StoryGenerationSettings storyGeneration)
+    {
+        if (events.Entries.Select(x => x.Id).Any(x => x == Guid.Empty) ||
+            events.Entries.Select(x => x.Id).Distinct().Count() != events.Entries.Count)
+            throw new InvalidDataException("Planned Event IDs are invalid.");
+        foreach (var entry in events.Entries)
+        {
+            if (PlannedEventProcessor.ValidateEntry(entry.Description, entry.Importance, entry.Urgency, entry.LastRelevantTurnNumber, limits) is { } error)
+                throw new InvalidDataException(error);
+            if (entry.PrerequisiteEventIds.Contains(Guid.Empty))
+                throw new InvalidDataException("A Planned Event lists an empty prerequisite ID.");
+        }
+        if (PlannedEventProcessor.ValidateRelationships(events) is { } relationshipError)
+            throw new InvalidDataException(relationshipError);
+        if (!PlannedEventProcessor.IsWithinLimits(events, storyGeneration))
+            throw new InvalidDataException("The Planned Events exceed the configured Planned Event limits.");
+    }
+
+    private static void ValidatePlannedEventMaintenance(IReadOnlyList<PlannedEventMaintenanceRecord> records)
+    {
+        if (records.Select(x => x.Id).Any(x => x == Guid.Empty) ||
+            records.Select(x => x.Id).Distinct().Count() != records.Count)
+            throw new InvalidDataException("Planned Event maintenance IDs are invalid.");
+        foreach (var record in records)
+        {
+            if (record.Limits.MaxEntries <= 0 || record.Limits.MaxEntryCharacters <= 0 || record.Limits.MaxTotalCharacters <= 0)
+                throw new InvalidDataException("A Planned Event maintenance limit snapshot is invalid.");
+            ValidatePlannedEventChanges(record.Changes);
+            ValidateUtc(record.CompletedAtUtc, "maintenance timestamp");
+        }
+    }
+
+    private static void ValidatePlannedEventChanges(IReadOnlyList<AppliedPlannedEventChange> changes)
+    {
+        foreach (var change in changes)
+        {
+            if (change.EntryId == Guid.Empty ||
+                change.Before is not null && change.Before.Id != change.EntryId ||
+                change.After is not null && change.After.Id != change.EntryId)
+                throw new InvalidDataException("A Planned Event change has inconsistent IDs.");
+            if (change.Operation == PlannedEventOperation.Add && (change.Before is not null || change.After is null) ||
+                change.Operation == PlannedEventOperation.Replace && (change.Before is null || change.After is null) ||
+                change.Operation == PlannedEventOperation.Remove && (change.Before is null || change.After is not null))
+                throw new InvalidDataException("A Planned Event change has an invalid before/after shape.");
         }
     }
 

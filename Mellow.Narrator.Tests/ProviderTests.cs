@@ -13,7 +13,7 @@ public sealed class ProviderTests
     public async Task TraceLogging_IncludesBodiesButNeverCredential()
     {
         var handler = new StubHandler(_ => Task.FromResult(Response(
-            """{"refinedStoryPrompt":"PRIVATE RESPONSE TOP-SECRET-KEY","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"private","name":"Fact","knownFacts":["PRIVATE RESPONSE TOP-SECRET-KEY"],"secretFacts":[],"importance":4}]}""")));
+            """{"refinedStoryPrompt":"PRIVATE RESPONSE TOP-SECRET-KEY","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"private","name":"Fact","knownFacts":["PRIVATE RESPONSE TOP-SECRET-KEY"],"secretFacts":[],"importance":4}],"initialPlannedEvents":[]}""")));
         var informationLogger = new CaptureLogger<OpenAiCompatibleProvider>();
         var informationProvider = new OpenAiCompatibleProvider(
             new HttpClient(handler),
@@ -160,7 +160,7 @@ public sealed class ProviderTests
         {
             captured = request;
             body = request.Content is null ? null : await request.Content.ReadAsStringAsync();
-            var content = """{"refinedStoryPrompt":"A red moon story.","suggestedTitle":"Red Moon","initialEventsPrompt":"The moon glows ominously overhead.","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["The moon is red."],"secretFacts":[],"importance":4}]}""";
+            var content = """{"refinedStoryPrompt":"A red moon story.","suggestedTitle":"Red Moon","initialEventsPrompt":"The moon glows ominously overhead.","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["The moon is red."],"secretFacts":[],"importance":4}],"initialPlannedEvents":[]}""";
             var envelope = System.Text.Json.JsonSerializer.Serialize(new
             {
                 id = "response-1",
@@ -200,8 +200,8 @@ public sealed class ProviderTests
             requests++;
             bodies.Add(await request.Content!.ReadAsStringAsync());
             var content = requests == 1
-                ? """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["Red"],"secretFacts":[],"importance":9}]}"""
-                : """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["Red"],"secretFacts":[],"importance":4}]}""";
+                ? """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["Red"],"secretFacts":[],"importance":9}],"initialPlannedEvents":[]}"""
+                : """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["Red"],"secretFacts":[],"importance":4}],"initialPlannedEvents":[]}""";
             return Response(content);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
@@ -222,7 +222,7 @@ public sealed class ProviderTests
         var handler = new StubHandler(_ =>
         {
             requests++;
-            var content = """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"note":"unexpected extra field"}""";
+            var content = """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[],"note":"unexpected extra field"}""";
             return Task.FromResult(Response(content));
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
@@ -240,7 +240,7 @@ public sealed class ProviderTests
         var handler = new StubHandler(async request =>
         {
             body = await request.Content!.ReadAsStringAsync();
-            return Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[]}""");
+            return Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[]}""");
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
 
@@ -265,13 +265,14 @@ public sealed class ProviderTests
             requests++;
             body = await request.Content!.ReadAsStringAsync();
             return Response($$$"""
-                {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":["{{{entry.Id}}}","{{{entry.Id}}}","{{{unknown}}}","not-a-uuid",42,null],"storyBibleUpdates":[]}
+                {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":["{{{entry.Id}}}","{{{entry.Id}}}","{{{unknown}}}","not-a-uuid",42,null],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[]}
                 """);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
-            new("Story", "Prompt", new([entry])),
+            new("Story", "Prompt", "", new([entry]), PlannedEvents.Empty),
             new([entry]),
+            PlannedEvents.Empty,
             [],
             "Continue",
             1);
@@ -289,6 +290,120 @@ public sealed class ProviderTests
     }
 
     [Fact]
+    public async Task GenerateTurn_IncludesPlannedEventsInTheStoryContextMessage()
+    {
+        string? body = null;
+        var handler = new StubHandler(async request =>
+        {
+            body = await request.Content!.ReadAsStringAsync();
+            return Response("""
+                {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[]}
+                """);
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The bridge must collapse.", 5, 3, [], 0);
+        var context = new GenerationContext(
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty),
+            new([]),
+            new([plannedEvent]),
+            [],
+            "Continue",
+            1);
+
+        await provider.GenerateTurnAsync(Settings(), null, context);
+
+        Assert.Contains("The bridge must collapse.", body);
+        Assert.Contains("plannedEvents", body);
+    }
+
+    [Fact]
+    public async Task GenerateTurn_ParsesPlannedEventUpdatesAndRelevantIds()
+    {
+        var existing = new PlannedEvent(Guid.NewGuid(), "Existing plot point.", 3, 3, [], 0);
+        var handler = new StubHandler(_ => Task.FromResult(Response($$$"""
+            {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":["{{{existing.Id}}}"],"plannedEventUpdates":[{"operation":"add","entryId":null,"entry":{"description":"A new complication.","importance":2,"urgency":4,"prerequisiteEventIds":[]},"outcome":null}]}
+            """)));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty),
+            new([]),
+            new([existing]),
+            [],
+            "Continue",
+            1);
+
+        var result = await provider.GenerateTurnAsync(Settings(), null, context);
+
+        Assert.Equal(existing.Id, Assert.Single(result.RelevantPlannedEventIds));
+        var update = Assert.Single(result.PlannedEventUpdates);
+        Assert.Equal(PlannedEventOperation.Add, update.Operation);
+        Assert.Equal("A new complication.", update.Entry!.Description);
+        Assert.Equal(2, update.Entry.Importance);
+        Assert.Equal(4, update.Entry.Urgency);
+    }
+
+    [Fact]
+    public async Task GenerateTurn_RejectsPlannedEventRemovalMissingOutcome()
+    {
+        var existing = new PlannedEvent(Guid.NewGuid(), "Existing plot point.", 3, 3, [], 0);
+        var requests = 0;
+        var handler = new StubHandler(_ =>
+        {
+            requests++;
+            return Task.FromResult(Response($$$"""
+                {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[{"operation":"remove","entryId":"{{{existing.Id}}}","entry":null,"outcome":null}]}
+                """));
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty),
+            new([]),
+            new([existing]),
+            [],
+            "Continue",
+            1);
+
+        // The stub always returns the same invalid payload, so the one automatic corrective retry also
+        // fails validation and the exception from that second attempt propagates instead of being retried again.
+        await Assert.ThrowsAsync<JsonException>(() => provider.GenerateTurnAsync(Settings(), null, context));
+        Assert.Equal(2, requests);
+    }
+
+    [Fact]
+    public async Task GenerateTurn_RejectsPlannedEventRemovalWithInvalidOutcome()
+    {
+        var existing = new PlannedEvent(Guid.NewGuid(), "Existing plot point.", 3, 3, [], 0);
+        var handler = new StubHandler(_ => Task.FromResult(Response($$$"""
+            {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[{"operation":"remove","entryId":"{{{existing.Id}}}","entry":null,"outcome":"maybe"}]}
+            """)));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty),
+            new([]),
+            new([existing]),
+            [],
+            "Continue",
+            1);
+
+        await Assert.ThrowsAsync<JsonException>(() => provider.GenerateTurnAsync(Settings(), null, context));
+    }
+
+    [Fact]
+    public async Task GenerateDefinition_ParsesInitialPlannedEvents()
+    {
+        var handler = new StubHandler(_ => Task.FromResult(Response(
+            """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[{"description":"The tower must fall.","importance":5,"urgency":2,"prerequisiteEventIds":[]}]}""")));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+
+        var result = await provider.GenerateStoryDefinitionAsync(Settings(), null, "Story");
+
+        var plannedEvent = Assert.Single(result.InitialPlannedEvents);
+        Assert.Equal("The tower must fall.", plannedEvent.Description);
+        Assert.Equal(5, plannedEvent.Importance);
+        Assert.Equal(2, plannedEvent.Urgency);
+    }
+
+    [Fact]
     public async Task GenerateTurn_SubstitutesConfiguredSuggestedActionCountIntoPromptAndSchema()
     {
         string? body = null;
@@ -296,13 +411,14 @@ public sealed class ProviderTests
         {
             body = await request.Content!.ReadAsStringAsync();
             return Response("""
-                {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["A","B","C","D"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+                {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["A","B","C","D"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[]}
                 """);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
-            new("Story", "Prompt", new([])),
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty),
             new([]),
+            PlannedEvents.Empty,
             [],
             "Continue",
             1);
@@ -328,13 +444,14 @@ public sealed class ProviderTests
         {
             body = await request.Content!.ReadAsStringAsync();
             return Response("""
-                {"turnNumber":1,"acknowledgedPlayerAction":"Leap over the hole","narration":"You catch the far edge.","suggestedActions":["Pull yourself up","Call for help"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+                {"turnNumber":1,"acknowledgedPlayerAction":"Leap over the hole","narration":"You catch the far edge.","suggestedActions":["Pull yourself up","Call for help"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[]}
                 """);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
-            new("Story", "Prompt", new([])),
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty),
             new([]),
+            PlannedEvents.Empty,
             [],
             "Leap over the hole",
             1);
@@ -376,13 +493,13 @@ public sealed class ProviderTests
         {
             body = await request.Content!.ReadAsStringAsync();
             return Response("""
-                {"turnNumber":2,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["A","B"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+                {"turnNumber":2,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["A","B"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[]}
                 """);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
-        var definition = new StoryDefinitionSnapshot("Story", "Prompt", new([])) { InitialEventsPrompt = "The village is under curfew." };
-        var recent = new StoryTurn(Guid.NewGuid(), Guid.NewGuid(), 1, "Wait", "Nothing happens.", [], [], [], DateTimeOffset.UtcNow, new("model", null, null, null));
-        var context = new GenerationContext(definition, new([]), [recent], "Continue", 2);
+        var definition = new StoryDefinitionSnapshot("Story", "Prompt", "The village is under curfew.", new([]), PlannedEvents.Empty);
+        var recent = new StoryTurn(Guid.NewGuid(), Guid.NewGuid(), 1, "Wait", "Nothing happens.", [], [], [], [], [], DateTimeOffset.UtcNow, new("model", null, null, null));
+        var context = new GenerationContext(definition, new([]), PlannedEvents.Empty, [recent], "Continue", 2);
         var settings = Settings() with { StoryGeneration = Settings().StoryGeneration with { RecentTurnCount = 3 } };
 
         await provider.GenerateTurnAsync(settings, null, context);
@@ -398,13 +515,13 @@ public sealed class ProviderTests
         {
             body = await request.Content!.ReadAsStringAsync();
             return Response("""
-                {"turnNumber":2,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["A","B"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+                {"turnNumber":2,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["A","B"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[]}
                 """);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
-        var definition = new StoryDefinitionSnapshot("Story", "Prompt", new([])) { InitialEventsPrompt = "The village is under curfew." };
-        var recent = new StoryTurn(Guid.NewGuid(), Guid.NewGuid(), 1, "Wait", "Nothing happens.", [], [], [], DateTimeOffset.UtcNow, new("model", null, null, null));
-        var context = new GenerationContext(definition, new([]), [recent], "Continue", 2);
+        var definition = new StoryDefinitionSnapshot("Story", "Prompt", "The village is under curfew.", new([]), PlannedEvents.Empty);
+        var recent = new StoryTurn(Guid.NewGuid(), Guid.NewGuid(), 1, "Wait", "Nothing happens.", [], [], [], [], [], DateTimeOffset.UtcNow, new("model", null, null, null));
+        var context = new GenerationContext(definition, new([]), PlannedEvents.Empty, [recent], "Continue", 2);
         var settings = Settings() with { StoryGeneration = Settings().StoryGeneration with { RecentTurnCount = 1 } };
 
         await provider.GenerateTurnAsync(settings, null, context);
@@ -420,13 +537,14 @@ public sealed class ProviderTests
         {
             requests++;
             return Task.FromResult(Response("""
-                {"turnNumber":2,"acknowledgedPlayerAction":"Current action","narration":"A new scene unfolds.","suggestedActions":["Only one"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+                {"turnNumber":2,"acknowledgedPlayerAction":"Current action","narration":"A new scene unfolds.","suggestedActions":["Only one"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[]}
                 """));
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
-            new("Story", "Prompt", new([])),
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty),
             new([]),
+            PlannedEvents.Empty,
             [],
             "Current action",
             2);
@@ -446,13 +564,14 @@ public sealed class ProviderTests
             requests++;
             var acknowledged = requests == 1 ? "Previous action" : "Current action";
             return Task.FromResult(Response($$"""
-                {"turnNumber":2,"acknowledgedPlayerAction":"{{acknowledged}}","narration":"A new scene unfolds.","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+                {"turnNumber":2,"acknowledgedPlayerAction":"{{acknowledged}}","narration":"A new scene unfolds.","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[]}
                 """));
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
-            new("Story", "Prompt", new([])),
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty),
             new([]),
+            PlannedEvents.Empty,
             [],
             "Current action",
             2);
@@ -471,13 +590,14 @@ public sealed class ProviderTests
         {
             requests++;
             return Task.FromResult(Response("""
-                {"turnNumber":2,"acknowledgedPlayerAction":"  Current   action.  ","narration":"A new scene unfolds.","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+                {"turnNumber":2,"acknowledgedPlayerAction":"  Current   action.  ","narration":"A new scene unfolds.","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[]}
                 """));
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
-            new("Story", "Prompt", new([])),
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty),
             new([]),
+            PlannedEvents.Empty,
             [],
             "Current action",
             2);
@@ -504,7 +624,7 @@ public sealed class ProviderTests
                 ? previousNarration.Replace("silent corridor", "quiet corridor", StringComparison.Ordinal)
                 : "Your new decision changes the situation and opens an entirely different path.";
             return Task.FromResult(Response($$"""
-                {"turnNumber":2,"acknowledgedPlayerAction":"Choose another path","narration":"{{narration}}","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+                {"turnNumber":2,"acknowledgedPlayerAction":"Choose another path","narration":"{{narration}}","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[]}
                 """));
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
@@ -518,11 +638,14 @@ public sealed class ProviderTests
             [],
             [],
             [],
+            [],
+            [],
             DateTimeOffset.UtcNow,
             new("model", null, null, null));
         var context = new GenerationContext(
-            new("Story", "Prompt", new([])),
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty),
             new([]),
+            PlannedEvents.Empty,
             [recent],
             "Choose another path",
             2);
@@ -537,12 +660,13 @@ public sealed class ProviderTests
     public async Task GenerateOpening_RequiresTurnZeroAndNullAcknowledgedAction()
     {
         var handler = new StubHandler(_ => Task.FromResult(Response("""
-            {"turnNumber":0,"acknowledgedPlayerAction":null,"narration":"The story begins.","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[]}
+            {"turnNumber":0,"acknowledgedPlayerAction":null,"narration":"The story begins.","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[]}
             """)));
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
-            new("Story", "Prompt", new([])),
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty),
             new([]),
+            PlannedEvents.Empty,
             [],
             null,
             0);
@@ -563,13 +687,14 @@ public sealed class ProviderTests
             requests++;
             requestBody = await request.Content!.ReadAsStringAsync();
             return Response($$$"""
-                {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"A new place appears.","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[{"operation":"add","entryId":"{{{modelCreatedId}}}","entry":{"category":"location","name":"New Place","knownFacts":["A newly discovered place."],"secretFacts":[],"importance":3}}]}
+                {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"A new place appears.","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[{"operation":"add","entryId":"{{{modelCreatedId}}}","entry":{"category":"location","name":"New Place","knownFacts":["A newly discovered place."],"secretFacts":[],"importance":3}}],"relevantPlannedEventIds":[],"plannedEventUpdates":[]}
                 """);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
-            new("Story", "Prompt", new([])),
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty),
             new([]),
+            PlannedEvents.Empty,
             [],
             "Continue",
             1);
@@ -590,7 +715,7 @@ public sealed class ProviderTests
             requests++;
             return Task.FromResult(requests == 1
                 ? new HttpResponseMessage(HttpStatusCode.RequestTimeout)
-                : Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[]}"""));
+                : Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[]}"""));
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var settings = Settings() with { Retry = Settings().Retry with { InitialDelay = TimeSpan.FromMilliseconds(1) } };
@@ -626,7 +751,7 @@ public sealed class ProviderTests
                 return Response("""{"ok":true}""");
             }
             generatedBody = body;
-            return Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["Red"],"secretFacts":[],"importance":4}]}""");
+            return Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["Red"],"secretFacts":[],"importance":4}],"initialPlannedEvents":[]}""");
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var settings = Settings();

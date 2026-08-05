@@ -19,5 +19,30 @@ and often should have both known and secret facts about the same subject; do not
 separate entries. Either list may be empty, but not both. Include every durable fact required to
 narrate consistently, avoid duplicate entries for the same subject, and assign importance 1 through 5.
 Also propose a concise, evocative title for the story; it is used only if the user did not already
-provide one. Return JSON only with refinedStoryPrompt, suggestedTitle, initialEventsPrompt, and
-initialStoryBibleEntries.
+provide one.
+
+Also propose initialPlannedEvents: future plot points the narrator should steer the story toward as
+it unfolds, kept secret from the player for the entire story (never their content, only their
+downstream effects, may surface in narration). Each has a description and two independent ratings
+from 1 through 5, importance and urgency. Importance 5 is mandatory: the narrator is required to
+find a way to make that event happen no matter how the player's choices diverge, and once proposed
+it can only ever be removed by actually occurring in the story, never dropped or demoted. Reserve
+importance 5 for events essential to the story's premise or shape; use lower importance for
+developments that add texture but can be allowed to fall away if the player steers elsewhere.
+Urgency is independent of importance and says how soon and directly the narrator should steer scenes
+toward the event: 5 means work it into the very next scenes, 1 means let it emerge naturally whenever
+the unfolding story happens to head that way. A mandatory event can still have low urgency (it must
+eventually happen, but there is no rush) and a minor event can have high urgency (small, but should
+happen very soon if it happens at all). Do not duplicate a fact already covered by a Story Bible
+entry or the Initial Events prompt; a Planned Event is for something that has not happened yet, not
+for recording current state.
+
+Each Planned Event also has prerequisiteEventIds, a list of other Planned Event IDs that must occur
+first. Leave it empty here: at this stage no Planned Event has an ID yet, so there is nothing valid
+to reference. If one event should logically depend on another, describe that ordering in its
+description instead (for example, "once the hero has learned the prophecy, ..."), and the dependency
+can be formalized with a real prerequisiteEventIds reference in a later turn once both events have
+been assigned IDs and appear in the plannedEvents context.
+
+Return JSON only with refinedStoryPrompt, suggestedTitle, initialEventsPrompt,
+initialStoryBibleEntries, and initialPlannedEvents.

@@ -138,14 +138,18 @@ public sealed class NarratorApplication(
             definitionSummaries.Select(x => definitions.GetAsync(x.Id, cancellationToken)));
         var definitionCount = loadedDefinitions.Count(x =>
             x is not null && !StoryBibleProcessor.IsWithinLimits(x.InitialStoryBible, proposed));
+        var plannedEventDefinitionCount = loadedDefinitions.Count(x =>
+            x is not null && !PlannedEventProcessor.IsWithinLimits(x.InitialPlannedEvents, proposed));
 
         var stateSummaries = await states.ListAsync(cancellationToken);
         var loadedStates = await Task.WhenAll(
             stateSummaries.Select(x => states.GetAsync(x.Id, cancellationToken)));
         var stateCount = loadedStates.Count(x =>
             x is not null && !StoryBibleProcessor.IsWithinLimits(x.CurrentStoryBible, proposed));
+        var plannedEventStateCount = loadedStates.Count(x =>
+            x is not null && !PlannedEventProcessor.IsWithinLimits(x.CurrentPlannedEvents, proposed));
 
-        return new(definitionCount, stateCount);
+        return new(definitionCount, stateCount, plannedEventDefinitionCount, plannedEventStateCount);
     }
 
     public async Task<StoryDefinition> GenerateDefinitionAsync(
@@ -178,6 +182,10 @@ public sealed class NarratorApplication(
             throw new NarratorException("The generated initial Story Bible contains too many entries.");
         foreach (var entry in generated.InitialStoryBibleEntries)
             ValidateGeneratedEntry(entry, settings.ContentLimits);
+        if (generated.InitialPlannedEvents.Count > SettingsValidator.MaxPlannedEventsUpperBound)
+            throw new NarratorException("The generated initial Planned Events contain too many entries.");
+        foreach (var plannedEvent in generated.InitialPlannedEvents)
+            ValidateGeneratedPlannedEvent(plannedEvent, settings.ContentLimits);
         var now = timeProvider.GetUtcNow();
         StoryDefinition? source = null;
         if (overwrite && draft.SourceStoryDefinitionId is { } sourceId)
@@ -197,6 +205,15 @@ public sealed class NarratorApplication(
         if (culls.Count > 0)
             maintenance.Add(new(idGenerator.NewId(), StoryBibleMaintenanceReason.GeneratedBibleLimitCull,
                 Limits(settings), culls, now));
+        var rawPlannedEvents = new PlannedEvents(generated.InitialPlannedEvents.Select(x =>
+            new PlannedEvent(idGenerator.NewId(), x.Description.Trim(), x.Importance, x.Urgency, x.PrerequisiteEventIds, 0)).ToArray());
+        if (PlannedEventProcessor.ValidateRelationships(rawPlannedEvents) is { } initialRelationshipError)
+            throw new NarratorException(initialRelationshipError);
+        var (plannedEvents, plannedEventCulls) = PlannedEventProcessor.CullToLimits(rawPlannedEvents, settings.StoryGeneration);
+        var plannedEventMaintenance = source?.PlannedEventMaintenanceHistory.ToList() ?? [];
+        if (plannedEventCulls.Count > 0)
+            plannedEventMaintenance.Add(new(idGenerator.NewId(), PlannedEventMaintenanceReason.GeneratedLimitCull,
+                PlannedEventLimits(settings), plannedEventCulls, now));
         StoryDefinition definition;
         await _definitionCreateGate.WaitAsync(cancellationToken);
         try
@@ -206,21 +223,22 @@ public sealed class NarratorApplication(
                 source?.Id ?? targetId,
                 title,
                 generated.RefinedStoryPrompt.Trim(),
+                generated.InitialEventsPrompt.Trim(),
                 bible,
                 maintenance,
+                plannedEvents,
+                plannedEventMaintenance,
                 source?.SortOrder ?? (definitionSummaries.Count == 0 ? 0 : definitionSummaries.Max(x => x.SortOrder) + 1),
                 source?.CreatedAtUtc ?? now,
-                now)
-            {
-                InitialEventsPrompt = generated.InitialEventsPrompt.Trim()
-            };
+                now);
             await definitions.SaveAsync(definition, cancellationToken);
         }
         finally { _definitionCreateGate.Release(); }
         _logger.LogInformation(
-            "Story Definition {StoryDefinitionId} saved with {BibleEntryCount} initial Story Bible entries.",
+            "Story Definition {StoryDefinitionId} saved with {BibleEntryCount} initial Story Bible entries and {PlannedEventCount} initial Planned Events.",
             definition.Id,
-            definition.InitialStoryBible.Entries.Count);
+            definition.InitialStoryBible.Entries.Count,
+            definition.InitialPlannedEvents.Entries.Count);
         return definition;
     }
 
@@ -229,15 +247,31 @@ public sealed class NarratorApplication(
         var definition = await definitions.GetAsync(definitionId, cancellationToken) ?? throw new NarratorException("Story Definition not found.");
         var settings = await settingsStore.LoadAsync(cancellationToken);
         var (bible, changes) = StoryBibleProcessor.CullToLimits(definition.InitialStoryBible, settings.StoryGeneration);
-        if (changes.Count == 0) return definition;
-        var history = definition.StoryBibleMaintenanceHistory.Append(new StoryBibleMaintenanceRecord(
-            idGenerator.NewId(), StoryBibleMaintenanceReason.UserApprovedLimitCull, Limits(settings), changes, timeProvider.GetUtcNow())).ToArray();
-        var updated = definition with { InitialStoryBible = bible, StoryBibleMaintenanceHistory = history, UpdatedAtUtc = timeProvider.GetUtcNow() };
+        var (plannedEvents, plannedEventChanges) = PlannedEventProcessor.CullToLimits(definition.InitialPlannedEvents, settings.StoryGeneration);
+        if (changes.Count == 0 && plannedEventChanges.Count == 0) return definition;
+        var now = timeProvider.GetUtcNow();
+        var history = changes.Count == 0
+            ? definition.StoryBibleMaintenanceHistory
+            : definition.StoryBibleMaintenanceHistory.Append(new StoryBibleMaintenanceRecord(
+                idGenerator.NewId(), StoryBibleMaintenanceReason.UserApprovedLimitCull, Limits(settings), changes, now)).ToArray();
+        var plannedEventHistory = plannedEventChanges.Count == 0
+            ? definition.PlannedEventMaintenanceHistory
+            : definition.PlannedEventMaintenanceHistory.Append(new PlannedEventMaintenanceRecord(
+                idGenerator.NewId(), PlannedEventMaintenanceReason.UserApprovedLimitCull, PlannedEventLimits(settings), plannedEventChanges, now)).ToArray();
+        var updated = definition with
+        {
+            InitialStoryBible = bible,
+            StoryBibleMaintenanceHistory = history,
+            InitialPlannedEvents = plannedEvents,
+            PlannedEventMaintenanceHistory = plannedEventHistory,
+            UpdatedAtUtc = now
+        };
         await definitions.SaveAsync(updated, cancellationToken);
         _logger.LogInformation(
-            "Story Definition {StoryDefinitionId} Story Bible culled with {ChangeCount} changes.",
+            "Story Definition {StoryDefinitionId} Story Bible culled with {ChangeCount} changes; Planned Events culled with {PlannedEventChangeCount} changes.",
             definitionId,
-            changes.Count);
+            changes.Count,
+            plannedEventChanges.Count);
         return updated;
     }
 
@@ -246,15 +280,30 @@ public sealed class NarratorApplication(
         var state = await states.GetAsync(stateId, cancellationToken) ?? throw new NarratorException("Story State not found.");
         var settings = await settingsStore.LoadAsync(cancellationToken);
         var (bible, changes) = StoryBibleProcessor.CullToLimits(state.CurrentStoryBible, settings.StoryGeneration);
-        if (changes.Count == 0) return state;
-        var history = state.StoryBibleMaintenanceHistory.Append(new StoryBibleMaintenanceRecord(
-            idGenerator.NewId(), StoryBibleMaintenanceReason.UserApprovedLimitCull, Limits(settings), changes, timeProvider.GetUtcNow())).ToArray();
-        var updated = state with { CurrentStoryBible = bible, StoryBibleMaintenanceHistory = history };
+        var (plannedEvents, plannedEventChanges) = PlannedEventProcessor.CullToLimits(state.CurrentPlannedEvents, settings.StoryGeneration);
+        if (changes.Count == 0 && plannedEventChanges.Count == 0) return state;
+        var now = timeProvider.GetUtcNow();
+        var history = changes.Count == 0
+            ? state.StoryBibleMaintenanceHistory
+            : state.StoryBibleMaintenanceHistory.Append(new StoryBibleMaintenanceRecord(
+                idGenerator.NewId(), StoryBibleMaintenanceReason.UserApprovedLimitCull, Limits(settings), changes, now)).ToArray();
+        var plannedEventHistory = plannedEventChanges.Count == 0
+            ? state.PlannedEventMaintenanceHistory
+            : state.PlannedEventMaintenanceHistory.Append(new PlannedEventMaintenanceRecord(
+                idGenerator.NewId(), PlannedEventMaintenanceReason.UserApprovedLimitCull, PlannedEventLimits(settings), plannedEventChanges, now)).ToArray();
+        var updated = state with
+        {
+            CurrentStoryBible = bible,
+            StoryBibleMaintenanceHistory = history,
+            CurrentPlannedEvents = plannedEvents,
+            PlannedEventMaintenanceHistory = plannedEventHistory
+        };
         await states.SaveAsync(updated, cancellationToken);
         _logger.LogInformation(
-            "Story State {StoryStateId} Story Bible culled with {ChangeCount} changes.",
+            "Story State {StoryStateId} Story Bible culled with {ChangeCount} changes; Planned Events culled with {PlannedEventChangeCount} changes.",
             stateId,
-            changes.Count);
+            changes.Count,
+            plannedEventChanges.Count);
         return updated;
     }
 
@@ -301,6 +350,49 @@ public sealed class NarratorApplication(
         return updated;
     }
 
+    public async Task<StoryDefinition> UpdateInitialPlannedEventsAsync(Guid definitionId, PlannedEvents events, CancellationToken cancellationToken = default)
+    {
+        var definition = await definitions.GetAsync(definitionId, cancellationToken) ?? throw new NarratorException("Story Definition not found.");
+        var settings = await settingsStore.LoadAsync(cancellationToken);
+        var normalized = NormalizeManualPlannedEvents(events, settings.ContentLimits);
+        if (!PlannedEventProcessor.IsWithinLimits(normalized, settings.StoryGeneration))
+            throw new NarratorException("The Planned Events exceed current limits. Increase the limits or cull them first.");
+        var now = timeProvider.GetUtcNow();
+        var changes = DiffManualPlannedEventEdit(definition.InitialPlannedEvents, normalized);
+        var history = changes.Count == 0
+            ? definition.PlannedEventMaintenanceHistory
+            : definition.PlannedEventMaintenanceHistory.Append(new PlannedEventMaintenanceRecord(
+                idGenerator.NewId(), PlannedEventMaintenanceReason.ManualEdit, PlannedEventLimits(settings), changes, now)).ToArray();
+        var updated = definition with { InitialPlannedEvents = normalized, PlannedEventMaintenanceHistory = history, UpdatedAtUtc = now };
+        await definitions.SaveAsync(updated, cancellationToken);
+        _logger.LogInformation(
+            "Story Definition {StoryDefinitionId} Planned Events manually updated with {ChangeCount} changes.",
+            definitionId,
+            changes.Count);
+        return updated;
+    }
+
+    public async Task<StoryState> UpdateCurrentPlannedEventsAsync(Guid stateId, PlannedEvents events, CancellationToken cancellationToken = default)
+    {
+        var state = await states.GetAsync(stateId, cancellationToken) ?? throw new NarratorException("Story State not found.");
+        var settings = await settingsStore.LoadAsync(cancellationToken);
+        var normalized = NormalizeManualPlannedEvents(events, settings.ContentLimits);
+        if (!PlannedEventProcessor.IsWithinLimits(normalized, settings.StoryGeneration))
+            throw new NarratorException("The Planned Events exceed current limits. Increase the limits or cull them first.");
+        var changes = DiffManualPlannedEventEdit(state.CurrentPlannedEvents, normalized);
+        var history = changes.Count == 0
+            ? state.PlannedEventMaintenanceHistory
+            : state.PlannedEventMaintenanceHistory.Append(new PlannedEventMaintenanceRecord(
+                idGenerator.NewId(), PlannedEventMaintenanceReason.ManualEdit, PlannedEventLimits(settings), changes, timeProvider.GetUtcNow())).ToArray();
+        var updated = state with { CurrentPlannedEvents = normalized, PlannedEventMaintenanceHistory = history };
+        await states.SaveAsync(updated, cancellationToken);
+        _logger.LogInformation(
+            "Story State {StoryStateId} Planned Events manually updated with {ChangeCount} changes.",
+            stateId,
+            changes.Count);
+        return updated;
+    }
+
     public async Task<(StoryState State, StoryTurn Opening)> StartStoryAsync(
         StartStoryDraft draft,
         Guid targetStateId,
@@ -315,17 +407,23 @@ public sealed class NarratorApplication(
             settings.ModelId);
         if (!StoryBibleProcessor.IsWithinLimits(draft.Definition.InitialStoryBible, settings.StoryGeneration))
             throw new NarratorException("The initial Story Bible exceeds current limits. Increase the limits or cull it first.");
+        if (!PlannedEventProcessor.IsWithinLimits(draft.Definition.InitialPlannedEvents, settings.StoryGeneration))
+            throw new NarratorException("The initial Planned Events exceed current limits. Increase the limits or cull them first.");
 
-        // Entries removed by an earlier cull can still be referenced by StoryBibleMaintenanceHistory below,
-        // so ids are mapped lazily (not just for the entries currently in the bible) to keep every reference
-        // to the same old id pointing at the same new id.
+        // Entries removed by an earlier cull can still be referenced by StoryBibleMaintenanceHistory/
+        // PlannedEventMaintenanceHistory below, so ids are mapped lazily (not just for the entries
+        // currently in the bible/planned events) to keep every reference to the same old id pointing at
+        // the same new id. Bible entry ids and planned event ids are both freshly generated GUIDs and
+        // never collide, so one shared map safely covers both.
         var idMap = new Dictionary<Guid, Guid>();
         Guid MapId(Guid oldId) => idMap.TryGetValue(oldId, out var mapped) ? mapped : idMap[oldId] = idGenerator.NewId();
 
         var initial = new StoryBible(draft.Definition.InitialStoryBible.Entries
             .Select(x => x with { Id = MapId(x.Id), LastRelevantTurnNumber = 0 }).ToArray());
-        var snapshot = draft.Definition with { InitialStoryBible = initial };
-        var context = new GenerationContext(snapshot, initial, [], null, 0);
+        var initialPlannedEvents = new PlannedEvents(draft.Definition.InitialPlannedEvents.Entries
+            .Select(x => x with { Id = MapId(x.Id), LastRelevantTurnNumber = 0 }).ToArray());
+        var snapshot = draft.Definition with { InitialStoryBible = initial, InitialPlannedEvents = initialPlannedEvents };
+        var context = new GenerationContext(snapshot, initial, initialPlannedEvents, [], null, 0);
         var response = await provider.GenerateOpeningAsync(settings, credential, context, cancellationToken);
         response = ValidateGenerationResponse(response, settings.ContentLimits);
         var relevant = response.RelevantStoryBibleEntryIds
@@ -333,7 +431,22 @@ public sealed class NarratorApplication(
             .Distinct()
             .ToArray();
         var applied = StoryBibleProcessor.Apply(initial, relevant, response.StoryBibleUpdates, 0, settings.StoryGeneration, idGenerator.NewId);
+        var relevantPlannedEvents = response.RelevantPlannedEventIds
+            .Concat(initialPlannedEvents.Entries.Select(x => x.Id))
+            .Distinct()
+            .ToArray();
+        var appliedPlannedEvents = PlannedEventProcessor.Apply(
+            initialPlannedEvents, relevantPlannedEvents, response.PlannedEventUpdates, 0, settings.StoryGeneration, idGenerator.NewId);
         var maintenanceHistory = draft.StoryBibleMaintenanceHistory.Select(x => x with
+        {
+            Changes = x.Changes.Select(change => change with
+            {
+                EntryId = MapId(change.EntryId),
+                Before = change.Before is null ? null : change.Before with { Id = MapId(change.Before.Id) },
+                After = change.After is null ? null : change.After with { Id = MapId(change.After.Id) }
+            }).ToArray()
+        }).ToArray();
+        var plannedEventMaintenanceHistory = draft.PlannedEventMaintenanceHistory.Select(x => x with
         {
             Changes = x.Changes.Select(change => change with
             {
@@ -352,8 +465,9 @@ public sealed class NarratorApplication(
             var stateSummaries = await states.ListAsync(cancellationToken);
             state = new StoryState(stateId, snapshot.Title, draft.SourceStoryDefinitionId,
                 new(snapshot), applied.Bible, maintenanceHistory,
+                appliedPlannedEvents.Events, plannedEventMaintenanceHistory,
                 stateSummaries.Count == 0 ? 0 : stateSummaries.Max(x => x.SortOrder) + 1, now, null, 0);
-            turn = CreateTurn(stateId, 0, null, response, applied, settings.ModelId!, now);
+            turn = CreateTurn(stateId, 0, null, response, applied, appliedPlannedEvents, settings.ModelId!, now);
             await states.CreateAsync(state, turn, cancellationToken);
         }
         finally { _stateCreateGate.Release(); }
@@ -370,10 +484,13 @@ public sealed class NarratorApplication(
         if (action.Length > settings.ContentLimits.MaxPlayerActionCharacters) throw new NarratorException("The action exceeds the configured limit.");
         if (!StoryBibleProcessor.IsWithinLimits(state.CurrentStoryBible, settings.StoryGeneration))
             throw new NarratorException("The Story Bible exceeds current limits. Increase the limits or cull it first.");
+        if (!PlannedEventProcessor.IsWithinLimits(state.CurrentPlannedEvents, settings.StoryGeneration))
+            throw new NarratorException("The Planned Events exceed current limits. Increase the limits or cull them first.");
         var recent = await states.GetTurnsAsync(stateId, settings.StoryGeneration.RecentTurnCount, cancellationToken);
         var context = new GenerationContext(
             state.Setup.Definition,
             state.CurrentStoryBible,
+            state.CurrentPlannedEvents,
             recent,
             action,
             state.LastCommittedTurnSequence + 1);
@@ -392,9 +509,22 @@ public sealed class NarratorApplication(
             sequence,
             settings.StoryGeneration,
             idGenerator.NewId);
+        var appliedPlannedEvents = PlannedEventProcessor.Apply(
+            state.CurrentPlannedEvents,
+            response.RelevantPlannedEventIds,
+            response.PlannedEventUpdates,
+            sequence,
+            settings.StoryGeneration,
+            idGenerator.NewId);
         var now = timeProvider.GetUtcNow();
-        var next = state with { CurrentStoryBible = applied.Bible, LastActionAtUtc = now, LastCommittedTurnSequence = sequence };
-        var turn = CreateTurn(stateId, sequence, action, response, applied, settings.ModelId!, now);
+        var next = state with
+        {
+            CurrentStoryBible = applied.Bible,
+            CurrentPlannedEvents = appliedPlannedEvents.Events,
+            LastActionAtUtc = now,
+            LastCommittedTurnSequence = sequence
+        };
+        var turn = CreateTurn(stateId, sequence, action, response, applied, appliedPlannedEvents, settings.ModelId!, now);
         await states.CommitTurnAsync(next, turn, cancellationToken);
         _logger.LogInformation(
             "Turn {TurnSequence} committed for Story State {StoryStateId}.",
@@ -425,13 +555,17 @@ public sealed class NarratorApplication(
     }
 
     private StoryTurn CreateTurn(Guid stateId, int sequence, string? action, StoryGenerationResponse response,
-        StoryBibleApplyResult applied, string model, DateTimeOffset now) =>
+        StoryBibleApplyResult applied, PlannedEventApplyResult appliedPlannedEvents, string model, DateTimeOffset now) =>
         new(idGenerator.NewId(), stateId, sequence, action, response.Narration, response.SuggestedActions,
-            applied.RelevantEntryIds, applied.Changes, now,
-            new(model, response.ProviderResponseId, response.InputTokens, response.OutputTokens));
+            applied.RelevantEntryIds, applied.Changes,
+            appliedPlannedEvents.RelevantEntryIds, appliedPlannedEvents.Changes,
+            now, new(model, response.ProviderResponseId, response.InputTokens, response.OutputTokens));
 
     private static StoryBibleLimitSnapshot Limits(ApiConnectionSettings settings) =>
         new(settings.StoryGeneration.MaxStoryBibleEntries, settings.StoryGeneration.MaxStoryBibleEntryCharacters, settings.StoryGeneration.MaxStoryBibleCharacters);
+
+    private static PlannedEventLimitSnapshot PlannedEventLimits(ApiConnectionSettings settings) =>
+        new(settings.StoryGeneration.MaxPlannedEvents, settings.StoryGeneration.MaxPlannedEventCharacters, settings.StoryGeneration.MaxPlannedEventsCharacters);
 
     private static void ValidateDraft(StoryPromptDraft draft, ContentLimitSettings limits)
     {
@@ -453,6 +587,10 @@ public sealed class NarratorApplication(
             throw new NarratorException("The response contains too many Story Bible updates.");
         foreach (var update in response.StoryBibleUpdates.Where(x => x.Entry is not null))
             ValidateGeneratedEntry(update.Entry!, limits);
+        if (response.PlannedEventUpdates.Count > limits.MaxPlannedEventUpdatesPerResponse)
+            throw new NarratorException("The response contains too many Planned Event updates.");
+        foreach (var update in response.PlannedEventUpdates.Where(x => x.Entry is not null))
+            ValidateGeneratedPlannedEvent(update.Entry!, limits);
         return response;
     }
 
@@ -464,6 +602,15 @@ public sealed class NarratorApplication(
         int importance, int? lastRelevantTurnNumber, ContentLimitSettings limits)
     {
         if (StoryBibleProcessor.ValidateEntry(category, name, knownFacts, secretFacts, importance, lastRelevantTurnNumber, limits) is { } error)
+            throw new NarratorException(error);
+    }
+
+    private static void ValidateGeneratedPlannedEvent(ProposedPlannedEvent plannedEvent, ContentLimitSettings limits) =>
+        ValidatePlannedEventFields(plannedEvent.Description, plannedEvent.Importance, plannedEvent.Urgency, null, limits);
+
+    private static void ValidatePlannedEventFields(string description, int importance, int urgency, int? lastRelevantTurnNumber, ContentLimitSettings limits)
+    {
+        if (PlannedEventProcessor.ValidateEntry(description, importance, urgency, lastRelevantTurnNumber, limits) is { } error)
             throw new NarratorException(error);
     }
 
@@ -500,6 +647,46 @@ public sealed class NarratorApplication(
         foreach (var entry in before.Entries)
             if (!afterById.ContainsKey(entry.Id))
                 changes.Add(new(StoryBibleOperation.Remove, entry.Id, entry, null, StoryBibleChangeSource.ManualEdit));
+        return changes;
+    }
+
+    // Manual edits (via NarratorApplication) have no LLM-supplied outcome and are not subject to the
+    // mandatory-removal rule PlannedEventProcessor.Apply enforces on the LLM path - the author who set an
+    // event's importance in the first place is free to remove or demote it directly, same as Story Bible
+    // manual edits are unrestricted.
+    private PlannedEvents NormalizeManualPlannedEvents(PlannedEvents events, ContentLimitSettings limits)
+    {
+        var seenIds = new HashSet<Guid>();
+        var entries = new List<PlannedEvent>(events.Entries.Count);
+        foreach (var entry in events.Entries)
+        {
+            var id = entry.Id == Guid.Empty ? idGenerator.NewId() : entry.Id;
+            if (!seenIds.Add(id)) throw new NarratorException("Planned Event IDs must be unique.");
+            var description = entry.Description.Trim();
+            ValidatePlannedEventFields(description, entry.Importance, entry.Urgency, entry.LastRelevantTurnNumber, limits);
+            entries.Add(entry with { Id = id, Description = description });
+        }
+        var normalized = new PlannedEvents(entries);
+        if (PlannedEventProcessor.ValidateRelationships(normalized) is { } relationshipError)
+            throw new NarratorException(relationshipError);
+        return normalized;
+    }
+
+    private static IReadOnlyList<AppliedPlannedEventChange> DiffManualPlannedEventEdit(PlannedEvents before, PlannedEvents after)
+    {
+        var beforeById = before.Entries.ToDictionary(x => x.Id);
+        var afterById = after.Entries.ToDictionary(x => x.Id);
+        var changes = new List<AppliedPlannedEventChange>();
+        foreach (var entry in after.Entries)
+        {
+            if (!beforeById.TryGetValue(entry.Id, out var previous))
+                changes.Add(new(PlannedEventOperation.Add, entry.Id, null, entry, PlannedEventChangeSource.ManualEdit, null));
+            else if (previous != entry)
+                changes.Add(new(PlannedEventOperation.Replace, entry.Id, previous, entry, PlannedEventChangeSource.ManualEdit, null));
+        }
+        foreach (var entry in before.Entries)
+            if (!afterById.ContainsKey(entry.Id))
+                changes.Add(new(PlannedEventOperation.Remove, entry.Id, entry, null, PlannedEventChangeSource.ManualEdit, null));
         return changes;
     }
 }

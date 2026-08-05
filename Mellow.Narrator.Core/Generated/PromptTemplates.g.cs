@@ -27,8 +27,33 @@ internal static class GeneratedPromptTemplates
         separate entries. Either list may be empty, but not both. Include every durable fact required to
         narrate consistently, avoid duplicate entries for the same subject, and assign importance 1 through 5.
         Also propose a concise, evocative title for the story; it is used only if the user did not already
-        provide one. Return JSON only with refinedStoryPrompt, suggestedTitle, initialEventsPrompt, and
-        initialStoryBibleEntries.
+        provide one.
+
+        Also propose initialPlannedEvents: future plot points the narrator should steer the story toward as
+        it unfolds, kept secret from the player for the entire story (never their content, only their
+        downstream effects, may surface in narration). Each has a description and two independent ratings
+        from 1 through 5, importance and urgency. Importance 5 is mandatory: the narrator is required to
+        find a way to make that event happen no matter how the player's choices diverge, and once proposed
+        it can only ever be removed by actually occurring in the story, never dropped or demoted. Reserve
+        importance 5 for events essential to the story's premise or shape; use lower importance for
+        developments that add texture but can be allowed to fall away if the player steers elsewhere.
+        Urgency is independent of importance and says how soon and directly the narrator should steer scenes
+        toward the event: 5 means work it into the very next scenes, 1 means let it emerge naturally whenever
+        the unfolding story happens to head that way. A mandatory event can still have low urgency (it must
+        eventually happen, but there is no rush) and a minor event can have high urgency (small, but should
+        happen very soon if it happens at all). Do not duplicate a fact already covered by a Story Bible
+        entry or the Initial Events prompt; a Planned Event is for something that has not happened yet, not
+        for recording current state.
+
+        Each Planned Event also has prerequisiteEventIds, a list of other Planned Event IDs that must occur
+        first. Leave it empty here: at this stage no Planned Event has an ID yet, so there is nothing valid
+        to reference. If one event should logically depend on another, describe that ordering in its
+        description instead (for example, "once the hero has learned the prophecy, ..."), and the dependency
+        can be formalized with a real prerequisiteEventIds reference in a later turn once both events have
+        been assigned IDs and appear in the plannedEvents context.
+
+        Return JSON only with refinedStoryPrompt, suggestedTitle, initialEventsPrompt,
+        initialStoryBibleEntries, and initialPlannedEvents.
         """;
 
     public const string StoryNarrationInstruction = """
@@ -128,6 +153,53 @@ internal static class GeneratedPromptTemplates
         starting state and early scenes; it is only supplied for the earliest turns and will silently stop
         appearing once enough real history has accumulated, so never treat its absence as something having
         changed.
+
+        Planned Events: the plannedEvents array supplied with every request lists future plot points chosen
+        for this story, each with a description and two independent ratings from 1 through 5, importance and
+        urgency. They are never known to the player character and their content must never be stated,
+        implied, or hinted at directly in the narration — only the ordinary in-scene events that make them
+        happen may appear, exactly as any other story development would.
+
+        Importance controls whether the event can be dropped. Importance 5 is mandatory: treat it as a
+        required destination for the story and actively steer events, NPC choices, and complications toward
+        making it happen, adapting the path as needed to fit whatever the player has done, rather than
+        letting player choices carry the story away from it indefinitely. Once a planned event has genuinely
+        occurred in the narration, issue a remove update with outcome fulfilled; a mandatory (importance 5)
+        planned event can only be removed this way and never as abandoned, and its importance can never be
+        lowered — the only way to be rid of one is to narrate it into happening. A lower-importance planned
+        event may instead be removed with outcome abandoned once the player's choices have made it
+        implausible or moot.
+
+        Urgency controls how directly and soon to work toward the event, independent of importance. Urgency
+        5 means introduce complications, NPC actions, or opportunities in the very next scene(s) that push
+        directly toward the event; urgency 1 means let it emerge only opportunistically, when the player's
+        own choices happen to lead there, without engineering the scene around it. A mandatory event with low
+        urgency is still guaranteed to happen eventually but should not be rushed; a minor (low-importance)
+        event with high urgency should be pursued promptly if it is to happen at all, since it is not
+        protected from being abandoned once its moment passes. Weave the current scene toward whichever
+        planned events fit naturally given how the player has actually acted and how urgently each is rated;
+        do not force a low-urgency event into a scene it has no plausible way to reach yet.
+
+        Prerequisites: a planned event's prerequisiteEventIds lists other planned events (by ID, copied
+        exactly from the current plannedEvents) that must occur before this one is pursued. Never steer a
+        scene toward an event while any ID in its prerequisiteEventIds still names an event currently present
+        in plannedEvents — that prerequisite has not happened yet, so the event is not yet reachable and must
+        wait, no matter how important or urgent it is. Once every one of its prerequisites has been removed
+        from plannedEvents (because each was fulfilled, or because the story moved past it), the event is
+        free to be pursued according to its own importance and urgency. Do not manually strip a satisfied
+        prerequisite's ID out of prerequisiteEventIds when replacing an event for an unrelated reason (for
+        example, rewording its description); leave the list exactly as it was unless you are deliberately
+        adding a new prerequisite or the event's dependencies have genuinely changed. A new prerequisite may
+        only reference an ID currently present in plannedEvents, never one you invent, and an event can never
+        list itself.
+
+        Add new planned events sparingly as the story develops and replace an existing one (same rules as
+        Story Bible replace) when its description, importance, urgency, or prerequisiteEventIds needs
+        updating without changing what event it represents — for example, raising urgency as the story
+        approaches the point where the event must occur, or adding a prerequisite once it becomes clear this
+        event should not happen before another. In relevantPlannedEventIds, use only IDs copied exactly from
+        the current planned events; mark any planned event the current scene is actively working toward or
+        that meaningfully constrains it.
         """;
 
     public const string CorrectiveRetryInstruction = """

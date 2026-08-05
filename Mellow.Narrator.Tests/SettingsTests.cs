@@ -65,9 +65,9 @@ public sealed class SettingsTests
             RequestTimeout = TimeSpan.FromSeconds(10),
             MaxOutputTokens = 256,
             Parameters = new(0, 0, null),
-            StoryGeneration = new(0, 1, 100, 1000, 50),
+            StoryGeneration = new(0, 1, 100, 1000, 50, 1, 100, 1000, 50),
             Retry = new(0, TimeSpan.FromSeconds(.25), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1)),
-            ContentLimits = new(1, 1, 100, 1, 100, 1, 1, 1, 1, 1, 64 * 1024) { MinSuggestedActions = 1 }
+            ContentLimits = new(1, 1, 100, 1, 100, 1, 1, 1, 1, 1, 1, 1, 64 * 1024) { MinSuggestedActions = 1 }
         };
         Assert.Empty(SettingsValidator.Validate(value));
     }
@@ -80,9 +80,9 @@ public sealed class SettingsTests
             RequestTimeout = TimeSpan.FromSeconds(900),
             MaxOutputTokens = 131072,
             Parameters = new(2, 1, "high"),
-            StoryGeneration = new(100, 2000, 50000, 1000000, 95),
+            StoryGeneration = new(100, 2000, 50000, 1000000, 95, 500, 50000, 1000000, 95),
             Retry = new(5, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(120), TimeSpan.FromSeconds(600)),
-            ContentLimits = new(1000, 1000, 200000, 50000, 200000, 20, 5000, 1000, 2000, 1000, 16 * 1024 * 1024) { MinSuggestedActions = 20 }
+            ContentLimits = new(1000, 1000, 200000, 50000, 200000, 20, 5000, 1000, 2000, 1000, 5000, 1000, 16 * 1024 * 1024) { MinSuggestedActions = 20 }
         };
         Assert.Empty(SettingsValidator.Validate(value));
     }

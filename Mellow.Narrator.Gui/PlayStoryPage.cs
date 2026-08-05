@@ -16,6 +16,7 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
     private readonly Button _submit;
     private readonly Button _copy;
     private readonly VerticalStackLayout _bible = new();
+    private readonly VerticalStackLayout _plannedEvents = new();
     private readonly Label _limitWarning = new() { TextColor = Colors.DarkOrange };
     private readonly ScrollView _story;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
@@ -85,7 +86,9 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
             Children =
             {
                 Ui.Heading("Story Bible"), _bible,
-                Ui.SecondaryButton("Export Bible History", ExportBibleHistory)
+                Ui.SecondaryButton("Export Bible History", ExportBibleHistory),
+                Ui.Heading("Planned Events"), _plannedEvents,
+                Ui.SecondaryButton("Export Planned Event History", ExportPlannedEventHistory)
             }
         };
         var sidePanel = new ScrollView { IsVisible = false, Content = sidePanelContent };
@@ -201,11 +204,23 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
                 if (!await DisplayAlertAsync("Cull Story Bible?", $"These entries will be removed:\n{names}", "Cull", "Cancel")) return;
                 state = await _app.CullStoryStateAsync(_stateId);
             }
+            if (!PlannedEventProcessor.IsWithinLimits(state.CurrentPlannedEvents, settings.StoryGeneration))
+            {
+                var choice = await DisplayActionSheetAsync("Planned Events exceed current limits", "Cancel", null, "Increase Limits", "Automatically Cull");
+                if (choice == "Increase Limits") { _tabs.OpenSettings(); return; }
+                if (choice != "Automatically Cull") return;
+                var preview = PlannedEventProcessor.CullToLimits(state.CurrentPlannedEvents, settings.StoryGeneration);
+                var descriptions = string.Join(Environment.NewLine, preview.Changes.Select(x => $"• {x.Before?.Description}"));
+                if (!await DisplayAlertAsync("Cull Planned Events?", $"These events will be removed:\n{descriptions}", "Cull", "Cancel")) return;
+                state = await _app.CullStoryStateAsync(_stateId);
+            }
             Title = state.Label;
             if (Parent is NavigationPage navigation) navigation.Title = Title;
             _limitWarning.Text = StoryBibleProcessor.IsApproachingLimits(state.CurrentStoryBible, settings.StoryGeneration)
                 ? "The Story Bible is approaching one or more configured limits."
-                : "";
+                : PlannedEventProcessor.IsApproachingLimits(state.CurrentPlannedEvents, settings.StoryGeneration)
+                    ? "Planned Events are approaching one or more configured limits."
+                    : "";
             _narration.Children.Clear();
             var turns = await _repository.GetTurnsAsync(
                 _stateId,
@@ -240,6 +255,8 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
             }
             _bible.Children.Clear();
             _bible.Children.Add(StoryBibleView.Create(this, state.CurrentStoryBible, settings.ContentLimits, state.LastCommittedTurnSequence, SaveBibleAsync, alwaysExpanded: true));
+            _plannedEvents.Children.Clear();
+            _plannedEvents.Children.Add(PlannedEventsView.Create(this, state.CurrentPlannedEvents, settings.ContentLimits, state.LastCommittedTurnSequence, SavePlannedEventsAsync, alwaysExpanded: true));
             completed = true;
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
@@ -298,6 +315,12 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
     private async Task SaveBibleAsync(StoryBible next)
     {
         try { await _app.UpdateCurrentStoryBibleAsync(_stateId, next); await Refresh(); }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private async Task SavePlannedEventsAsync(PlannedEvents next)
+    {
+        try { await _app.UpdateCurrentPlannedEventsAsync(_stateId, next); await Refresh(); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
@@ -397,6 +420,17 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
             var snapshot = await _repository.GetSnapshotAsync(_stateId)
                 ?? throw new NarratorException("Story State not found.");
             await ImportExportService.ExportBibleHistoryAsync(snapshot.State, snapshot.Turns);
+        }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private async void ExportPlannedEventHistory(object? sender, EventArgs e)
+    {
+        try
+        {
+            var snapshot = await _repository.GetSnapshotAsync(_stateId)
+                ?? throw new NarratorException("Story State not found.");
+            await ImportExportService.ExportPlannedEventHistoryAsync(snapshot.State, snapshot.Turns);
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }

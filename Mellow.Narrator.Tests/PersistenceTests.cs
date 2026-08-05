@@ -45,6 +45,50 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task Definition_LoadsPreExistingDocumentMissingPlannedEventFields()
+    {
+        var repository = (IStoryDefinitionRepository)_store;
+        var definition = Definition();
+        await repository.SaveAsync(definition);
+        var file = Path.Combine(_root, "Mellow.Narrator", "story-definitions", $"{definition.Id:D}.json");
+        var document = JsonNode.Parse(await File.ReadAllTextAsync(file))!.AsObject();
+        var data = document["data"]!.AsObject();
+        data.Remove("initialPlannedEvents");
+        data.Remove("plannedEventMaintenanceHistory");
+        await File.WriteAllTextAsync(file, document.ToJsonString());
+
+        var loaded = await repository.GetAsync(definition.Id);
+
+        Assert.NotNull(loaded);
+        Assert.Empty(loaded!.InitialPlannedEvents.Entries);
+        Assert.Empty(loaded.PlannedEventMaintenanceHistory);
+        Assert.True(PlannedEventProcessor.IsWithinLimits(loaded.InitialPlannedEvents, NarratorDefaults.Create().StoryGeneration));
+    }
+
+    [Fact]
+    public async Task State_LoadsPreExistingDocumentMissingPlannedEventFields()
+    {
+        var repository = (IStoryStateRepository)_store;
+        var (state, opening) = State();
+        await repository.CreateAsync(state, opening);
+        var file = Path.Combine(_root, "Mellow.Narrator", "story-states", state.Id.ToString("D"), "state.json");
+        var document = JsonNode.Parse(await File.ReadAllTextAsync(file))!.AsObject();
+        var data = document["data"]!.AsObject();
+        data.Remove("currentPlannedEvents");
+        data.Remove("plannedEventMaintenanceHistory");
+        data["setup"]!.AsObject()["definition"]!.AsObject().Remove("initialPlannedEvents");
+        await File.WriteAllTextAsync(file, document.ToJsonString());
+
+        var loaded = await repository.GetAsync(state.Id);
+
+        Assert.NotNull(loaded);
+        Assert.Empty(loaded!.CurrentPlannedEvents.Entries);
+        Assert.Empty(loaded.PlannedEventMaintenanceHistory);
+        Assert.Empty(loaded.Setup.Definition.InitialPlannedEvents.Entries);
+        Assert.True(PlannedEventProcessor.IsWithinLimits(loaded.CurrentPlannedEvents, NarratorDefaults.Create().StoryGeneration));
+    }
+
+    [Fact]
     public async Task ConnectionCapabilities_RoundTripNegotiatedRequestContract()
     {
         var repository = (IApiConnectionSettingsStore)_store;
@@ -77,6 +121,39 @@ public sealed class PersistenceTests : IDisposable
         var loaded = await repository.LoadAsync();
 
         Assert.Equal(NarratorLogLevel.Information, loaded.Logging.MinimumLevel);
+    }
+
+    [Fact]
+    public async Task ConnectionSettingsWithoutPlannedEventFields_LoadDefaultsAndPassValidation()
+    {
+        var repository = (IApiConnectionSettingsStore)_store;
+        await repository.SaveAsync(NarratorDefaults.Create());
+        var path = Path.Combine(_root, "Mellow.Narrator", "settings", "api-connection.json");
+        var document = JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
+        var data = document["data"]!.AsObject();
+        var storyGeneration = data["storyGeneration"]!.AsObject();
+        storyGeneration.Remove("maxPlannedEvents");
+        storyGeneration.Remove("maxPlannedEventCharacters");
+        storyGeneration.Remove("maxPlannedEventsCharacters");
+        storyGeneration.Remove("plannedEventsWarningPercent");
+        var contentLimits = data["contentLimits"]!.AsObject();
+        contentLimits.Remove("maxPlannedEventDescriptionCharacters");
+        contentLimits.Remove("maxPlannedEventUpdatesPerResponse");
+        await File.WriteAllTextAsync(path, document.ToJsonString());
+
+        var loaded = await repository.LoadAsync();
+
+        var defaults = NarratorDefaults.Create();
+        Assert.Equal(defaults.StoryGeneration.MaxPlannedEvents, loaded.StoryGeneration.MaxPlannedEvents);
+        Assert.Equal(defaults.StoryGeneration.MaxPlannedEventCharacters, loaded.StoryGeneration.MaxPlannedEventCharacters);
+        Assert.Equal(defaults.StoryGeneration.MaxPlannedEventsCharacters, loaded.StoryGeneration.MaxPlannedEventsCharacters);
+        Assert.Equal(defaults.StoryGeneration.PlannedEventsWarningPercent, loaded.StoryGeneration.PlannedEventsWarningPercent);
+        Assert.Equal(defaults.ContentLimits.MaxPlannedEventDescriptionCharacters, loaded.ContentLimits.MaxPlannedEventDescriptionCharacters);
+        Assert.Equal(defaults.ContentLimits.MaxPlannedEventUpdatesPerResponse, loaded.ContentLimits.MaxPlannedEventUpdatesPerResponse);
+        // The actual bug: without normalization these fields load as 0 (the int default), which fails
+        // every one of their range checks, so re-saving unrelated settings changes was rejected citing
+        // Planned Event fields the user never touched.
+        Assert.Empty(SettingsValidator.Validate(loaded));
     }
 
     [Fact]
@@ -424,7 +501,7 @@ public sealed class PersistenceTests : IDisposable
     private static StoryDefinition Definition()
     {
         var now = DateTimeOffset.UtcNow;
-        return new(Guid.NewGuid(), "Definition", "Prompt", new([]), [], 0, now, now);
+        return new(Guid.NewGuid(), "Definition", "Prompt", "", new([]), [], PlannedEvents.Empty, [], 0, now, now);
     }
 
     private static (StoryState, StoryTurn) State()
@@ -432,10 +509,10 @@ public sealed class PersistenceTests : IDisposable
         var id = Guid.NewGuid();
         var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Fact", ["Content"], [], 3, 0);
         var bible = new StoryBible([entry]);
-        var definition = new StoryDefinitionSnapshot("Story", "Prompt", bible);
+        var definition = new StoryDefinitionSnapshot("Story", "Prompt", "", bible, PlannedEvents.Empty);
         var now = DateTimeOffset.UtcNow;
-        var state = new StoryState(id, "Story", null, new(definition), bible, [], 0, now, null, 0);
-        var turn = new StoryTurn(Guid.NewGuid(), id, 0, null, "Opening", ["Continue"], [entry.Id], [], now, new("model", null, null, null));
+        var state = new StoryState(id, "Story", null, new(definition), bible, [], PlannedEvents.Empty, [], 0, now, null, 0);
+        var turn = new StoryTurn(Guid.NewGuid(), id, 0, null, "Opening", ["Continue"], [entry.Id], [], [], [], now, new("model", null, null, null));
         return (state, turn);
     }
 }

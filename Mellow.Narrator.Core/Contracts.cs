@@ -66,13 +66,16 @@ public sealed record StoryDefinitionGenerationResponse(
     string RefinedStoryPrompt,
     string SuggestedTitle,
     string InitialEventsPrompt,
-    IReadOnlyList<ProposedStoryBibleEntry> InitialStoryBibleEntries);
+    IReadOnlyList<ProposedStoryBibleEntry> InitialStoryBibleEntries,
+    IReadOnlyList<ProposedPlannedEvent> InitialPlannedEvents);
 
 public sealed record StoryGenerationResponse(
     string Narration,
     IReadOnlyList<string> SuggestedActions,
     IReadOnlyList<Guid> RelevantStoryBibleEntryIds,
     IReadOnlyList<ProposedStoryBibleUpdate> StoryBibleUpdates,
+    IReadOnlyList<Guid> RelevantPlannedEventIds,
+    IReadOnlyList<ProposedPlannedEventUpdate> PlannedEventUpdates,
     string? ProviderResponseId,
     int? InputTokens,
     int? OutputTokens);
@@ -83,11 +86,16 @@ public sealed record ConnectionTestResult(
     ConnectionCapabilities Capabilities,
     string? Error);
 
-public sealed record BibleLimitImpact(int StoryDefinitionCount, int StoryStateCount);
+public sealed record BibleLimitImpact(
+    int StoryDefinitionCount,
+    int StoryStateCount,
+    int PlannedEventDefinitionCount,
+    int PlannedEventStateCount);
 
 public sealed record GenerationContext(
     StoryDefinitionSnapshot Definition,
     StoryBible StoryBible,
+    PlannedEvents PlannedEvents,
     IReadOnlyList<StoryTurn> RecentTurns,
     string? PlayerAction,
     int NextTurnNumber);
@@ -114,6 +122,8 @@ public interface INarratorApplication
     Task<StoryState> CullStoryStateAsync(Guid stateId, CancellationToken cancellationToken = default);
     Task<StoryDefinition> UpdateInitialStoryBibleAsync(Guid definitionId, StoryBible bible, CancellationToken cancellationToken = default);
     Task<StoryState> UpdateCurrentStoryBibleAsync(Guid stateId, StoryBible bible, CancellationToken cancellationToken = default);
+    Task<StoryDefinition> UpdateInitialPlannedEventsAsync(Guid definitionId, PlannedEvents events, CancellationToken cancellationToken = default);
+    Task<StoryState> UpdateCurrentPlannedEventsAsync(Guid stateId, PlannedEvents events, CancellationToken cancellationToken = default);
     Task<(StoryState State, StoryTurn Opening)> StartStoryAsync(StartStoryDraft draft, Guid targetStateId, CancellationToken cancellationToken = default);
     Task<(StoryState State, StoryTurn Turn)> PlayTurnAsync(Guid stateId, string action, CancellationToken cancellationToken = default);
 }

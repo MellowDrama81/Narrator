@@ -45,7 +45,11 @@ public sealed record StoryGenerationSettings(
     int MaxStoryBibleEntries,
     int MaxStoryBibleEntryCharacters,
     int MaxStoryBibleCharacters,
-    int StoryBibleWarningPercent);
+    int StoryBibleWarningPercent,
+    int MaxPlannedEvents,
+    int MaxPlannedEventCharacters,
+    int MaxPlannedEventsCharacters,
+    int PlannedEventsWarningPercent);
 
 public sealed record RetrySettings(int MaxAutomaticRetries, TimeSpan InitialDelay, TimeSpan MaxDelay, TimeSpan MaxRetryAfter);
 
@@ -60,6 +64,8 @@ public sealed record ContentLimitSettings(
     int MaxStoryBibleCategoryCharacters,
     int MaxStoryBibleNameCharacters,
     int MaxStoryBibleUpdatesPerResponse,
+    int MaxPlannedEventDescriptionCharacters,
+    int MaxPlannedEventUpdatesPerResponse,
     int MaxResponseBodyBytes)
 {
     public int MinSuggestedActions { get; init; } = 2;
@@ -110,7 +116,11 @@ public static class NarratorDefaults
             MaxStoryBibleEntries: 200,
             MaxStoryBibleEntryCharacters: 4000,
             MaxStoryBibleCharacters: 60000,
-            StoryBibleWarningPercent: 80),
+            StoryBibleWarningPercent: 80,
+            MaxPlannedEvents: 50,
+            MaxPlannedEventCharacters: 2000,
+            MaxPlannedEventsCharacters: 20000,
+            PlannedEventsWarningPercent: 80),
         Retry: new RetrySettings(
             MaxAutomaticRetries: 2,
             InitialDelay: TimeSpan.FromSeconds(1),
@@ -127,6 +137,8 @@ public static class NarratorDefaults
             MaxStoryBibleCategoryCharacters: 100,
             MaxStoryBibleNameCharacters: 200,
             MaxStoryBibleUpdatesPerResponse: 100,
+            MaxPlannedEventDescriptionCharacters: 1000,
+            MaxPlannedEventUpdatesPerResponse: 50,
             MaxResponseBodyBytes: 2 * 1024 * 1024),
         Capabilities: new ConnectionCapabilities(
             SupportsModelDiscovery: false,
@@ -140,6 +152,8 @@ public static class SettingsValidator
     // Shared with NarratorApplication's sanity check on LLM-generated initial Story Bible entry counts,
     // so the two can't silently diverge.
     public const int MaxStoryBibleEntriesUpperBound = 2000;
+    // Shared with NarratorApplication's sanity check on LLM-generated initial Planned Event counts.
+    public const int MaxPlannedEventsUpperBound = 500;
 
     public static IReadOnlyDictionary<string, string> Validate(ApiConnectionSettings value)
     {
@@ -157,6 +171,12 @@ public static class SettingsValidator
         if (value.StoryGeneration.MaxStoryBibleEntryCharacters > value.StoryGeneration.MaxStoryBibleCharacters)
             errors["MaxStoryBibleEntryCharacters"] = "Must not exceed the maximum total Story Bible characters.";
         Range(errors, "StoryBibleWarningPercent", value.StoryGeneration.StoryBibleWarningPercent, 50, 95);
+        Range(errors, "MaxPlannedEvents", value.StoryGeneration.MaxPlannedEvents, 1, MaxPlannedEventsUpperBound);
+        Range(errors, "MaxPlannedEventCharacters", value.StoryGeneration.MaxPlannedEventCharacters, 100, 50000);
+        Range(errors, "MaxPlannedEventsCharacters", value.StoryGeneration.MaxPlannedEventsCharacters, 1000, 1000000);
+        if (value.StoryGeneration.MaxPlannedEventCharacters > value.StoryGeneration.MaxPlannedEventsCharacters)
+            errors["MaxPlannedEventCharacters"] = "Must not exceed the maximum total Planned Events characters.";
+        Range(errors, "PlannedEventsWarningPercent", value.StoryGeneration.PlannedEventsWarningPercent, 50, 95);
         Range(errors, "MaxAutomaticRetries", value.Retry.MaxAutomaticRetries, 0, 5);
         Range(errors, "InitialDelay", value.Retry.InitialDelay.TotalSeconds, .25, 30);
         Range(errors, "MaxDelay", value.Retry.MaxDelay.TotalSeconds, 1, 120);
@@ -182,6 +202,8 @@ public static class SettingsValidator
         Range(errors, nameof(c.MaxStoryBibleCategoryCharacters), c.MaxStoryBibleCategoryCharacters, 1, 1000);
         Range(errors, nameof(c.MaxStoryBibleNameCharacters), c.MaxStoryBibleNameCharacters, 1, 2000);
         Range(errors, nameof(c.MaxStoryBibleUpdatesPerResponse), c.MaxStoryBibleUpdatesPerResponse, 1, 1000);
+        Range(errors, nameof(c.MaxPlannedEventDescriptionCharacters), c.MaxPlannedEventDescriptionCharacters, 1, 5000);
+        Range(errors, nameof(c.MaxPlannedEventUpdatesPerResponse), c.MaxPlannedEventUpdatesPerResponse, 1, 1000);
         Range(errors, nameof(c.MaxResponseBodyBytes), c.MaxResponseBodyBytes, 64 * 1024, 16 * 1024 * 1024);
         Range(errors, nameof(c.MinParagraphsPerResponse), c.MinParagraphsPerResponse, 1, 20);
         Range(errors, nameof(c.MaxParagraphsPerResponse), c.MaxParagraphsPerResponse, 1, 20);

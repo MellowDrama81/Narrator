@@ -386,6 +386,20 @@ public sealed class OpenAiCompatibleProvider(
                 operation,
                 RedactCredential(name, credential));
         }
+
+        var plannedEventUpdates = parsed["plannedEventUpdates"] as JsonArray ?? [];
+        for (var index = 0; index < plannedEventUpdates.Count; index++)
+        {
+            var update = plannedEventUpdates[index] as JsonObject;
+            var operation = update?["operation"]?.GetValue<string>() ?? "unknown";
+            var description = (update?["entry"] as JsonObject)?["description"]?.GetValue<string>() ?? update?["entryId"]?.GetValue<string>() ?? "(unknown)";
+            _logger.LogTrace(
+                "LLM response Planned Event update {UpdateIndex} for {RequestId}: {Operation} {Description}",
+                index,
+                requestId,
+                operation,
+                RedactCredential(description, credential));
+        }
         return true;
     }
 
@@ -525,7 +539,8 @@ public sealed class OpenAiCompatibleProvider(
         {
             contextType = "storyContext",
             storyPrompt = context.Definition.StoryPrompt,
-            storyBible = context.StoryBible.Entries
+            storyBible = context.StoryBible.Entries,
+            plannedEvents = context.PlannedEvents.Entries
         }, Json)));
         if (context.RecentTurns.Count < recentTurnCount && !string.IsNullOrWhiteSpace(context.Definition.InitialEventsPrompt))
             messages.Add(Message("user", JsonSerializer.Serialize(new
@@ -562,7 +577,7 @@ public sealed class OpenAiCompatibleProvider(
         ApiConnectionSettings settings)
     {
         node.Remove("_transport");
-        RequireProperties(node, settings, "refinedStoryPrompt", "suggestedTitle", "initialEventsPrompt", "initialStoryBibleEntries");
+        RequireProperties(node, settings, "refinedStoryPrompt", "suggestedTitle", "initialEventsPrompt", "initialStoryBibleEntries", "initialPlannedEvents");
         var refinedStoryPrompt = RequiredString(node, "refinedStoryPrompt");
         if (string.IsNullOrWhiteSpace(refinedStoryPrompt) || refinedStoryPrompt.Length > settings.ContentLimits.MaxStoryPromptCharacters)
             throw new JsonException("The refined Story Prompt is empty or exceeds the configured limit.");
@@ -576,6 +591,11 @@ public sealed class OpenAiCompatibleProvider(
         if (entries.Count > 2000) throw new JsonException("The initial Story Bible contains too many entries.");
         foreach (var item in entries)
             ValidateProposedEntry(item as JsonObject ?? throw new JsonException("A Story Bible entry must be an object."), settings);
+        var plannedEvents = RequiredArray(node, "initialPlannedEvents");
+        if (plannedEvents.Count > SettingsValidator.MaxPlannedEventsUpperBound)
+            throw new JsonException("The initial Planned Events contain too many entries.");
+        foreach (var item in plannedEvents)
+            ValidateProposedPlannedEvent(item as JsonObject ?? throw new JsonException("A Planned Event must be an object."), settings);
         var result = node.Deserialize<StoryDefinitionGenerationResponse>(Json)
             ?? throw new JsonException("Empty Story Definition response.");
         return result;
@@ -597,7 +617,9 @@ public sealed class OpenAiCompatibleProvider(
             "narration",
             "suggestedActions",
             "relevantStoryBibleEntryIds",
-            "storyBibleUpdates");
+            "storyBibleUpdates",
+            "relevantPlannedEventIds",
+            "plannedEventUpdates");
         var turnNumber = RequiredInteger(node, "turnNumber");
         if (turnNumber != context.NextTurnNumber)
             throw new JsonException(
@@ -648,6 +670,23 @@ public sealed class OpenAiCompatibleProvider(
         node["relevantStoryBibleEntryIds"] = new JsonArray(
             normalizedRelevantIds.Select(id => (JsonNode)id.ToString("D")).ToArray());
 
+        // Same lenient-drop treatment as relevantStoryBibleEntryIds above, for the same reason.
+        var relevantPlannedEventNodes = RequiredArray(node, "relevantPlannedEventIds");
+        var currentPlannedEventIds = context.PlannedEvents.Entries.Select(entry => entry.Id).ToHashSet();
+        var seenRelevantPlannedEventIds = new HashSet<Guid>();
+        var normalizedRelevantPlannedEventIds = new List<Guid>();
+        foreach (var relevantNode in relevantPlannedEventNodes)
+        {
+            if (relevantNode is JsonValue value &&
+                value.TryGetValue<string>(out var text) &&
+                Guid.TryParse(text, out var id) &&
+                currentPlannedEventIds.Contains(id) &&
+                seenRelevantPlannedEventIds.Add(id))
+                normalizedRelevantPlannedEventIds.Add(id);
+        }
+        node["relevantPlannedEventIds"] = new JsonArray(
+            normalizedRelevantPlannedEventIds.Select(id => (JsonNode)id.ToString("D")).ToArray());
+
         var updates = RequiredArray(node, "storyBibleUpdates");
         if (updates.Count > settings.ContentLimits.MaxStoryBibleUpdatesPerResponse)
             throw new JsonException("Too many Story Bible updates.");
@@ -676,6 +715,37 @@ public sealed class OpenAiCompatibleProvider(
             }
         }
 
+        var plannedEventUpdates = RequiredArray(node, "plannedEventUpdates");
+        if (plannedEventUpdates.Count > settings.ContentLimits.MaxPlannedEventUpdatesPerResponse)
+            throw new JsonException("Too many Planned Event updates.");
+        foreach (var item in plannedEventUpdates)
+        {
+            var update = item as JsonObject ?? throw new JsonException("A Planned Event update must be an object.");
+            RequireProperties(update, settings, "operation", "entryId", "entry", "outcome");
+            var operation = RequiredString(update, "operation");
+            if (operation is not ("add" or "replace" or "remove"))
+                throw new JsonException("A Planned Event update has an invalid operation.");
+            if (operation == "add")
+                update["entryId"] = null;
+            if (operation != "add" && (update["entryId"] is null || !Guid.TryParse(StringValue(update["entryId"], "An entry ID"), out _)))
+                throw new JsonException("A replace or remove Planned Event update requires an entry ID.");
+            if (operation == "remove")
+            {
+                if (update["entry"] is not null) throw new JsonException("A remove update cannot contain a Planned Event.");
+                var outcome = update["outcome"] is null ? null : RequiredString(update, "outcome");
+                if (outcome is not ("fulfilled" or "abandoned"))
+                    throw new JsonException("A Planned Event removal must state outcome as fulfilled or abandoned.");
+            }
+            else
+            {
+                // outcome only carries meaning for a remove update; clear a stray value on add/replace
+                // the same way entryId is cleared on add above, rather than rejecting a harmless slip.
+                update["outcome"] = null;
+                ValidateProposedPlannedEvent(update["entry"] as JsonObject
+                    ?? throw new JsonException("An add or replace Planned Event update requires an entry."), settings);
+            }
+        }
+
         var dto = node.Deserialize<StoryResponseDto>(Json) ?? throw new JsonException("Empty story response.");
         var projectedRelevant = opening
             ? dto.RelevantStoryBibleEntryIds.Concat(context.StoryBible.Entries.Select(x => x.Id)).Distinct().ToArray()
@@ -686,11 +756,22 @@ public sealed class OpenAiCompatibleProvider(
             dto.StoryBibleUpdates,
             context.NextTurnNumber,
             settings.StoryGeneration);
+        var projectedRelevantPlannedEvents = opening
+            ? dto.RelevantPlannedEventIds.Concat(context.PlannedEvents.Entries.Select(x => x.Id)).Distinct().ToArray()
+            : dto.RelevantPlannedEventIds;
+        _ = PlannedEventProcessor.Apply(
+            context.PlannedEvents,
+            projectedRelevantPlannedEvents,
+            dto.PlannedEventUpdates,
+            context.NextTurnNumber,
+            settings.StoryGeneration);
         return new(
             dto.Narration,
             dto.SuggestedActions,
             dto.RelevantStoryBibleEntryIds,
             dto.StoryBibleUpdates,
+            dto.RelevantPlannedEventIds,
+            dto.PlannedEventUpdates,
             meta?["responseId"]?.GetValue<string>(),
             meta?["inputTokens"]?.GetValue<int?>(),
             meta?["outputTokens"]?.GetValue<int?>());
@@ -713,6 +794,19 @@ public sealed class OpenAiCompatibleProvider(
             throw new JsonException("A Story Bible entry has an empty fact.");
         var importance = RequiredInteger(entry, "importance");
         if (importance is < 1 or > 5) throw new JsonException("Story Bible importance must be from 1 to 5.");
+    }
+
+    private static void ValidateProposedPlannedEvent(JsonObject entry, ApiConnectionSettings settings)
+    {
+        RequireProperties(entry, settings, "description", "importance", "urgency", "prerequisiteEventIds");
+        var description = RequiredString(entry, "description");
+        if (string.IsNullOrWhiteSpace(description) || description.Length > settings.ContentLimits.MaxPlannedEventDescriptionCharacters)
+            throw new JsonException("A Planned Event description is empty or exceeds the configured limit.");
+        var importance = RequiredInteger(entry, "importance");
+        if (importance is < 1 or > 5) throw new JsonException("Planned Event importance must be from 1 to 5.");
+        var urgency = RequiredInteger(entry, "urgency");
+        if (urgency is < 1 or > 5) throw new JsonException("Planned Event urgency must be from 1 to 5.");
+        RequiredArray(entry, "prerequisiteEventIds");
     }
 
     private static void RequireProperties(JsonObject value, ApiConnectionSettings settings, params string[] expected)
@@ -763,8 +857,14 @@ public sealed class OpenAiCompatibleProvider(
             ["type"] = "array",
             ["maxItems"] = 2000,
             ["items"] = ProposedEntrySchema(settings)
+        },
+        ["initialPlannedEvents"] = new JsonObject
+        {
+            ["type"] = "array",
+            ["maxItems"] = SettingsValidator.MaxPlannedEventsUpperBound,
+            ["items"] = ProposedPlannedEventSchema(settings)
         }
-    }, ["refinedStoryPrompt", "suggestedTitle", "initialEventsPrompt", "initialStoryBibleEntries"]);
+    }, ["refinedStoryPrompt", "suggestedTitle", "initialEventsPrompt", "initialStoryBibleEntries", "initialPlannedEvents"]);
 
     private static JsonObject TurnSchema(ApiConnectionSettings settings) => ObjectSchema(new Dictionary<string, JsonNode?>
     {
@@ -793,8 +893,22 @@ public sealed class OpenAiCompatibleProvider(
                 ["entryId"] = new JsonObject { ["type"] = new JsonArray("string", "null"), ["format"] = "uuid" },
                 ["entry"] = new JsonObject { ["anyOf"] = new JsonArray(ProposedEntrySchema(settings), new JsonObject { ["type"] = "null" }) }
             }, ["operation", "entryId", "entry"])
+        },
+        ["relevantPlannedEventIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } },
+        ["plannedEventUpdates"] = new JsonObject
+        {
+            ["type"] = "array",
+            ["maxItems"] = settings.ContentLimits.MaxPlannedEventUpdatesPerResponse,
+            ["items"] = ObjectSchema(new Dictionary<string, JsonNode?>
+            {
+                ["operation"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray("add", "replace", "remove") },
+                ["entryId"] = new JsonObject { ["type"] = new JsonArray("string", "null"), ["format"] = "uuid" },
+                ["entry"] = new JsonObject { ["anyOf"] = new JsonArray(ProposedPlannedEventSchema(settings), new JsonObject { ["type"] = "null" }) },
+                ["outcome"] = new JsonObject { ["type"] = new JsonArray("string", "null"), ["enum"] = new JsonArray("fulfilled", "abandoned", null) }
+            }, ["operation", "entryId", "entry", "outcome"])
         }
-    }, ["turnNumber", "acknowledgedPlayerAction", "narration", "suggestedActions", "relevantStoryBibleEntryIds", "storyBibleUpdates"]);
+    }, ["turnNumber", "acknowledgedPlayerAction", "narration", "suggestedActions", "relevantStoryBibleEntryIds", "storyBibleUpdates",
+        "relevantPlannedEventIds", "plannedEventUpdates"]);
 
     private static bool IsSubstantiallyDuplicate(string candidate, string previous)
     {
@@ -845,6 +959,14 @@ public sealed class OpenAiCompatibleProvider(
         ["secretFacts"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } },
         ["importance"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 5 }
     }, ["category", "name", "knownFacts", "secretFacts", "importance"]);
+
+    private static JsonObject ProposedPlannedEventSchema(ApiConnectionSettings settings) => ObjectSchema(new Dictionary<string, JsonNode?>
+    {
+        ["description"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxPlannedEventDescriptionCharacters },
+        ["importance"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 5 },
+        ["urgency"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 5 },
+        ["prerequisiteEventIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } }
+    }, ["description", "importance", "urgency", "prerequisiteEventIds"]);
 
     // Weak models handling the PromptedJson fallback tier tend to follow a concrete example far more
     // reliably than raw JSON Schema syntax (nullable-as-type-array, anyOf, format:uuid). This walks any
@@ -922,7 +1044,9 @@ public sealed class OpenAiCompatibleProvider(
         string Narration,
         IReadOnlyList<string> SuggestedActions,
         IReadOnlyList<Guid> RelevantStoryBibleEntryIds,
-        IReadOnlyList<ProposedStoryBibleUpdate> StoryBibleUpdates);
+        IReadOnlyList<ProposedStoryBibleUpdate> StoryBibleUpdates,
+        IReadOnlyList<Guid> RelevantPlannedEventIds,
+        IReadOnlyList<ProposedPlannedEventUpdate> PlannedEventUpdates);
 }
 
 public sealed class ProviderException(string message, HttpStatusCode? statusCode, Exception? innerException = null)

@@ -27,6 +27,11 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         ["name"] = "default 200; range 1–2000",
         ["updates"] = "default 100; range 1–1000",
         ["responseBytes"] = "default 2097152; range 65536–16777216",
+        ["plannedEventEntry"] = "default 2000; range 100–50000",
+        ["plannedEventTotal"] = "default 20000; range 1000–1000000",
+        ["plannedEventWarning"] = "default 80%; range 50–95",
+        ["plannedEventDescription"] = "default 1000; range 1–5000",
+        ["plannedEventUpdates"] = "default 50; range 1–1000",
         ["paragraphsMin"] = "default 4; range 1–20; must not exceed the maximum",
         ["paragraphsMax"] = "default 6; range 1–20",
         ["sentencesMin"] = "default 2; range 1–20; must not exceed the maximum",
@@ -43,6 +48,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
     private readonly Entry _maxOutput = Numeric();
     private readonly Entry _recentTurns = Numeric();
     private readonly Entry _maxEntries = Numeric();
+    private readonly Entry _maxPlannedEvents = Numeric();
     private readonly Entry _temperature = Numeric();
     private readonly Entry _topP = Numeric();
     private readonly Entry _reasoning = new();
@@ -122,6 +128,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         content.Children.Add(Field("Reasoning effort (blank = provider default)", _reasoning));
         content.Children.Add(Field("Recent turns (default 8; range 0–100)", _recentTurns));
         content.Children.Add(Field("Maximum Story Bible entries (default 200; range 1–2000)", _maxEntries));
+        content.Children.Add(Field("Maximum Planned Events (default 50; range 1–500)", _maxPlannedEvents));
 
         var logging = Section(content, "Logging", expanded: false);
         logging.Children.Add(new Label { Text = "Log level" });
@@ -142,6 +149,11 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         Add(bibleAndRetries, "Maximum retry delay seconds", "retryMax");
         Add(bibleAndRetries, "Maximum Retry-After seconds", "retryAfter");
 
+        var plannedEvents = Section(content, "Planned Events", expanded: false);
+        Add(plannedEvents, "Planned Event entry character limit", "plannedEventEntry");
+        Add(plannedEvents, "Planned Events total character limit", "plannedEventTotal");
+        Add(plannedEvents, "Planned Events warning percent", "plannedEventWarning");
+
         var contentLimits = Section(content, "Content Limits", expanded: false);
         Add(contentLimits, "Title characters", "title");
         Add(contentLimits, "Label characters", "label");
@@ -158,6 +170,8 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         Add(contentLimits, "Bible category characters", "category");
         Add(contentLimits, "Bible name characters", "name");
         Add(contentLimits, "Bible updates per response", "updates");
+        Add(contentLimits, "Planned Event description characters", "plannedEventDescription");
+        Add(contentLimits, "Planned Event updates per response", "plannedEventUpdates");
         Add(contentLimits, "HTTP response bytes", "responseBytes");
 
         content.Children.Add(Ui.Buttons(
@@ -317,11 +331,16 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
                 (int)Parse(_maxEntries, "maximum Story Bible entries"),
                 Int("bibleEntry"),
                 Int("bibleTotal"),
-                Int("bibleWarning")),
+                Int("bibleWarning"),
+                (int)Parse(_maxPlannedEvents, "maximum Planned Events"),
+                Int("plannedEventEntry"),
+                Int("plannedEventTotal"),
+                Int("plannedEventWarning")),
             Retry = new(Int("retries"), Seconds("retryInitial"), Seconds("retryMax"), Seconds("retryAfter")),
             ContentLimits = new(Int("title"), Int("label"), Int("prompt"), Int("action"), Int("narration"),
                 Int("suggestedCount"), Int("suggestedLength"),
-                Int("category"), Int("name"), Int("updates"), Int("responseBytes"))
+                Int("category"), Int("name"), Int("updates"),
+                Int("plannedEventDescription"), Int("plannedEventUpdates"), Int("responseBytes"))
             {
                 MinSuggestedActions = Int("suggestedMin"),
                 MinParagraphsPerResponse = Int("paragraphsMin"),
@@ -371,10 +390,14 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         _reasoning.Text = settings.Parameters.ReasoningEffort ?? "";
         _recentTurns.Text = settings.StoryGeneration.RecentTurnCount.ToString(CultureInfo.InvariantCulture);
         _maxEntries.Text = settings.StoryGeneration.MaxStoryBibleEntries.ToString(CultureInfo.InvariantCulture);
+        _maxPlannedEvents.Text = settings.StoryGeneration.MaxPlannedEvents.ToString(CultureInfo.InvariantCulture);
         _logLevel.SelectedItem = settings.Logging.MinimumLevel;
         Set("bibleEntry", settings.StoryGeneration.MaxStoryBibleEntryCharacters);
         Set("bibleTotal", settings.StoryGeneration.MaxStoryBibleCharacters);
         Set("bibleWarning", settings.StoryGeneration.StoryBibleWarningPercent);
+        Set("plannedEventEntry", settings.StoryGeneration.MaxPlannedEventCharacters);
+        Set("plannedEventTotal", settings.StoryGeneration.MaxPlannedEventsCharacters);
+        Set("plannedEventWarning", settings.StoryGeneration.PlannedEventsWarningPercent);
         Set("retries", settings.Retry.MaxAutomaticRetries);
         Set("retryInitial", settings.Retry.InitialDelay.TotalSeconds);
         Set("retryMax", settings.Retry.MaxDelay.TotalSeconds);
@@ -395,6 +418,8 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         Set("category", c.MaxStoryBibleCategoryCharacters);
         Set("name", c.MaxStoryBibleNameCharacters);
         Set("updates", c.MaxStoryBibleUpdatesPerResponse);
+        Set("plannedEventDescription", c.MaxPlannedEventDescriptionCharacters);
+        Set("plannedEventUpdates", c.MaxPlannedEventUpdatesPerResponse);
         Set("responseBytes", c.MaxResponseBodyBytes);
     }
 
@@ -453,15 +478,22 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
 
     private async Task<bool> ConfirmBibleLimitImpactAsync(ApiConnectionSettings current, ApiConnectionSettings proposed)
     {
-        var lowered = proposed.StoryGeneration.MaxStoryBibleEntries < current.StoryGeneration.MaxStoryBibleEntries ||
+        var bibleLowered = proposed.StoryGeneration.MaxStoryBibleEntries < current.StoryGeneration.MaxStoryBibleEntries ||
             proposed.StoryGeneration.MaxStoryBibleEntryCharacters < current.StoryGeneration.MaxStoryBibleEntryCharacters ||
             proposed.StoryGeneration.MaxStoryBibleCharacters < current.StoryGeneration.MaxStoryBibleCharacters;
-        if (!lowered) return true;
+        var plannedEventsLowered = proposed.StoryGeneration.MaxPlannedEvents < current.StoryGeneration.MaxPlannedEvents ||
+            proposed.StoryGeneration.MaxPlannedEventCharacters < current.StoryGeneration.MaxPlannedEventCharacters ||
+            proposed.StoryGeneration.MaxPlannedEventsCharacters < current.StoryGeneration.MaxPlannedEventsCharacters;
+        if (!bibleLowered && !plannedEventsLowered) return true;
         var impact = await _app.GetBibleLimitImpactAsync(proposed.StoryGeneration);
-        if (impact.StoryDefinitionCount == 0 && impact.StoryStateCount == 0) return true;
+        if (impact.StoryDefinitionCount == 0 && impact.StoryStateCount == 0 &&
+            impact.PlannedEventDefinitionCount == 0 && impact.PlannedEventStateCount == 0)
+            return true;
         return await DisplayAlertAsync(
-            "Existing Story Bibles exceed the proposed limits",
-            $"{impact.StoryDefinitionCount} Story Definitions and {impact.StoryStateCount} Story States will require increased limits or confirmed automatic culling before generation. Saving does not modify them.",
+            "Existing Story Bibles or Planned Events exceed the proposed limits",
+            $"{impact.StoryDefinitionCount} Story Definitions and {impact.StoryStateCount} Story States have a Story Bible exceeding the proposed limits; " +
+            $"{impact.PlannedEventDefinitionCount} Story Definitions and {impact.PlannedEventStateCount} Story States have Planned Events exceeding the proposed limits. " +
+            "They will require increased limits or confirmed automatic culling before generation. Saving does not modify them.",
             "Save Anyway",
             "Cancel");
     }

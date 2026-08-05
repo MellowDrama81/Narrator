@@ -119,10 +119,22 @@ public sealed class MainTabbedPage : TabbedPage
             if (!await DisplayAlertAsync("Cull Story Bible?", $"These entries will be removed:\n{names}", "Cull", "Cancel")) return null;
             source = await _app.CullDefinitionAsync(definitionId);
         }
-        var definition = new StoryDefinitionSnapshot(source.Title, source.StoryPrompt, source.InitialStoryBible)
+        if (!PlannedEventProcessor.IsWithinLimits(source.InitialPlannedEvents, settings.StoryGeneration))
         {
-            InitialEventsPrompt = source.InitialEventsPrompt
-        };
+            var choice = await DisplayActionSheetAsync(
+                "Planned Events exceed current limits.",
+                "Cancel",
+                null,
+                "Increase Limits",
+                "Automatically Cull");
+            if (choice == "Increase Limits") { OpenSettings(); return null; }
+            if (choice != "Automatically Cull") return null;
+            var preview = PlannedEventProcessor.CullToLimits(source.InitialPlannedEvents, settings.StoryGeneration);
+            var descriptions = string.Join(Environment.NewLine, preview.Changes.Select(x => $"• {x.Before?.Description}"));
+            if (!await DisplayAlertAsync("Cull Planned Events?", $"These events will be removed:\n{descriptions}", "Cull", "Cancel")) return null;
+            source = await _app.CullDefinitionAsync(definitionId);
+        }
+        var definition = new StoryDefinitionSnapshot(source.Title, source.StoryPrompt, source.InitialEventsPrompt, source.InitialStoryBible, source.InitialPlannedEvents);
         var draft = new StartStoryDraft(definitionId, definition);
         var result = await _app.StartStoryAsync(draft, targetStateId, cancellationToken);
         if (replaceCurrent) await ReplaceCurrentWithPlayAsync(result.State.Id);

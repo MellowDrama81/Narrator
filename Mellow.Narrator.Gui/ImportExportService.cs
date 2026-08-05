@@ -97,6 +97,32 @@ internal static class ImportExportService
         return $"{known}{secret}";
     }
 
+    public static async Task ExportPlannedEventHistoryAsync(StoryState state, IReadOnlyList<StoryTurn> turns)
+    {
+        var groups = new List<(DateTimeOffset At, string Header, IReadOnlyList<AppliedPlannedEventChange> Changes)>();
+        groups.AddRange(state.PlannedEventMaintenanceHistory.Select(x =>
+            (x.CompletedAtUtc, x.Reason.ToString(), (IReadOnlyList<AppliedPlannedEventChange>)x.Changes)));
+        groups.AddRange(turns.Where(x => x.PlannedEventChanges.Count > 0).Select(x =>
+            (x.CompletedAtUtc, $"Turn {x.SequenceNumber}", x.PlannedEventChanges)));
+        var text = string.Join(
+            Environment.NewLine + Environment.NewLine,
+            groups.OrderByDescending(x => x.At).Select(FormatPlannedEventHistoryGroup));
+        await SaveTextAsync($"{Safe(state.Label)}-planned-events-history.txt", text);
+    }
+
+    private static string FormatPlannedEventHistoryGroup(
+        (DateTimeOffset At, string Header, IReadOnlyList<AppliedPlannedEventChange> Changes) group)
+    {
+        var lines = new List<string> { $"{group.Header} — {group.At.ToLocalTime():g}" };
+        lines.AddRange(group.Changes.Select(FormatPlannedEventChange));
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string FormatPlannedEventChange(AppliedPlannedEventChange change) =>
+        $"{change.Operation}: {change.Before?.Description ?? change.After?.Description} ({change.Source}{(change.Outcome is null ? "" : $", {change.Outcome}")})" + Environment.NewLine +
+        $"Before: {change.Before?.Description ?? "—"}" + Environment.NewLine +
+        $"After: {change.After?.Description ?? "—"}";
+
     private static string FormatTurn(StoryTurn turn) =>
         turn.PlayerAction is null
             ? turn.Narration

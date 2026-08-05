@@ -151,6 +151,19 @@ public sealed class StoryDefinitionPage : ContentPage, IPendingOperationPage, IC
             if (StoryBibleProcessor.IsApproachingLimits(value.InitialStoryBible, settings.StoryGeneration))
                 _content.Children.Add(new Label { Text = "The Story Bible is approaching one or more configured limits.", TextColor = Colors.DarkOrange });
             _content.Children.Add(StoryBibleView.Create(this, value.InitialStoryBible, settings.ContentLimits, 0, SaveBibleAsync, alwaysExpanded: true));
+            _content.Children.Add(Ui.Heading($"Initial Planned Events ({value.InitialPlannedEvents.Entries.Count})"));
+            _content.Children.Add(new Label
+            {
+                Text = "Future plot points kept secret from the player. Importance 5 is mandatory: the narrator must " +
+                    "find a way to make it happen no matter how the player's choices diverge. Urgency controls how " +
+                    "directly and soon the narrator should steer toward it, independent of importance. Prerequisites " +
+                    "let an event require one or more other events to occur first; the narrator will not pursue it " +
+                    "until every prerequisite has happened.",
+                FontSize = 12
+            });
+            if (PlannedEventProcessor.IsApproachingLimits(value.InitialPlannedEvents, settings.StoryGeneration))
+                _content.Children.Add(new Label { Text = "Planned Events are approaching one or more configured limits.", TextColor = Colors.DarkOrange });
+            _content.Children.Add(PlannedEventsView.Create(this, value.InitialPlannedEvents, settings.ContentLimits, 0, SavePlannedEventsAsync, alwaysExpanded: true));
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
@@ -182,6 +195,12 @@ public sealed class StoryDefinitionPage : ContentPage, IPendingOperationPage, IC
     private async Task SaveBibleAsync(StoryBible next)
     {
         try { await _application.UpdateInitialStoryBibleAsync(_id, next); await RefreshAsync(); }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private async Task SavePlannedEventsAsync(PlannedEvents next)
+    {
+        try { await _application.UpdateInitialPlannedEventsAsync(_id, next); await RefreshAsync(); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
