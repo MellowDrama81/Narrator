@@ -14,6 +14,7 @@ import { DbService } from '../core/db.service';
 import { defaultSettings } from '../core/defaults';
 import { LlmService } from '../core/llm.service';
 import { AppSettings } from '../core/models';
+import { validateSettings } from '../core/settings-validator';
 
 @Component({
   imports: [
@@ -93,15 +94,34 @@ import { AppSettings } from '../core/models';
       </mat-expansion-panel>
       <mat-expansion-panel>
         <mat-expansion-panel-header>
-          <mat-panel-title>Story structure</mat-panel-title>
-          <mat-panel-description>Memory and response shape</mat-panel-description>
+          <mat-panel-title>Narration shape</mat-panel-title>
+          <mat-panel-description>Suggestions, paragraphs, and sentences per response</mat-panel-description>
+        </mat-expansion-panel-header>
+        <div class="form-grid compact">
+          <mat-form-field appearance="outline"><mat-label>Minimum suggestions</mat-label><input matInput type="number" [(ngModel)]="settings.minSuggestedActions"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum suggestions</mat-label><input matInput type="number" [(ngModel)]="settings.maxSuggestedActions"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum suggestion characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxSuggestedActionCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Minimum paragraphs</mat-label><input matInput type="number" [(ngModel)]="settings.minParagraphs"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum paragraphs</mat-label><input matInput type="number" [(ngModel)]="settings.maxParagraphs"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Minimum sentences per paragraph</mat-label><input matInput type="number" [(ngModel)]="settings.minSentencesPerParagraph"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum sentences per paragraph</mat-label><input matInput type="number" [(ngModel)]="settings.maxSentencesPerParagraph"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum narration characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxNarrationCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum player action characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlayerActionCharacters"></mat-form-field>
+        </div>
+      </mat-expansion-panel>
+      <mat-expansion-panel>
+        <mat-expansion-panel-header>
+          <mat-panel-title>Story Bible</mat-panel-title>
+          <mat-panel-description>Persistent facts remembered across turns</mat-panel-description>
         </mat-expansion-panel-header>
         <div class="form-grid compact">
           <mat-form-field appearance="outline"><mat-label>Maximum Bible entries</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryBibleEntries"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Minimum suggestions</mat-label><input matInput type="number" [(ngModel)]="settings.minSuggestedActions"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Maximum suggestions</mat-label><input matInput type="number" [(ngModel)]="settings.maxSuggestedActions"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Minimum paragraphs</mat-label><input matInput type="number" [(ngModel)]="settings.minParagraphs"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Maximum paragraphs</mat-label><input matInput type="number" [(ngModel)]="settings.maxParagraphs"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum characters per entry</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryBibleEntryCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum total characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryBibleCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Capacity warning percent</mat-label><input matInput type="number" [(ngModel)]="settings.storyBibleWarningPercent"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum category characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryBibleCategoryCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum name characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryBibleNameCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum updates per response</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryBibleUpdatesPerResponse"></mat-form-field>
         </div>
       </mat-expansion-panel>
       <mat-expansion-panel>
@@ -112,6 +132,36 @@ import { AppSettings } from '../core/models';
         <div class="form-grid compact">
           <mat-form-field appearance="outline"><mat-label>Maximum Planned Events</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEvents"></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Capacity warning percent</mat-label><input matInput type="number" [(ngModel)]="settings.plannedEventsWarningPercent"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum characters per event</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEventCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum total characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEventsCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum description characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEventDescriptionCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum condition characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEventConditionCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum updates per response</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEventUpdatesPerResponse"></mat-form-field>
+        </div>
+      </mat-expansion-panel>
+      <mat-expansion-panel>
+        <mat-expansion-panel-header>
+          <mat-panel-title>Content limits</mat-panel-title>
+          <mat-panel-description>Story metadata and victory/loss conditions</mat-panel-description>
+        </mat-expansion-panel-header>
+        <div class="form-grid compact">
+          <mat-form-field appearance="outline"><mat-label>Maximum title characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryTitleCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum label characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryLabelCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum story prompt characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryPromptCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum conditions</mat-label><input matInput type="number" [(ngModel)]="settings.maxConditions"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum condition characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxConditionDescriptionCharacters"></mat-form-field>
+        </div>
+      </mat-expansion-panel>
+      <mat-expansion-panel>
+        <mat-expansion-panel-header>
+          <mat-panel-title>Retry</mat-panel-title>
+          <mat-panel-description>Behavior when a request fails</mat-panel-description>
+        </mat-expansion-panel-header>
+        <div class="form-grid compact">
+          <mat-form-field appearance="outline"><mat-label>Maximum automatic retries</mat-label><input matInput type="number" [(ngModel)]="settings.maxAutomaticRetries"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Initial delay · seconds</mat-label><input matInput type="number" step=".25" [(ngModel)]="settings.retryInitialDelaySeconds"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum delay · seconds</mat-label><input matInput type="number" [(ngModel)]="settings.retryMaxDelaySeconds"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum Retry-After · seconds</mat-label><input matInput type="number" [(ngModel)]="settings.retryMaxRetryAfterSeconds"></mat-form-field>
         </div>
       </mat-expansion-panel>
     </mat-accordion>
@@ -124,6 +174,12 @@ export class SettingsComponent implements OnInit {
   busy = false;
   storageError = '';
 
+  // The baseUrl/modelId last known to be persisted, so a save can tell whether the connection is
+  // changing and reset the negotiated capability state accordingly (mirrors
+  // NarratorApplication.SaveSettingsAsync's reset-on-change logic in Settings.cs).
+  private lastSavedBaseUrl = '';
+  private lastSavedModelId = '';
+
   constructor(
     private readonly db: DbService,
     private readonly llm: LlmService,
@@ -134,6 +190,8 @@ export class SettingsComponent implements OnInit {
   async ngOnInit(): Promise<void> {
     try {
       this.settings = await this.db.settings();
+      this.lastSavedBaseUrl = this.settings.baseUrl;
+      this.lastSavedModelId = this.settings.modelId;
     } catch {
       this.storageError = 'Browser storage could not be opened. You can configure this session, but settings may not persist until IndexedDB access is available.';
     } finally {
@@ -143,8 +201,7 @@ export class SettingsComponent implements OnInit {
 
   async save(): Promise<void> {
     await this.run(async () => {
-      await this.db.saveSettings(this.settings);
-      this.storageError = '';
+      await this.persistSettings();
       this.snack.open('Settings saved to this browser.', 'Dismiss', { duration: 2500 });
     });
   }
@@ -162,14 +219,34 @@ export class SettingsComponent implements OnInit {
 
   async test(): Promise<void> {
     await this.run(async () => {
-      await this.db.saveSettings(this.settings);
-      this.storageError = '';
+      await this.persistSettings();
       this.snack.open(await this.llm.test(this.settings), 'Dismiss', { duration: 4000 });
     });
   }
 
   reset(): void {
     this.settings = defaultSettings();
+  }
+
+  // Validates, resets negotiated connection capabilities if the endpoint or model changed, and saves.
+  // Throws (surfaced by run() as a snackbar) rather than persisting when validation fails - this is
+  // what stops a blank field's NaN, or minSuggestedActions > maxSuggestedActions, from being saved.
+  private async persistSettings(): Promise<void> {
+    if (this.settings.baseUrl !== this.lastSavedBaseUrl || this.settings.modelId !== this.lastSavedModelId) {
+      this.settings.structuredOutputTier = 'untested';
+      this.settings.outputTokenParameter = 'maxCompletionTokens';
+      this.settings.instructionMessageRole = 'developer';
+    }
+
+    const errors = Object.entries(validateSettings(this.settings));
+    if (errors.length > 0) {
+      throw new Error(errors.slice(0, 5).map(([field, message]) => `${field}: ${message}`).join('\n'));
+    }
+
+    await this.db.saveSettings(this.settings);
+    this.lastSavedBaseUrl = this.settings.baseUrl;
+    this.lastSavedModelId = this.settings.modelId;
+    this.storageError = '';
   }
 
   private async run(action: () => Promise<void>): Promise<void> {

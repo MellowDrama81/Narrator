@@ -127,6 +127,16 @@ export interface StoryState {
   turns: StoryTurn[];
 }
 
+// Mirrors Mellow.Narrator.Core's ConnectionCapabilities.StructuredOutputTier. Tracks what response
+// shape the provider has actually been proven to support, learned by probing during real requests.
+export type StructuredOutputTier = 'untested' | 'strictJsonSchema' | 'jsonMode' | 'promptedJson' | 'unsupported';
+// Mirrors ConnectionCapabilities.OutputTokenParameter - which request field this provider accepts for
+// capping output length.
+export type OutputTokenParameter = 'maxCompletionTokens' | 'maxTokens';
+// Mirrors ConnectionCapabilities.InstructionMessageRole - which message role this provider accepts for
+// system-level instructions.
+export type InstructionMessageRole = 'system' | 'developer';
+
 export interface AppSettings {
   key: 'app';
   baseUrl: string;
@@ -139,12 +149,45 @@ export interface AppSettings {
   reasoningEffort: string;
   recentTurnCount: number;
   maxStoryBibleEntries: number;
+  maxStoryBibleEntryCharacters: number;
+  maxStoryBibleCharacters: number;
+  storyBibleWarningPercent: number;
   maxPlannedEvents: number;
+  maxPlannedEventCharacters: number;
+  maxPlannedEventsCharacters: number;
   plannedEventsWarningPercent: number;
   minSuggestedActions: number;
   maxSuggestedActions: number;
   minParagraphs: number;
   maxParagraphs: number;
+  maxStoryTitleCharacters: number;
+  maxStoryLabelCharacters: number;
+  maxStoryPromptCharacters: number;
+  maxPlayerActionCharacters: number;
+  maxNarrationCharacters: number;
+  maxSuggestedActionCharacters: number;
+  maxStoryBibleCategoryCharacters: number;
+  maxStoryBibleNameCharacters: number;
+  maxStoryBibleUpdatesPerResponse: number;
+  maxPlannedEventDescriptionCharacters: number;
+  maxPlannedEventConditionCharacters: number;
+  maxPlannedEventUpdatesPerResponse: number;
+  maxConditions: number;
+  maxConditionDescriptionCharacters: number;
+  minSentencesPerParagraph: number;
+  maxSentencesPerParagraph: number;
+  maxAutomaticRetries: number;
+  retryInitialDelaySeconds: number;
+  retryMaxDelaySeconds: number;
+  retryMaxRetryAfterSeconds: number;
+  // Connection-capability state, learned by probing the provider (see ConnectionCapabilities in
+  // Settings.cs). Not user-editable - a later agent negotiates/probes and persists these
+  // automatically. Whenever baseUrl or modelId changes, these get reset back toward their untested
+  // defaults (mirroring NarratorApplication.SaveSettingsAsync's reset-on-change logic), since a
+  // different endpoint or model can't be assumed to share the same negotiated capabilities.
+  structuredOutputTier: StructuredOutputTier;
+  outputTokenParameter: OutputTokenParameter;
+  instructionMessageRole: InstructionMessageRole;
 }
 
 export interface TrashItem {

@@ -1,7 +1,14 @@
 import {
-  applyConditionTurn, conditionPayload, normalizeConditionIds, resolveInitialConditions,
+  applyConditionTurn, ConditionLimits, conditionPayload, isWithinConditionLimits, normalizeConditionIds,
+  resolveInitialConditions,
 } from './story-conditions';
 import { ProposedStoryCondition, StoryCondition } from './models';
+
+const limits = (overrides: Partial<ConditionLimits> = {}): ConditionLimits => ({
+  maxConditions: 20,
+  maxDescriptionCharacters: 1000,
+  ...overrides,
+});
 
 const proposal = (overrides: Partial<ProposedStoryCondition> = {}): ProposedStoryCondition => ({
   description: 'Reach the lighthouse before dawn.',
@@ -18,7 +25,9 @@ const condition = (overrides: Partial<StoryCondition> = {}): StoryCondition => (
 
 describe('resolveInitialConditions', () => {
   it('assigns ids and trims descriptions', () => {
-    const result = resolveInitialConditions([proposal(), proposal({ description: '  The keeper dies.  ', secret: true })]);
+    const result = resolveInitialConditions(
+      [proposal(), proposal({ description: '  The keeper dies.  ', secret: true })], limits(),
+    );
     expect(result).toHaveLength(2);
     expect(result[0].id).toBeTruthy();
     expect(result[1].id).not.toBe(result[0].id);
@@ -27,7 +36,37 @@ describe('resolveInitialConditions', () => {
   });
 
   it('throws on an empty description', () => {
-    expect(() => resolveInitialConditions([proposal({ description: '   ' })])).toThrow(/empty/i);
+    expect(() => resolveInitialConditions([proposal({ description: '   ' })], limits())).toThrow(/empty/i);
+  });
+
+  it('throws when a description exceeds the configured limit', () => {
+    expect(() => resolveInitialConditions([proposal({ description: 'x'.repeat(1001) })], limits({ maxDescriptionCharacters: 1000 })))
+      .toThrow(/exceeds the configured limit/i);
+  });
+
+  it('accepts a description exactly at the configured limit', () => {
+    const result = resolveInitialConditions([proposal({ description: 'x'.repeat(1000) })], limits({ maxDescriptionCharacters: 1000 }));
+    expect(result[0].description).toHaveLength(1000);
+  });
+});
+
+describe('isWithinConditionLimits', () => {
+  it('is true when every budget is satisfied', () => {
+    expect(isWithinConditionLimits([condition()], limits())).toBe(true);
+  });
+
+  it('is false when the condition count exceeds the maximum', () => {
+    expect(isWithinConditionLimits([condition(), condition({ id: 'cond-2' })], limits({ maxConditions: 1 }))).toBe(false);
+  });
+
+  it('is false when a description exceeds the configured limit', () => {
+    expect(isWithinConditionLimits([condition({ description: 'x'.repeat(1001) })], limits({ maxDescriptionCharacters: 1000 }))).toBe(false);
+  });
+
+  it('is true when the count and every description are exactly at their limits', () => {
+    expect(isWithinConditionLimits(
+      [condition({ description: 'x'.repeat(1000) })], limits({ maxConditions: 1, maxDescriptionCharacters: 1000 }),
+    )).toBe(true);
   });
 });
 

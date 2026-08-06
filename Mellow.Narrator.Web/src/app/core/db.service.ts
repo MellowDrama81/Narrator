@@ -4,6 +4,11 @@ import { AppSettings, StoryDefinition, StoryState, TrashItem } from './models';
 
 type StoreName = 'settings' | 'definitions' | 'stories' | 'trash' | 'meta';
 
+// Mirrors JsonNarratorStore's PurgeTrashAsync cap of 10 items / 100MB total. Exported so tests can
+// reference the exact cap instead of duplicating the literal.
+export const TRASH_MAX_ITEMS = 10;
+export const TRASH_MAX_SIZE_BYTES = 100 * 1024 * 1024;
+
 // initialPlannedEvents/currentPlannedEvents/relevantPlannedEventIds/plannedEventUpdates were added to
 // these types after they first shipped, so a record written to IndexedDB before then has no such
 // property at all - not even `undefined` as a key, since structured-clone-based storage preserves
@@ -138,8 +143,36 @@ export class DbService {
   saveStory(value: StoryState): Promise<void> { return this.put('stories', value); }
   deleteStory(id: string): Promise<void> { return this.remove('stories', id); }
   trash(): Promise<TrashItem[]> { return this.getAll<TrashItem>('trash'); }
-  saveTrash(value: TrashItem): Promise<void> { return this.put('trash', value); }
+
+  async saveTrash(value: TrashItem): Promise<void> {
+    await this.put('trash', value);
+    await this.purgeTrash();
+  }
+
   deleteTrash(id: string): Promise<void> { return this.remove('trash', id); }
+
+  // Mirrors JsonNarratorStore.PurgeTrashAsync (Mellow.Narrator.Persistence): after every move-to-trash,
+  // auto-purge the oldest trash items while there are more than 10 items or the total payload size
+  // exceeds 100MB, but always leave at least 1 item even if that lone item alone exceeds the size cap.
+  // The C# side measures on-disk file size; here JSON.stringify(payload).length is used as a reasonable
+  // proxy for that, since there is no filesystem to stat.
+  private async purgeTrash(): Promise<void> {
+    let items = await this.trash();
+    let totalSize = items.reduce((sum, item) => sum + DbService.trashItemSize(item), 0);
+    const oldestFirst = [...items].sort((a, b) => a.deletedAtUtc.localeCompare(b.deletedAtUtc));
+    const candidates = oldestFirst.slice(0, Math.max(0, items.length - 1));
+    for (const item of candidates) {
+      if (items.length <= TRASH_MAX_ITEMS && totalSize <= TRASH_MAX_SIZE_BYTES) break;
+      await this.deleteTrash(item.trashId);
+      totalSize -= DbService.trashItemSize(item);
+      items = items.filter(x => x.trashId !== item.trashId);
+    }
+  }
+
+  private static trashItemSize(item: TrashItem): number {
+    return JSON.stringify(item.payload).length;
+  }
+
   meta<T>(key: string): Promise<T | undefined> { return this.get<{ key: string; value: T }>('meta', key).then(x => x?.value); }
   saveMeta<T>(key: string, value: T): Promise<void> { return this.put('meta', { key, value }); }
 }

@@ -9,6 +9,7 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { Router, RouterLink } from '@angular/router';
 import { DbService } from '../core/db.service';
 import { downloadJson, safeFilename } from '../core/download';
+import { validateImportedDefinition } from '../core/import-validation';
 import { nowIso, StoryDefinition, uuid } from '../core/models';
 import { NarratorService } from '../core/narrator.service';
 
@@ -52,6 +53,7 @@ import { NarratorService } from '../core/narrator.service';
               <button mat-button [disabled]="index === 0" (click)="move(index, -1)">Earlier</button>
               <button mat-button [disabled]="index === definitions.length - 1" (click)="move(index, 1)">Later</button>
               <button mat-button (click)="export(item)">Export</button>
+              <button mat-button [disabled]="busyId === item.id" (click)="regenerate(item)">Regenerate</button>
               <a mat-button [routerLink]="['/definitions', item.id]">Open</a>
               <button mat-flat-button [disabled]="busyId === item.id" (click)="start(item)">Start story</button>
             </mat-card-actions>
@@ -88,6 +90,27 @@ export class DefinitionsComponent implements OnInit {
     downloadJson(`${safeFilename(value.title)}-definition.json`, { formatVersion: 1, exportedAtUtc: nowIso(), definition: value });
   }
 
+  // Re-runs generation against an existing Definition's title/prompt - e.g. after editing the story
+  // prompt and wanting fresh Story Bible/Planned Events/Conditions for it. Mirrors NarratorApplication's
+  // GenerateDefinitionAsync(overwrite/targetId) intent, but narrator.service.ts#generateDefinition
+  // doesn't (yet) accept an existing id to preserve, so this can only create a brand-new Definition
+  // rather than overwrite in place; a known follow-up is threading id/createdAtUtc preservation through
+  // generateDefinition so this can stop retiring the original to Trash. Until then: the new Definition
+  // takes over the original's spot in the list (same sortOrder), and the original is moved to Trash
+  // rather than deleted outright, so it's still recoverable.
+  async regenerate(definition: StoryDefinition): Promise<void> {
+    this.busyId = definition.id;
+    try {
+      const regenerated = await this.narrator.generateDefinition(definition.title, definition.storyPrompt);
+      regenerated.sortOrder = definition.sortOrder;
+      await this.db.saveDefinition(regenerated);
+      await this.narrator.trashDefinition(definition);
+      await this.reload();
+      this.snack.open('Story Definition regenerated.', 'Dismiss', { duration: 2500 });
+    } catch (error) { this.error(error); }
+    finally { this.busyId = ''; }
+  }
+
   async move(index: number, delta: number): Promise<void> {
     const other = this.definitions[index + delta];
     if (!other) return;
@@ -110,8 +133,9 @@ export class DefinitionsComponent implements OnInit {
       const victoryConditions = source.initialVictoryConditions?.entries ?? source.initialVictoryConditions ?? [];
       const lossConditions = source.initialLossConditions?.entries ?? source.initialLossConditions ?? [];
       const definitions = await this.db.definitions();
+      const sourceId = typeof source.id === 'string' && source.id.trim() ? source.id : null;
       const imported: StoryDefinition = {
-        id: await this.db.definition(source.id) ? uuid() : String(source.id ?? uuid()),
+        id: sourceId && await this.db.definition(sourceId) ? uuid() : (sourceId ?? uuid()),
         title: String(source.title ?? 'Imported definition'),
         storyPrompt: String(source.storyPrompt ?? ''),
         initialEventsPrompt: String(source.initialEventsPrompt ?? ''),
@@ -123,6 +147,11 @@ export class DefinitionsComponent implements OnInit {
         createdAtUtc: source.createdAtUtc ?? nowIso(),
         updatedAtUtc: nowIso(),
       };
+      const validationError = validateImportedDefinition(imported, await this.db.settings());
+      if (validationError) {
+        this.snack.open(validationError, 'Dismiss', { duration: 7000 });
+        return;
+      }
       await this.db.saveDefinition(imported);
       await this.reload();
       this.snack.open('Story Definition imported.', 'Dismiss', { duration: 2500 });

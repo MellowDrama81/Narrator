@@ -12,6 +12,7 @@ import { DbService } from '../core/db.service';
 import { downloadJson, downloadText, safeFilename } from '../core/download';
 import { nowIso, PlannedEvent, StoryBibleEntry, StoryState, StoryTurn } from '../core/models';
 import { NarratorService } from '../core/narrator.service';
+import { validateBibleEntry } from '../core/story-bible';
 import { BibleEditorComponent } from '../shared/bible-editor.component';
 import { PlannedEventsEditorComponent } from '../shared/planned-events-editor.component';
 
@@ -27,6 +28,7 @@ import { PlannedEventsEditorComponent } from '../shared/planned-events-editor.co
         <div class="actions">
           <button mat-button (click)="bibleOpen = !bibleOpen">{{ bibleOpen ? 'Hide' : 'Open' }} Story Bible</button>
           <button mat-button (click)="plannedEventsOpen = !plannedEventsOpen">{{ plannedEventsOpen ? 'Hide' : 'Open' }} Planned Events</button>
+          <button mat-stroked-button [disabled]="culling" (click)="cullToLimits()">Cull to limits</button>
           <button mat-stroked-button (click)="copy()">Copy story</button>
           <button mat-button (click)="export()">Export</button>
         </div>
@@ -104,6 +106,7 @@ export class PlayComponent implements OnInit {
   story?: StoryState;
   action = '';
   busy = false;
+  culling = false;
   bibleOpen = false;
   plannedEventsOpen = false;
   private pendingKey = '';
@@ -167,7 +170,14 @@ export class PlayComponent implements OnInit {
 
   async saveBible(entries: StoryBibleEntry[]): Promise<void> {
     if (!this.story) return;
-    this.story.currentStoryBible = entries;
+    const bible = entries.map(entry => ({
+      ...entry, name: entry.name.trim(), category: entry.category.trim(),
+      knownFacts: entry.knownFacts.map(x => x.trim()),
+      secretFacts: entry.secretFacts.map(x => x.trim()),
+    }));
+    const bibleError = bible.map(validateBibleEntry).find(Boolean);
+    if (bibleError) { this.snack.open(bibleError, 'Dismiss', { duration: 7000 }); return; }
+    this.story.currentStoryBible = bible;
     await this.db.saveStory(this.story);
   }
 
@@ -175,6 +185,43 @@ export class PlayComponent implements OnInit {
     if (!this.story) return;
     this.story.currentPlannedEvents = entries;
     await this.db.saveStory(this.story);
+  }
+
+  // Trims the current Story Bible/Planned Events down to the currently configured limits - mirrors
+  // NarratorApplication.CullStoryStateAsync. Confirms first, then reports exactly what was removed
+  // (rather than culling silently), diffing the before/after entry ids since cullStoryState() itself
+  // returns only the updated Story State.
+  async cullToLimits(): Promise<void> {
+    if (!this.story) return;
+    if (!confirm('Cull the Story Bible and Planned Events down to the currently configured limits? Lower-importance or less-recently-relevant entries may be removed.')) return;
+    this.culling = true;
+    try {
+      const before = this.story;
+      const after = await this.narrator.cullStoryState(before);
+      this.story = after;
+      this.reportCulled(before.currentStoryBible, after.currentStoryBible, before.currentPlannedEvents, after.currentPlannedEvents);
+    } catch (error) {
+      this.snack.open(error instanceof Error ? error.message : 'The cull request failed.', 'Dismiss', { duration: 8000 });
+    } finally {
+      this.culling = false;
+      this.changeDetector.markForCheck();
+    }
+  }
+
+  private reportCulled(
+    bibleBefore: StoryBibleEntry[], bibleAfter: StoryBibleEntry[],
+    eventsBefore: PlannedEvent[], eventsAfter: PlannedEvent[],
+  ): void {
+    const survivingBibleIds = new Set(bibleAfter.map(x => x.id));
+    const removedBible = bibleBefore.filter(x => !survivingBibleIds.has(x.id));
+    const survivingEventIds = new Set(eventsAfter.map(x => x.id));
+    const removedEvents = eventsBefore.filter(x => !survivingEventIds.has(x.id));
+    if (!removedBible.length && !removedEvents.length) {
+      this.snack.open('Already within limits — nothing removed.', 'Dismiss', { duration: 4000 });
+      return;
+    }
+    const names = [...removedBible.map(x => x.name), ...removedEvents.map(x => x.description)];
+    this.snack.open(`Culled to limits. Removed: ${names.join(', ')}`, 'Dismiss', { duration: 12000 });
   }
 
   async copy(): Promise<void> {

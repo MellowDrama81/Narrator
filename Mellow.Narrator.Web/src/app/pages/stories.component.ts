@@ -10,6 +10,7 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { Router, RouterLink } from '@angular/router';
 import { DbService } from '../core/db.service';
 import { downloadJson, safeFilename } from '../core/download';
+import { validateImportedState } from '../core/import-validation';
 import { nowIso, StoryState, uuid } from '../core/models';
 import { NarratorService } from '../core/narrator.service';
 
@@ -115,7 +116,8 @@ export class StoriesComponent implements OnInit {
         };
       }
       const stories = await this.db.stories();
-      const id = await this.db.story(source.id) ? uuid() : String(source.id ?? uuid());
+      const sourceId = typeof source.id === 'string' && source.id.trim() ? source.id : null;
+      const id = sourceId && await this.db.story(sourceId) ? uuid() : (sourceId ?? uuid());
       const definition = source.definition ?? {};
       const imported: StoryState = {
         id,
@@ -144,6 +146,9 @@ export class StoriesComponent implements OnInit {
           storyStateId: id,
           sequenceNumber: turn.sequenceNumber ?? index,
           modelId: turn.modelId ?? turn.generation?.modelId ?? 'imported',
+          suggestedActions: turn.suggestedActions ?? [],
+          relevantStoryBibleEntryIds: turn.relevantStoryBibleEntryIds ?? [],
+          storyBibleUpdates: turn.storyBibleUpdates ?? [],
           relevantPlannedEventIds: turn.relevantPlannedEventIds ?? [],
           plannedEventUpdates: turn.plannedEventUpdates ?? [],
           revealedVictoryConditionIds: turn.revealedVictoryConditionIds ?? [],
@@ -152,6 +157,11 @@ export class StoriesComponent implements OnInit {
           metLossConditionIds: turn.metLossConditionIds ?? [],
         })),
       };
+      const validationError = validateImportedState(imported, await this.db.settings());
+      if (validationError) {
+        this.snack.open(validationError, 'Dismiss', { duration: 7000 });
+        return;
+      }
       await this.db.saveStory(imported);
       await this.reload();
       this.snack.open('Story imported.', 'Dismiss', { duration: 2500 });

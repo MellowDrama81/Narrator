@@ -1,19 +1,43 @@
 import { ProposedStoryCondition, StoryCondition, uuid } from './models';
 
+export interface ConditionLimits {
+  maxConditions: number;
+  maxDescriptionCharacters: number;
+}
+
 /**
  * Resolves a batch of brand-new proposals - the initial victory/loss conditions proposed alongside a
  * Story Definition - into real Story Conditions, assigning each an id via uuid(). Unlike Planned Events,
  * no key/prerequisite resolution is needed here: conditions never reference each other. Throws on an
- * empty description, mirroring resolveInitialPlannedEvents's error-throwing style for a malformed batch.
+ * empty or oversized description, mirroring resolveInitialPlannedEvents's error-throwing style for a
+ * malformed batch and StoryConditionProcessor.ValidateEntry's length check.
  */
-export function resolveInitialConditions(proposals: ProposedStoryCondition[]): StoryCondition[] {
-  for (const proposal of proposals)
+export function resolveInitialConditions(
+  proposals: ProposedStoryCondition[],
+  limits: Pick<ConditionLimits, 'maxDescriptionCharacters'>,
+): StoryCondition[] {
+  for (const proposal of proposals) {
     if (!proposal.description.trim()) throw new Error('A condition description is empty.');
+    if (proposal.description.length > limits.maxDescriptionCharacters)
+      throw new Error('A condition description exceeds the configured limit.');
+  }
   return proposals.map(proposal => ({
     id: uuid(),
     description: proposal.description.trim(),
     secret: proposal.secret,
   }));
+}
+
+/**
+ * True when the condition list is within both configured budgets: no more than maxConditions entries,
+ * and no entry's description longer than maxDescriptionCharacters - mirroring
+ * StoryConditionProcessor.IsWithinLimits. Conditions have no cull mechanism (the list is fixed once
+ * resolved), so this is purely a check, used to validate a hand-authored or imported batch rather than to
+ * drive any automatic trimming.
+ */
+export function isWithinConditionLimits(conditions: StoryCondition[], limits: ConditionLimits): boolean {
+  return conditions.length <= limits.maxConditions
+    && conditions.every(entry => entry.description.length <= limits.maxDescriptionCharacters);
 }
 
 /**
