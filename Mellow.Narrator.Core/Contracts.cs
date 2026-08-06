@@ -67,7 +67,9 @@ public sealed record StoryDefinitionGenerationResponse(
     string SuggestedTitle,
     string InitialEventsPrompt,
     IReadOnlyList<ProposedStoryBibleEntry> InitialStoryBibleEntries,
-    IReadOnlyList<ProposedPlannedEvent> InitialPlannedEvents);
+    IReadOnlyList<ProposedPlannedEvent> InitialPlannedEvents,
+    IReadOnlyList<ProposedStoryCondition> InitialVictoryConditions,
+    IReadOnlyList<ProposedStoryCondition> InitialLossConditions);
 
 public sealed record StoryGenerationResponse(
     string Narration,
@@ -76,6 +78,10 @@ public sealed record StoryGenerationResponse(
     IReadOnlyList<ProposedStoryBibleUpdate> StoryBibleUpdates,
     IReadOnlyList<Guid> RelevantPlannedEventIds,
     IReadOnlyList<ProposedPlannedEventUpdate> PlannedEventUpdates,
+    IReadOnlyList<Guid> RevealedVictoryConditionIds,
+    IReadOnlyList<Guid> MetVictoryConditionIds,
+    IReadOnlyList<Guid> RevealedLossConditionIds,
+    IReadOnlyList<Guid> MetLossConditionIds,
     string? ProviderResponseId,
     int? InputTokens,
     int? OutputTokens);
@@ -92,10 +98,18 @@ public sealed record BibleLimitImpact(
     int PlannedEventDefinitionCount,
     int PlannedEventStateCount);
 
+// Groups a condition list (victory or loss) with the ids already revealed/met so far, for the provider
+// to filter and annotate when building the request - see OpenAiCompatibleProvider.BuildStoryMessages.
+// AlreadyMetIds conditions are dropped entirely from what's sent (nothing left to evaluate); the rest are
+// sent with a revealed flag so the model never re-reveals one already established.
+public sealed record ConditionsContext(StoryConditions Conditions, IReadOnlyList<Guid> RevealedIds, IReadOnlyList<Guid> MetIds);
+
 public sealed record GenerationContext(
     StoryDefinitionSnapshot Definition,
     StoryBible StoryBible,
     PlannedEvents PlannedEvents,
+    ConditionsContext VictoryConditions,
+    ConditionsContext LossConditions,
     IReadOnlyList<StoryTurn> RecentTurns,
     string? PlayerAction,
     int NextTurnNumber);
@@ -124,6 +138,8 @@ public interface INarratorApplication
     Task<StoryState> UpdateCurrentStoryBibleAsync(Guid stateId, StoryBible bible, CancellationToken cancellationToken = default);
     Task<StoryDefinition> UpdateInitialPlannedEventsAsync(Guid definitionId, PlannedEvents events, CancellationToken cancellationToken = default);
     Task<StoryState> UpdateCurrentPlannedEventsAsync(Guid stateId, PlannedEvents events, CancellationToken cancellationToken = default);
+    Task<StoryDefinition> UpdateInitialVictoryConditionsAsync(Guid definitionId, StoryConditions conditions, CancellationToken cancellationToken = default);
+    Task<StoryDefinition> UpdateInitialLossConditionsAsync(Guid definitionId, StoryConditions conditions, CancellationToken cancellationToken = default);
     Task<(StoryState State, StoryTurn Opening)> StartStoryAsync(StartStoryDraft draft, Guid targetStateId, CancellationToken cancellationToken = default);
     Task<(StoryState State, StoryTurn Turn)> PlayTurnAsync(Guid stateId, string action, CancellationToken cancellationToken = default);
 }

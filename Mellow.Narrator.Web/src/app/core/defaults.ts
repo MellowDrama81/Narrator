@@ -12,6 +12,8 @@ export const defaultSettings = (): AppSettings => ({
   reasoningEffort: '',
   recentTurnCount: 8,
   maxStoryBibleEntries: 200,
+  maxPlannedEvents: 50,
+  plannedEventsWarningPercent: 80,
   minSuggestedActions: 2,
   maxSuggestedActions: 3,
   minParagraphs: 4,

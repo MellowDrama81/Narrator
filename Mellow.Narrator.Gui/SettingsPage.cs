@@ -32,6 +32,8 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         ["plannedEventWarning"] = "default 80%; range 50–95",
         ["plannedEventDescription"] = "default 1000; range 1–5000",
         ["plannedEventUpdates"] = "default 50; range 1–1000",
+        ["conditionCount"] = "default 20; range 1–200",
+        ["conditionDescription"] = "default 1000; range 1–5000",
         ["paragraphsMin"] = "default 4; range 1–20; must not exceed the maximum",
         ["paragraphsMax"] = "default 6; range 1–20",
         ["sentencesMin"] = "default 2; range 1–20; must not exceed the maximum",
@@ -172,6 +174,8 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         Add(contentLimits, "Bible updates per response", "updates");
         Add(contentLimits, "Planned Event description characters", "plannedEventDescription");
         Add(contentLimits, "Planned Event updates per response", "plannedEventUpdates");
+        Add(contentLimits, "Victory/Loss Conditions per list", "conditionCount");
+        Add(contentLimits, "Condition description characters", "conditionDescription");
         Add(contentLimits, "HTTP response bytes", "responseBytes");
 
         content.Children.Add(Ui.Buttons(
@@ -340,7 +344,8 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
             ContentLimits = new(Int("title"), Int("label"), Int("prompt"), Int("action"), Int("narration"),
                 Int("suggestedCount"), Int("suggestedLength"),
                 Int("category"), Int("name"), Int("updates"),
-                Int("plannedEventDescription"), Int("plannedEventUpdates"), Int("responseBytes"))
+                Int("plannedEventDescription"), Int("plannedEventUpdates"),
+                Int("conditionCount"), Int("conditionDescription"), Int("responseBytes"))
             {
                 MinSuggestedActions = Int("suggestedMin"),
                 MinParagraphsPerResponse = Int("paragraphsMin"),
@@ -420,6 +425,8 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         Set("updates", c.MaxStoryBibleUpdatesPerResponse);
         Set("plannedEventDescription", c.MaxPlannedEventDescriptionCharacters);
         Set("plannedEventUpdates", c.MaxPlannedEventUpdatesPerResponse);
+        Set("conditionCount", c.MaxConditions);
+        Set("conditionDescription", c.MaxConditionDescriptionCharacters);
         Set("responseBytes", c.MaxResponseBodyBytes);
     }
 

@@ -164,6 +164,22 @@ public sealed class StoryDefinitionPage : ContentPage, IPendingOperationPage, IC
             if (PlannedEventProcessor.IsApproachingLimits(value.InitialPlannedEvents, settings.StoryGeneration))
                 _content.Children.Add(new Label { Text = "Planned Events are approaching one or more configured limits.", TextColor = Colors.DarkOrange });
             _content.Children.Add(PlannedEventsView.Create(this, value.InitialPlannedEvents, settings.ContentLimits, 0, SavePlannedEventsAsync, alwaysExpanded: true));
+            _content.Children.Add(Ui.Heading($"Victory Conditions ({value.InitialVictoryConditions.Entries.Count})"));
+            _content.Children.Add(new Label
+            {
+                Text = "Fixed win conditions checked every turn. A secret condition must never be stated directly in " +
+                    "narration; a non-secret one is woven into the prose once relevant and tracked as revealed. Once " +
+                    "met, a condition stays met for the rest of the story even if the player keeps playing.",
+                FontSize = 12
+            });
+            _content.Children.Add(ConditionsView.Create(this, value.InitialVictoryConditions, settings.ContentLimits, SaveVictoryConditionsAsync, alwaysExpanded: true));
+            _content.Children.Add(Ui.Heading($"Loss Conditions ({value.InitialLossConditions.Entries.Count})"));
+            _content.Children.Add(new Label
+            {
+                Text = "Fixed loss conditions checked every turn, with the same secret/revealed/met behavior as Victory Conditions.",
+                FontSize = 12
+            });
+            _content.Children.Add(ConditionsView.Create(this, value.InitialLossConditions, settings.ContentLimits, SaveLossConditionsAsync, alwaysExpanded: true));
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
@@ -201,6 +217,18 @@ public sealed class StoryDefinitionPage : ContentPage, IPendingOperationPage, IC
     private async Task SavePlannedEventsAsync(PlannedEvents next)
     {
         try { await _application.UpdateInitialPlannedEventsAsync(_id, next); await RefreshAsync(); }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private async Task SaveVictoryConditionsAsync(StoryConditions next)
+    {
+        try { await _application.UpdateInitialVictoryConditionsAsync(_id, next); await RefreshAsync(); }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private async Task SaveLossConditionsAsync(StoryConditions next)
+    {
+        try { await _application.UpdateInitialLossConditionsAsync(_id, next); await RefreshAsync(); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 

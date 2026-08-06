@@ -134,7 +134,9 @@ public sealed class MainTabbedPage : TabbedPage
             if (!await DisplayAlertAsync("Cull Planned Events?", $"These events will be removed:\n{descriptions}", "Cull", "Cancel")) return null;
             source = await _app.CullDefinitionAsync(definitionId);
         }
-        var definition = new StoryDefinitionSnapshot(source.Title, source.StoryPrompt, source.InitialEventsPrompt, source.InitialStoryBible, source.InitialPlannedEvents);
+        var definition = new StoryDefinitionSnapshot(
+            source.Title, source.StoryPrompt, source.InitialEventsPrompt, source.InitialStoryBible, source.InitialPlannedEvents,
+            source.InitialVictoryConditions, source.InitialLossConditions);
         var draft = new StartStoryDraft(definitionId, definition);
         var result = await _app.StartStoryAsync(draft, targetStateId, cancellationToken);
         if (replaceCurrent) await ReplaceCurrentWithPlayAsync(result.State.Id);

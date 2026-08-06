@@ -104,6 +104,16 @@ import { AppSettings } from '../core/models';
           <mat-form-field appearance="outline"><mat-label>Maximum paragraphs</mat-label><input matInput type="number" [(ngModel)]="settings.maxParagraphs"></mat-form-field>
         </div>
       </mat-expansion-panel>
+      <mat-expansion-panel>
+        <mat-expansion-panel-header>
+          <mat-panel-title>Planned Events</mat-panel-title>
+          <mat-panel-description>Secret plans and capacity</mat-panel-description>
+        </mat-expansion-panel-header>
+        <div class="form-grid compact">
+          <mat-form-field appearance="outline"><mat-label>Maximum Planned Events</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEvents"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Capacity warning percent</mat-label><input matInput type="number" [(ngModel)]="settings.plannedEventsWarningPercent"></mat-form-field>
+        </div>
+      </mat-expansion-panel>
     </mat-accordion>
     <div class="actions end"><button mat-button (click)="reset()">Reset defaults</button></div>
   `,

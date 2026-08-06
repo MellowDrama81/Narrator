@@ -89,6 +89,83 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task Definition_LoadsPreExistingDocumentMissingConditionFields()
+    {
+        var repository = (IStoryDefinitionRepository)_store;
+        var definition = Definition();
+        await repository.SaveAsync(definition);
+        var file = Path.Combine(_root, "Mellow.Narrator", "story-definitions", $"{definition.Id:D}.json");
+        var document = JsonNode.Parse(await File.ReadAllTextAsync(file))!.AsObject();
+        var data = document["data"]!.AsObject();
+        data.Remove("initialVictoryConditions");
+        data.Remove("initialLossConditions");
+        await File.WriteAllTextAsync(file, document.ToJsonString());
+
+        var loaded = await repository.GetAsync(definition.Id);
+
+        Assert.NotNull(loaded);
+        Assert.Empty(loaded!.InitialVictoryConditions.Entries);
+        Assert.Empty(loaded.InitialLossConditions.Entries);
+    }
+
+    [Fact]
+    public async Task State_LoadsPreExistingDocumentMissingConditionFields()
+    {
+        var repository = (IStoryStateRepository)_store;
+        var (state, opening) = State();
+        await repository.CreateAsync(state, opening);
+        var file = Path.Combine(_root, "Mellow.Narrator", "story-states", state.Id.ToString("D"), "state.json");
+        var document = JsonNode.Parse(await File.ReadAllTextAsync(file))!.AsObject();
+        var data = document["data"]!.AsObject();
+        data.Remove("currentVictoryConditions");
+        data.Remove("currentLossConditions");
+        data.Remove("revealedVictoryConditionIds");
+        data.Remove("metVictoryConditionIds");
+        data.Remove("revealedLossConditionIds");
+        data.Remove("metLossConditionIds");
+        var definitionObject = data["setup"]!.AsObject()["definition"]!.AsObject();
+        definitionObject.Remove("initialVictoryConditions");
+        definitionObject.Remove("initialLossConditions");
+        await File.WriteAllTextAsync(file, document.ToJsonString());
+
+        var loaded = await repository.GetAsync(state.Id);
+
+        Assert.NotNull(loaded);
+        Assert.Empty(loaded!.CurrentVictoryConditions.Entries);
+        Assert.Empty(loaded.CurrentLossConditions.Entries);
+        Assert.Empty(loaded.RevealedVictoryConditionIds);
+        Assert.Empty(loaded.MetVictoryConditionIds);
+        Assert.Empty(loaded.RevealedLossConditionIds);
+        Assert.Empty(loaded.MetLossConditionIds);
+        Assert.Empty(loaded.Setup.Definition.InitialVictoryConditions.Entries);
+        Assert.Empty(loaded.Setup.Definition.InitialLossConditions.Entries);
+    }
+
+    [Fact]
+    public async Task StoryTurn_LoadsPreExistingDocumentMissingConditionFields()
+    {
+        var repository = (IStoryStateRepository)_store;
+        var (state, opening) = State();
+        await repository.CreateAsync(state, opening);
+        var file = Path.Combine(
+            _root, "Mellow.Narrator", "story-states", state.Id.ToString("D"), "turns", $"00000000-{opening.Id:D}.json");
+        var document = JsonNode.Parse(await File.ReadAllTextAsync(file))!.AsObject();
+        var data = document["data"]!.AsObject();
+        data.Remove("revealedVictoryConditionIds");
+        data.Remove("metVictoryConditionIds");
+        data.Remove("revealedLossConditionIds");
+        data.Remove("metLossConditionIds");
+        await File.WriteAllTextAsync(file, document.ToJsonString());
+
+        var loaded = Assert.Single(await repository.GetTurnsAsync(state.Id));
+
+        Assert.Empty(loaded.RevealedVictoryConditionIds);
+        Assert.Empty(loaded.MetVictoryConditionIds);
+        Assert.Empty(loaded.RevealedLossConditionIds);
+        Assert.Empty(loaded.MetLossConditionIds);
+    }
+
+    [Fact]
     public async Task ConnectionCapabilities_RoundTripNegotiatedRequestContract()
     {
         var repository = (IApiConnectionSettingsStore)_store;
@@ -153,6 +230,28 @@ public sealed class PersistenceTests : IDisposable
         // The actual bug: without normalization these fields load as 0 (the int default), which fails
         // every one of their range checks, so re-saving unrelated settings changes was rejected citing
         // Planned Event fields the user never touched.
+        Assert.Empty(SettingsValidator.Validate(loaded));
+    }
+
+    [Fact]
+    public async Task ConnectionSettingsWithoutConditionFields_LoadDefaultsAndPassValidation()
+    {
+        var repository = (IApiConnectionSettingsStore)_store;
+        await repository.SaveAsync(NarratorDefaults.Create());
+        var path = Path.Combine(_root, "Mellow.Narrator", "settings", "api-connection.json");
+        var document = JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
+        var contentLimits = document["data"]!.AsObject()["contentLimits"]!.AsObject();
+        contentLimits.Remove("maxConditions");
+        contentLimits.Remove("maxConditionDescriptionCharacters");
+        await File.WriteAllTextAsync(path, document.ToJsonString());
+
+        var loaded = await repository.LoadAsync();
+
+        var defaults = NarratorDefaults.Create();
+        Assert.Equal(defaults.ContentLimits.MaxConditions, loaded.ContentLimits.MaxConditions);
+        Assert.Equal(defaults.ContentLimits.MaxConditionDescriptionCharacters, loaded.ContentLimits.MaxConditionDescriptionCharacters);
+        // Same bug class as the Planned Event fields above: without normalization these load as 0 and
+        // fail their range checks, rejecting saves of settings the user never touched.
         Assert.Empty(SettingsValidator.Validate(loaded));
     }
 
@@ -501,7 +600,7 @@ public sealed class PersistenceTests : IDisposable
     private static StoryDefinition Definition()
     {
         var now = DateTimeOffset.UtcNow;
-        return new(Guid.NewGuid(), "Definition", "Prompt", "", new([]), [], PlannedEvents.Empty, [], 0, now, now);
+        return new(Guid.NewGuid(), "Definition", "Prompt", "", new([]), [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
     }
 
     private static (StoryState, StoryTurn) State()
@@ -509,10 +608,10 @@ public sealed class PersistenceTests : IDisposable
         var id = Guid.NewGuid();
         var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Fact", ["Content"], [], 3, 0);
         var bible = new StoryBible([entry]);
-        var definition = new StoryDefinitionSnapshot("Story", "Prompt", "", bible, PlannedEvents.Empty);
+        var definition = new StoryDefinitionSnapshot("Story", "Prompt", "", bible, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
         var now = DateTimeOffset.UtcNow;
-        var state = new StoryState(id, "Story", null, new(definition), bible, [], PlannedEvents.Empty, [], 0, now, null, 0);
-        var turn = new StoryTurn(Guid.NewGuid(), id, 0, null, "Opening", ["Continue"], [entry.Id], [], [], [], now, new("model", null, null, null));
+        var state = new StoryState(id, "Story", null, new(definition), bible, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, null, 0);
+        var turn = new StoryTurn(Guid.NewGuid(), id, 0, null, "Opening", ["Continue"], [entry.Id], [], [], [], [], [], [], [], now, new("model", null, null, null));
         return (state, turn);
     }
 }

@@ -10,14 +10,17 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DbService } from '../core/db.service';
 import { downloadJson, safeFilename } from '../core/download';
-import { nowIso, StoryBibleEntry, StoryDefinition } from '../core/models';
+import { nowIso, PlannedEvent, StoryBibleEntry, StoryCondition, StoryDefinition } from '../core/models';
 import { NarratorService } from '../core/narrator.service';
 import { BibleEditorComponent } from '../shared/bible-editor.component';
+import { ConditionsEditorComponent } from '../shared/conditions-editor.component';
+import { PlannedEventsEditorComponent } from '../shared/planned-events-editor.component';
 
 @Component({
   imports: [
     CommonModule, FormsModule, RouterLink, MatButtonModule, MatCardModule,
-    MatFormFieldModule, MatInputModule, MatProgressBarModule, BibleEditorComponent,
+    MatFormFieldModule, MatInputModule, MatProgressBarModule, BibleEditorComponent, PlannedEventsEditorComponent,
+    ConditionsEditorComponent,
   ],
   template: `
     <header class="page-header">
@@ -73,6 +76,9 @@ import { BibleEditorComponent } from '../shared/bible-editor.component';
         </mat-card-content>
       </mat-card>
       <app-bible-editor [(entries)]="definition.initialStoryBible"></app-bible-editor>
+      <app-planned-events-editor [(entries)]="definition.initialPlannedEvents"></app-planned-events-editor>
+      <app-conditions-editor [(entries)]="definition.initialVictoryConditions" heading="Victory Conditions"></app-conditions-editor>
+      <app-conditions-editor [(entries)]="definition.initialLossConditions" heading="Loss Conditions"></app-conditions-editor>
     }
   `,
 })
@@ -125,6 +131,9 @@ export class DefinitionEditorComponent implements OnInit {
     if (!this.definition) return;
     this.definition.updatedAtUtc = nowIso();
     this.definition.initialStoryBible = this.cleanBible(this.definition.initialStoryBible);
+    this.definition.initialPlannedEvents = this.cleanPlannedEvents(this.definition.initialPlannedEvents);
+    this.definition.initialVictoryConditions = this.cleanConditions(this.definition.initialVictoryConditions);
+    this.definition.initialLossConditions = this.cleanConditions(this.definition.initialLossConditions);
     await this.db.saveDefinition(this.definition);
     this.snack.open('Definition saved.', 'Dismiss', { duration: 2500 });
   }
@@ -160,6 +169,19 @@ export class DefinitionEditorComponent implements OnInit {
       knownFacts: entry.knownFacts.map(x => x.trim()).filter(Boolean),
       secretFacts: entry.secretFacts.map(x => x.trim()).filter(Boolean),
     })).filter(entry => entry.name && (entry.knownFacts.length || entry.secretFacts.length));
+  }
+
+  private cleanPlannedEvents(entries: PlannedEvent[]): PlannedEvent[] {
+    return entries
+      .map(entry => ({ ...entry, description: entry.description.trim() }))
+      .filter(entry => entry.description)
+      .map(entry => ({ ...entry, prerequisiteEventIds: entry.prerequisiteEventIds.filter(id => id !== entry.id) }));
+  }
+
+  private cleanConditions(entries: StoryCondition[]): StoryCondition[] {
+    return entries
+      .map(entry => ({ ...entry, description: entry.description.trim() }))
+      .filter(entry => entry.description);
   }
 
   private error(error: unknown): void {

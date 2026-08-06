@@ -35,6 +35,8 @@ public static class ImportExportProcessor
         ValidateDefinition(source, limits, storyGeneration);
         var remap = new EntryIdRemapper();
         var plannedEventRemap = new PlannedEventIdRemapper();
+        var victoryRemap = new ConditionIdRemapper();
+        var lossRemap = new ConditionIdRemapper();
         return source with
         {
             Id = Guid.NewGuid(),
@@ -50,6 +52,8 @@ public static class ImportExportProcessor
                 Id = Guid.NewGuid(),
                 Changes = x.Changes.Select(plannedEventRemap.MapChange).ToArray()
             }).ToArray(),
+            InitialVictoryConditions = victoryRemap.MapConditions(source.InitialVictoryConditions),
+            InitialLossConditions = lossRemap.MapConditions(source.InitialLossConditions),
             SortOrder = sortOrder
         };
     }
@@ -65,6 +69,8 @@ public static class ImportExportProcessor
         var newStateId = Guid.NewGuid();
         var remap = new EntryIdRemapper();
         var plannedEventRemap = new PlannedEventIdRemapper();
+        var victoryRemap = new ConditionIdRemapper();
+        var lossRemap = new ConditionIdRemapper();
         var state = source with
         {
             Id = newStateId,
@@ -73,7 +79,9 @@ public static class ImportExportProcessor
                 Definition = source.Setup.Definition with
                 {
                     InitialStoryBible = remap.MapBible(source.Setup.Definition.InitialStoryBible),
-                    InitialPlannedEvents = plannedEventRemap.MapEvents(source.Setup.Definition.InitialPlannedEvents)
+                    InitialPlannedEvents = plannedEventRemap.MapEvents(source.Setup.Definition.InitialPlannedEvents),
+                    InitialVictoryConditions = victoryRemap.MapConditions(source.Setup.Definition.InitialVictoryConditions),
+                    InitialLossConditions = lossRemap.MapConditions(source.Setup.Definition.InitialLossConditions)
                 }
             },
             CurrentStoryBible = remap.MapBible(source.CurrentStoryBible),
@@ -88,6 +96,12 @@ public static class ImportExportProcessor
                 Id = Guid.NewGuid(),
                 Changes = x.Changes.Select(plannedEventRemap.MapChange).ToArray()
             }).ToArray(),
+            CurrentVictoryConditions = victoryRemap.MapConditions(source.CurrentVictoryConditions),
+            CurrentLossConditions = lossRemap.MapConditions(source.CurrentLossConditions),
+            RevealedVictoryConditionIds = source.RevealedVictoryConditionIds.Select(victoryRemap.MapEntryId).ToArray(),
+            MetVictoryConditionIds = source.MetVictoryConditionIds.Select(victoryRemap.MapEntryId).ToArray(),
+            RevealedLossConditionIds = source.RevealedLossConditionIds.Select(lossRemap.MapEntryId).ToArray(),
+            MetLossConditionIds = source.MetLossConditionIds.Select(lossRemap.MapEntryId).ToArray(),
             SortOrder = sortOrder
         };
         var mappedTurns = turns.OrderBy(x => x.SequenceNumber).Select(x => x with
@@ -97,7 +111,11 @@ public static class ImportExportProcessor
             RelevantStoryBibleEntryIds = x.RelevantStoryBibleEntryIds.Select(remap.MapEntryId).ToArray(),
             StoryBibleChanges = x.StoryBibleChanges.Select(remap.MapChange).ToArray(),
             RelevantPlannedEventIds = x.RelevantPlannedEventIds.Select(plannedEventRemap.MapEntryId).ToArray(),
-            PlannedEventChanges = x.PlannedEventChanges.Select(plannedEventRemap.MapChange).ToArray()
+            PlannedEventChanges = x.PlannedEventChanges.Select(plannedEventRemap.MapChange).ToArray(),
+            RevealedVictoryConditionIds = x.RevealedVictoryConditionIds.Select(victoryRemap.MapEntryId).ToArray(),
+            MetVictoryConditionIds = x.MetVictoryConditionIds.Select(victoryRemap.MapEntryId).ToArray(),
+            RevealedLossConditionIds = x.RevealedLossConditionIds.Select(lossRemap.MapEntryId).ToArray(),
+            MetLossConditionIds = x.MetLossConditionIds.Select(lossRemap.MapEntryId).ToArray()
         }).ToArray();
         return new(state, mappedTurns);
     }
@@ -154,6 +172,37 @@ public static class ImportExportProcessor
         };
     }
 
+    // Parallel to PlannedEventIdRemapper above, but for Story Condition IDs. Victory and Loss Conditions
+    // are separate ID spaces (a definition's InitialVictoryConditions and InitialLossConditions never
+    // reference each other), so CopyDefinition/CopyState use one instance per axis.
+    private sealed class ConditionIdRemapper
+    {
+        private readonly Dictionary<Guid, Guid> _entryIds = [];
+
+        public Guid MapEntryId(Guid oldId) =>
+            _entryIds.TryGetValue(oldId, out var mapped) ? mapped : _entryIds[oldId] = Guid.NewGuid();
+
+        public StoryConditions MapConditions(StoryConditions conditions) =>
+            new(conditions.Entries.Select(x => x with { Id = MapEntryId(x.Id) }).ToArray());
+    }
+
+    private static void ValidateConditions(StoryConditions conditions, ContentLimitSettings limits)
+    {
+        if (conditions.Entries.Select(x => x.Id).Any(x => x == Guid.Empty) ||
+            conditions.Entries.Select(x => x.Id).Distinct().Count() != conditions.Entries.Count)
+            throw new InvalidDataException("Condition IDs are invalid.");
+        foreach (var entry in conditions.Entries)
+            if (StoryConditionProcessor.ValidateEntry(entry.Description, limits) is { } error)
+                throw new InvalidDataException(error);
+    }
+
+    private static void ValidateConditionIds(StoryConditions conditions, IReadOnlyList<Guid> ids, string name)
+    {
+        var known = conditions.Entries.Select(x => x.Id).ToHashSet();
+        if (ids.Distinct().Count() != ids.Count || ids.Any(id => !known.Contains(id)))
+            throw new InvalidDataException($"A {name} ID is invalid.");
+    }
+
     public static void ValidateDefinition(StoryDefinition value, ContentLimitSettings limits, StoryGenerationSettings storyGeneration)
     {
         if (value.Id == Guid.Empty) throw new InvalidDataException("The Story Definition ID is invalid.");
@@ -164,6 +213,8 @@ public static class ImportExportProcessor
         ValidateMaintenance(value.StoryBibleMaintenanceHistory);
         ValidatePlannedEvents(value.InitialPlannedEvents, limits, storyGeneration);
         ValidatePlannedEventMaintenance(value.PlannedEventMaintenanceHistory);
+        ValidateConditions(value.InitialVictoryConditions, limits);
+        ValidateConditions(value.InitialLossConditions, limits);
         ValidateUtc(value.CreatedAtUtc, "created timestamp");
         ValidateUtc(value.UpdatedAtUtc, "updated timestamp");
     }
@@ -185,6 +236,14 @@ public static class ImportExportProcessor
         ValidatePlannedEvents(state.Setup.Definition.InitialPlannedEvents, limits, storyGeneration);
         ValidatePlannedEvents(state.CurrentPlannedEvents, limits, storyGeneration);
         ValidatePlannedEventMaintenance(state.PlannedEventMaintenanceHistory);
+        ValidateConditions(state.Setup.Definition.InitialVictoryConditions, limits);
+        ValidateConditions(state.Setup.Definition.InitialLossConditions, limits);
+        ValidateConditions(state.CurrentVictoryConditions, limits);
+        ValidateConditions(state.CurrentLossConditions, limits);
+        ValidateConditionIds(state.CurrentVictoryConditions, state.RevealedVictoryConditionIds, "revealed Victory Condition");
+        ValidateConditionIds(state.CurrentVictoryConditions, state.MetVictoryConditionIds, "met Victory Condition");
+        ValidateConditionIds(state.CurrentLossConditions, state.RevealedLossConditionIds, "revealed Loss Condition");
+        ValidateConditionIds(state.CurrentLossConditions, state.MetLossConditionIds, "met Loss Condition");
         ValidateUtc(state.StartedAtUtc, "started timestamp");
         if (state.LastActionAtUtc is { } lastAction) ValidateUtc(lastAction, "last-action timestamp");
 
@@ -213,6 +272,11 @@ public static class ImportExportProcessor
             if (turn.RelevantPlannedEventIds.Distinct().Count() != turn.RelevantPlannedEventIds.Count)
                 throw new InvalidDataException("A turn contains duplicate relevant Planned Event IDs.");
             ValidatePlannedEventChanges(turn.PlannedEventChanges);
+            if (turn.RevealedVictoryConditionIds.Distinct().Count() != turn.RevealedVictoryConditionIds.Count ||
+                turn.MetVictoryConditionIds.Distinct().Count() != turn.MetVictoryConditionIds.Count ||
+                turn.RevealedLossConditionIds.Distinct().Count() != turn.RevealedLossConditionIds.Count ||
+                turn.MetLossConditionIds.Distinct().Count() != turn.MetLossConditionIds.Count)
+                throw new InvalidDataException("A turn contains duplicate condition IDs.");
             ValidateUtc(turn.CompletedAtUtc, "turn timestamp");
             ValidateText(turn.Generation.ModelId, 1000, "generation model ID");
         }

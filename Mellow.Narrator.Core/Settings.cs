@@ -66,6 +66,8 @@ public sealed record ContentLimitSettings(
     int MaxStoryBibleUpdatesPerResponse,
     int MaxPlannedEventDescriptionCharacters,
     int MaxPlannedEventUpdatesPerResponse,
+    int MaxConditions,
+    int MaxConditionDescriptionCharacters,
     int MaxResponseBodyBytes)
 {
     public int MinSuggestedActions { get; init; } = 2;
@@ -139,6 +141,8 @@ public static class NarratorDefaults
             MaxStoryBibleUpdatesPerResponse: 100,
             MaxPlannedEventDescriptionCharacters: 1000,
             MaxPlannedEventUpdatesPerResponse: 50,
+            MaxConditions: 20,
+            MaxConditionDescriptionCharacters: 1000,
             MaxResponseBodyBytes: 2 * 1024 * 1024),
         Capabilities: new ConnectionCapabilities(
             SupportsModelDiscovery: false,
@@ -154,6 +158,8 @@ public static class SettingsValidator
     public const int MaxStoryBibleEntriesUpperBound = 2000;
     // Shared with NarratorApplication's sanity check on LLM-generated initial Planned Event counts.
     public const int MaxPlannedEventsUpperBound = 500;
+    // Shared with NarratorApplication's sanity check on LLM-generated initial victory/loss condition counts.
+    public const int MaxConditionsUpperBound = 200;
 
     public static IReadOnlyDictionary<string, string> Validate(ApiConnectionSettings value)
     {
@@ -204,6 +210,8 @@ public static class SettingsValidator
         Range(errors, nameof(c.MaxStoryBibleUpdatesPerResponse), c.MaxStoryBibleUpdatesPerResponse, 1, 1000);
         Range(errors, nameof(c.MaxPlannedEventDescriptionCharacters), c.MaxPlannedEventDescriptionCharacters, 1, 5000);
         Range(errors, nameof(c.MaxPlannedEventUpdatesPerResponse), c.MaxPlannedEventUpdatesPerResponse, 1, 1000);
+        Range(errors, nameof(c.MaxConditions), c.MaxConditions, 1, MaxConditionsUpperBound);
+        Range(errors, nameof(c.MaxConditionDescriptionCharacters), c.MaxConditionDescriptionCharacters, 1, 5000);
         Range(errors, nameof(c.MaxResponseBodyBytes), c.MaxResponseBodyBytes, 64 * 1024, 16 * 1024 * 1024);
         Range(errors, nameof(c.MinParagraphsPerResponse), c.MinParagraphsPerResponse, 1, 20);
         Range(errors, nameof(c.MaxParagraphsPerResponse), c.MaxParagraphsPerResponse, 1, 20);

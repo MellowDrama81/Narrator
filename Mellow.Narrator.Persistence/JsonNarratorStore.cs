@@ -344,7 +344,11 @@ public sealed class JsonNarratorStore :
             MaxPlannedEventDescriptionCharacters = settings.ContentLimits.MaxPlannedEventDescriptionCharacters == 0
                 ? defaults.ContentLimits.MaxPlannedEventDescriptionCharacters : settings.ContentLimits.MaxPlannedEventDescriptionCharacters,
             MaxPlannedEventUpdatesPerResponse = settings.ContentLimits.MaxPlannedEventUpdatesPerResponse == 0
-                ? defaults.ContentLimits.MaxPlannedEventUpdatesPerResponse : settings.ContentLimits.MaxPlannedEventUpdatesPerResponse
+                ? defaults.ContentLimits.MaxPlannedEventUpdatesPerResponse : settings.ContentLimits.MaxPlannedEventUpdatesPerResponse,
+            MaxConditions = settings.ContentLimits.MaxConditions == 0
+                ? defaults.ContentLimits.MaxConditions : settings.ContentLimits.MaxConditions,
+            MaxConditionDescriptionCharacters = settings.ContentLimits.MaxConditionDescriptionCharacters == 0
+                ? defaults.ContentLimits.MaxConditionDescriptionCharacters : settings.ContentLimits.MaxConditionDescriptionCharacters
         };
         return settings with { StoryGeneration = generation, ContentLimits = contentLimits };
     }
@@ -708,30 +712,46 @@ public sealed class JsonNarratorStore :
     {
         InitialEventsPrompt = value.InitialEventsPrompt ?? "",
         InitialPlannedEvents = NormalizePlannedEvents(value.InitialPlannedEvents),
-        PlannedEventMaintenanceHistory = value.PlannedEventMaintenanceHistory ?? []
+        PlannedEventMaintenanceHistory = value.PlannedEventMaintenanceHistory ?? [],
+        InitialVictoryConditions = NormalizeConditions(value.InitialVictoryConditions),
+        InitialLossConditions = NormalizeConditions(value.InitialLossConditions)
     };
 
     private static StoryState? Normalize(StoryState? value) => value is null ? null : value with
     {
         Setup = value.Setup with { Definition = NormalizeSnapshot(value.Setup.Definition) },
         CurrentPlannedEvents = NormalizePlannedEvents(value.CurrentPlannedEvents),
-        PlannedEventMaintenanceHistory = value.PlannedEventMaintenanceHistory ?? []
+        PlannedEventMaintenanceHistory = value.PlannedEventMaintenanceHistory ?? [],
+        CurrentVictoryConditions = NormalizeConditions(value.CurrentVictoryConditions),
+        CurrentLossConditions = NormalizeConditions(value.CurrentLossConditions),
+        RevealedVictoryConditionIds = value.RevealedVictoryConditionIds ?? [],
+        MetVictoryConditionIds = value.MetVictoryConditionIds ?? [],
+        RevealedLossConditionIds = value.RevealedLossConditionIds ?? [],
+        MetLossConditionIds = value.MetLossConditionIds ?? []
     };
 
     private static StoryTurn? Normalize(StoryTurn? value) => value is null ? null : value with
     {
         RelevantPlannedEventIds = value.RelevantPlannedEventIds ?? [],
-        PlannedEventChanges = value.PlannedEventChanges ?? []
+        PlannedEventChanges = value.PlannedEventChanges ?? [],
+        RevealedVictoryConditionIds = value.RevealedVictoryConditionIds ?? [],
+        MetVictoryConditionIds = value.MetVictoryConditionIds ?? [],
+        RevealedLossConditionIds = value.RevealedLossConditionIds ?? [],
+        MetLossConditionIds = value.MetLossConditionIds ?? []
     };
 
     private static StoryDefinitionSnapshot NormalizeSnapshot(StoryDefinitionSnapshot value) => value with
     {
         InitialEventsPrompt = value.InitialEventsPrompt ?? "",
-        InitialPlannedEvents = NormalizePlannedEvents(value.InitialPlannedEvents)
+        InitialPlannedEvents = NormalizePlannedEvents(value.InitialPlannedEvents),
+        InitialVictoryConditions = NormalizeConditions(value.InitialVictoryConditions),
+        InitialLossConditions = NormalizeConditions(value.InitialLossConditions)
     };
 
     private static PlannedEvents NormalizePlannedEvents(PlannedEvents? value) => new(
         (value?.Entries ?? []).Select(entry => entry with { PrerequisiteEventIds = entry.PrerequisiteEventIds ?? [] }).ToArray());
+
+    private static StoryConditions NormalizeConditions(StoryConditions? value) => new((value?.Entries ?? []).ToArray());
 
     private static string Stamp() => DateTimeOffset.UtcNow.ToString("yyyyMMdd'T'HHmmssfff'Z'");
     private static void ValidateId(Guid id) { if (id == Guid.Empty) throw new ArgumentException("ID cannot be empty."); }

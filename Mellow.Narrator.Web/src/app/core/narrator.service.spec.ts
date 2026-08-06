@@ -26,6 +26,12 @@ describe('NarratorService', () => {
         suggestedActions: ['Stand up'],
         relevantStoryBibleEntryIds: [],
         storyBibleUpdates: [],
+        relevantPlannedEventIds: [],
+        plannedEventUpdates: [],
+        revealedVictoryConditionIds: [],
+        metVictoryConditionIds: [],
+        revealedLossConditionIds: [],
+        metLossConditionIds: [],
       })),
     };
     const service = new NarratorService(database as unknown as DbService, llm as unknown as LlmService);
@@ -35,6 +41,9 @@ describe('NarratorService', () => {
       storyPrompt: 'A quiet alien world.',
       initialEventsPrompt: '',
       initialStoryBible: [],
+      initialPlannedEvents: [],
+      initialVictoryConditions: [],
+      initialLossConditions: [],
       sortOrder: 0,
       createdAtUtc: new Date().toISOString(),
       updatedAtUtc: new Date().toISOString(),

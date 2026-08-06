@@ -38,11 +38,25 @@ entry or the Initial Events prompt; a Planned Event is for something that has no
 for recording current state.
 
 Each Planned Event also has prerequisiteEventIds, a list of other Planned Event IDs that must occur
-first. Leave it empty here: at this stage no Planned Event has an ID yet, so there is nothing valid
-to reference. If one event should logically depend on another, describe that ordering in its
-description instead (for example, "once the hero has learned the prophecy, ..."), and the dependency
-can be formalized with a real prerequisiteEventIds reference in a later turn once both events have
-been assigned IDs and appear in the plannedEvents context.
+first; leave it empty here, since no Planned Event has a real ID yet at this stage. To make one
+proposed event depend on another within this same batch, use key and prerequisiteKeys instead: give
+the prerequisite event a key, a short label you invent (for example "prophecy" or "a") that is
+meaningful only within this one response and never used again afterward, then list that key in the
+dependent event's prerequisiteKeys. Each key you invent must be unique within initialPlannedEvents,
+and every value in prerequisiteKeys must exactly match another proposed event's key — never invent
+one that doesn't correspond to a key you actually assigned. Leave key empty unless another event in
+this batch depends on this one, and leave prerequisiteKeys empty unless this event genuinely depends
+on another you are proposing right now.
+
+Also propose initialVictoryConditions and initialLossConditions: the fixed win/lose conditions for this
+story. Each has a description and a secret flag. A secret condition must never be stated or implied to
+the player directly, in the same way a Planned Event's content must stay implied through ordinary
+events rather than being spelled out. A non-secret condition is meant to be revealed to the player
+later, once the unfolding story makes it relevant - never state it in the definition-generation
+response itself, and never as an upfront list; that happens turn by turn during narration instead (see
+story-narration.md). Propose only conditions that meaningfully define how this particular story can be
+won or lost; an ordinary story may have as few as one of each, or none of one kind if it has no natural
+loss condition, but never invent one that doesn't fit the premise just to fill the list.
 
 Return JSON only with refinedStoryPrompt, suggestedTitle, initialEventsPrompt,
-initialStoryBibleEntries, and initialPlannedEvents.
+initialStoryBibleEntries, initialPlannedEvents, initialVictoryConditions, and initialLossConditions.

@@ -4,6 +4,8 @@ import { LlmService } from './llm.service';
 import {
   nowIso, StoryBibleEntry, StoryBibleUpdate, StoryDefinition, StoryState, StoryTurn, TrashItem, uuid,
 } from './models';
+import { applyPlannedEvents, resolveInitialPlannedEvents } from './planned-events';
+import { applyConditionTurn, resolveInitialConditions } from './story-conditions';
 
 @Injectable({ providedIn: 'root' })
 export class NarratorService {
@@ -24,6 +26,9 @@ export class NarratorService {
       initialStoryBible: generated.initialStoryBibleEntries.map(entry => ({
         ...entry, id: uuid(), lastRelevantTurnNumber: 0,
       })),
+      initialPlannedEvents: resolveInitialPlannedEvents(generated.initialPlannedEvents),
+      initialVictoryConditions: resolveInitialConditions(generated.initialVictoryConditions),
+      initialLossConditions: resolveInitialConditions(generated.initialLossConditions),
       sortOrder: definitions.length ? Math.max(...definitions.map(x => x.sortOrder)) + 1 : 0,
       createdAtUtc: now,
       updatedAtUtc: now,
@@ -38,12 +43,28 @@ export class NarratorService {
     const stories = await this.db.stories();
     const id = uuid();
     const bible = this.applyBible(definition.initialStoryBible, generated.storyBibleUpdates, generated.relevantStoryBibleEntryIds, 0, settings.maxStoryBibleEntries);
+    const plannedEvents = applyPlannedEvents(
+      definition.initialPlannedEvents, generated.plannedEventUpdates, generated.relevantPlannedEventIds, 0, settings.maxPlannedEvents,
+    );
+    // Starting from empty revealed/met arrays, so this opening turn's delta and the story's new
+    // cumulative totals are the same values.
+    const victory = applyConditionTurn(
+      definition.initialVictoryConditions, [], [], generated.revealedVictoryConditionIds, generated.metVictoryConditionIds,
+    );
+    const loss = applyConditionTurn(
+      definition.initialLossConditions, [], [], generated.revealedLossConditionIds, generated.metLossConditionIds,
+    );
     const now = nowIso();
     const turn: StoryTurn = {
       id: uuid(), storyStateId: id, sequenceNumber: 0, playerAction: null,
       narration: generated.narration, suggestedActions: generated.suggestedActions,
       relevantStoryBibleEntryIds: generated.relevantStoryBibleEntryIds,
-      storyBibleUpdates: generated.storyBibleUpdates, completedAtUtc: now, modelId: settings.modelId,
+      storyBibleUpdates: generated.storyBibleUpdates,
+      relevantPlannedEventIds: generated.relevantPlannedEventIds,
+      plannedEventUpdates: generated.plannedEventUpdates,
+      revealedVictoryConditionIds: victory.revealed, metVictoryConditionIds: victory.met,
+      revealedLossConditionIds: loss.revealed, metLossConditionIds: loss.met,
+      completedAtUtc: now, modelId: settings.modelId,
     };
     const story: StoryState = {
       id, label: definition.title, sourceStoryDefinitionId: definition.id,
@@ -52,8 +73,16 @@ export class NarratorService {
         storyPrompt: definition.storyPrompt,
         initialEventsPrompt: definition.initialEventsPrompt,
         initialStoryBible: structuredClone(definition.initialStoryBible),
+        initialPlannedEvents: structuredClone(definition.initialPlannedEvents),
+        initialVictoryConditions: structuredClone(definition.initialVictoryConditions),
+        initialLossConditions: structuredClone(definition.initialLossConditions),
       },
       currentStoryBible: bible,
+      currentPlannedEvents: plannedEvents,
+      currentVictoryConditions: structuredClone(definition.initialVictoryConditions),
+      currentLossConditions: structuredClone(definition.initialLossConditions),
+      revealedVictoryConditionIds: victory.revealed, metVictoryConditionIds: victory.met,
+      revealedLossConditionIds: loss.revealed, metLossConditionIds: loss.met,
       sortOrder: stories.length ? Math.max(...stories.map(x => x.sortOrder)) + 1 : 0,
       startedAtUtc: now, lastActionAtUtc: null, turns: [turn],
     };
@@ -72,13 +101,41 @@ export class NarratorService {
       const sequence = story.turns.length ? story.turns[story.turns.length - 1].sequenceNumber + 1 : 0;
       const now = nowIso();
       const bible = this.applyBible(story.currentStoryBible, generated.storyBibleUpdates, generated.relevantStoryBibleEntryIds, sequence, settings.maxStoryBibleEntries);
+      const plannedEvents = applyPlannedEvents(
+        story.currentPlannedEvents, generated.plannedEventUpdates, generated.relevantPlannedEventIds, sequence, settings.maxPlannedEvents,
+      );
+      // The condition lists themselves never change during play - only these deltas against the
+      // story's existing cumulative revealed/met arrays.
+      const victory = applyConditionTurn(
+        story.currentVictoryConditions, story.revealedVictoryConditionIds, story.metVictoryConditionIds,
+        generated.revealedVictoryConditionIds, generated.metVictoryConditionIds,
+      );
+      const loss = applyConditionTurn(
+        story.currentLossConditions, story.revealedLossConditionIds, story.metLossConditionIds,
+        generated.revealedLossConditionIds, generated.metLossConditionIds,
+      );
       const turn: StoryTurn = {
         id: uuid(), storyStateId: story.id, sequenceNumber: sequence, playerAction: action.trim(),
         narration: generated.narration, suggestedActions: generated.suggestedActions,
         relevantStoryBibleEntryIds: generated.relevantStoryBibleEntryIds,
-        storyBibleUpdates: generated.storyBibleUpdates, completedAtUtc: now, modelId: settings.modelId,
+        storyBibleUpdates: generated.storyBibleUpdates,
+        relevantPlannedEventIds: generated.relevantPlannedEventIds,
+        plannedEventUpdates: generated.plannedEventUpdates,
+        revealedVictoryConditionIds: victory.revealed, metVictoryConditionIds: victory.met,
+        revealedLossConditionIds: loss.revealed, metLossConditionIds: loss.met,
+        completedAtUtc: now, modelId: settings.modelId,
       };
-      const updated = { ...story, currentStoryBible: bible, lastActionAtUtc: now, turns: [...story.turns, turn] };
+      const updated = {
+        ...story,
+        currentStoryBible: bible,
+        currentPlannedEvents: plannedEvents,
+        revealedVictoryConditionIds: [...story.revealedVictoryConditionIds, ...victory.revealed],
+        metVictoryConditionIds: [...story.metVictoryConditionIds, ...victory.met],
+        revealedLossConditionIds: [...story.revealedLossConditionIds, ...loss.revealed],
+        metLossConditionIds: [...story.metLossConditionIds, ...loss.met],
+        lastActionAtUtc: now,
+        turns: [...story.turns, turn],
+      };
       await this.db.saveStory(updated);
       return updated;
     } finally {

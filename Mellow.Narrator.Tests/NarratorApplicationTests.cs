@@ -10,7 +10,7 @@ public sealed class NarratorApplicationTests
         var draft = new StoryPromptDraft(null, "Title", "Raw prompt mentioning today's mutable state");
         var provider = new FakeProvider
         {
-            DefinitionResponse = new("Refined immutable prompt", "Suggested Title", "Initial events", [new("fact", "Fact", ["Content"], [], 3)], [])
+            DefinitionResponse = new("Refined immutable prompt", "Suggested Title", "Initial events", [new("fact", "Fact", ["Content"], [], 3)], [], [], [])
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
 
@@ -26,7 +26,7 @@ public sealed class NarratorApplicationTests
         var draft = new StoryPromptDraft(null, "Title", "Raw prompt");
         var provider = new FakeProvider
         {
-            DefinitionResponse = new("   ", "Suggested Title", "", [], [])
+            DefinitionResponse = new("   ", "Suggested Title", "", [], [], [], [])
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
 
@@ -39,7 +39,7 @@ public sealed class NarratorApplicationTests
         var draft = new StoryPromptDraft(Guid.NewGuid(), "Title", "Raw prompt");
         var provider = new FakeProvider
         {
-            DefinitionResponse = new("Refined prompt", "Suggested Title", "", [], [])
+            DefinitionResponse = new("Refined prompt", "Suggested Title", "", [], [], [], [])
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
 
@@ -52,7 +52,7 @@ public sealed class NarratorApplicationTests
         var draft = new StoryPromptDraft(null, "   ", "Raw prompt");
         var provider = new FakeProvider
         {
-            DefinitionResponse = new("Refined prompt", "A Generated Title", "", [], [])
+            DefinitionResponse = new("Refined prompt", "A Generated Title", "", [], [], [], [])
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
 
@@ -67,7 +67,7 @@ public sealed class NarratorApplicationTests
         var draft = new StoryPromptDraft(null, "My Title", "Raw prompt");
         var provider = new FakeProvider
         {
-            DefinitionResponse = new("Refined prompt", "A Generated Title", "", [], [])
+            DefinitionResponse = new("Refined prompt", "A Generated Title", "", [], [], [], [])
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
 
@@ -82,7 +82,7 @@ public sealed class NarratorApplicationTests
         var draft = new StoryPromptDraft(null, "", "Raw prompt");
         var provider = new FakeProvider
         {
-            DefinitionResponse = new("Refined prompt", "   ", "", [], [])
+            DefinitionResponse = new("Refined prompt", "   ", "", [], [], [], [])
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
 
@@ -95,7 +95,7 @@ public sealed class NarratorApplicationTests
         var draft = new StoryPromptDraft(null, "Title", "Raw prompt");
         var provider = new FakeProvider
         {
-            DefinitionResponse = new("Refined prompt", "Suggested Title", "The village is under curfew.", [], [])
+            DefinitionResponse = new("Refined prompt", "Suggested Title", "The village is under curfew.", [], [], [], [])
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
 
@@ -110,7 +110,7 @@ public sealed class NarratorApplicationTests
         var draft = new StoryPromptDraft(null, "Title", "Raw prompt");
         var provider = new FakeProvider
         {
-            DefinitionResponse = new("Refined prompt", "Suggested Title", new string('x', 20001), [], [])
+            DefinitionResponse = new("Refined prompt", "Suggested Title", new string('x', 20001), [], [], [], [])
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
 
@@ -123,7 +123,7 @@ public sealed class NarratorApplicationTests
         var draft = new StoryPromptDraft(null, "Title", "Raw prompt");
         var provider = new FakeProvider
         {
-            DefinitionResponse = new("Refined prompt", "Suggested Title", "", [], [new("The tower must fall.", 5, 4, [])])
+            DefinitionResponse = new("Refined prompt", "Suggested Title", "", [], [new("The tower must fall.", 5, 4, [], null, [])], [], [])
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
 
@@ -136,10 +136,182 @@ public sealed class NarratorApplicationTests
     }
 
     [Fact]
+    public async Task GenerateDefinition_ResolvesPrerequisiteKeysAmongInitialPlannedEvents()
+    {
+        var draft = new StoryPromptDraft(null, "Title", "Raw prompt");
+        var provider = new FakeProvider
+        {
+            DefinitionResponse = new("Refined prompt", "Suggested Title", "", [],
+            [
+                new("The hero learns the prophecy.", 4, 3, [], "prophecy", []),
+                new("The hero confronts the villain.", 5, 3, [], null, ["prophecy"])
+            ], [], [])
+        };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
+
+        var definition = await app.GenerateDefinitionAsync(draft, false, Guid.NewGuid());
+
+        var prophecy = Assert.Single(definition.InitialPlannedEvents.Entries, x => x.Description == "The hero learns the prophecy.");
+        var confrontation = Assert.Single(definition.InitialPlannedEvents.Entries, x => x.Description == "The hero confronts the villain.");
+        Assert.Equal(prophecy.Id, Assert.Single(confrontation.PrerequisiteEventIds));
+    }
+
+    [Fact]
+    public async Task GenerateDefinition_PersistsGeneratedInitialVictoryAndLossConditions()
+    {
+        var draft = new StoryPromptDraft(null, "Title", "Raw prompt");
+        var provider = new FakeProvider
+        {
+            DefinitionResponse = new(
+                "Refined prompt", "Suggested Title", "", [], [],
+                [new("Defeat the dragon.", false)],
+                [new("The kingdom falls.", true)])
+        };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
+
+        var definition = await app.GenerateDefinitionAsync(draft, false, Guid.NewGuid());
+
+        var victory = Assert.Single(definition.InitialVictoryConditions.Entries);
+        Assert.Equal("Defeat the dragon.", victory.Description);
+        Assert.False(victory.Secret);
+        Assert.NotEqual(Guid.Empty, victory.Id);
+        var loss = Assert.Single(definition.InitialLossConditions.Entries);
+        Assert.Equal("The kingdom falls.", loss.Description);
+        Assert.True(loss.Secret);
+        Assert.NotEqual(victory.Id, loss.Id);
+    }
+
+    [Fact]
+    public async Task GenerateDefinition_RejectsInvalidGeneratedCondition()
+    {
+        var draft = new StoryPromptDraft(null, "Title", "Raw prompt");
+        var provider = new FakeProvider
+        {
+            DefinitionResponse = new("Refined prompt", "Suggested Title", "", [], [], [new("   ", false)], [])
+        };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.GenerateDefinitionAsync(draft, false, Guid.NewGuid()));
+    }
+
+    [Fact]
+    public async Task StartStory_RemapsVictoryAndLossConditionIdsFreshWithNoCollisionAgainstTheSource()
+    {
+        var victory = new StoryCondition(Guid.NewGuid(), "Defeat the dragon.", false);
+        var loss = new StoryCondition(Guid.NewGuid(), "The kingdom falls.", true);
+        var snapshot = new StoryDefinitionSnapshot(
+            "Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, new([victory]), new([loss]));
+        var draft = new StartStoryDraft(Guid.NewGuid(), snapshot);
+        var provider = new FakeProvider
+        {
+            StoryResponse = new("Opening", ["Continue", "Wait"], [], [], [], [], [], [], [], [], "provider-id", 10, 20)
+        };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
+
+        var result = await app.StartStoryAsync(draft, Guid.NewGuid());
+
+        var newVictory = Assert.Single(result.State.CurrentVictoryConditions.Entries);
+        Assert.NotEqual(victory.Id, newVictory.Id);
+        Assert.Equal(victory.Description, newVictory.Description);
+        Assert.Equal(victory.Secret, newVictory.Secret);
+        var newLoss = Assert.Single(result.State.CurrentLossConditions.Entries);
+        Assert.NotEqual(loss.Id, newLoss.Id);
+        Assert.Equal(loss.Description, newLoss.Description);
+        Assert.Equal(loss.Secret, newLoss.Secret);
+        Assert.NotEqual(newVictory.Id, newLoss.Id);
+
+        // The snapshot carried in the new state's Setup must reference the same freshly remapped ids,
+        // not the original definition's ids - matching the pattern already used for Story Bible/Planned
+        // Event ids in StartStory_UsesTemporarySnapshotAndCarriesMaintenance above.
+        Assert.Equal(newVictory.Id, Assert.Single(result.State.Setup.Definition.InitialVictoryConditions.Entries).Id);
+        Assert.Equal(newLoss.Id, Assert.Single(result.State.Setup.Definition.InitialLossConditions.Entries).Id);
+    }
+
+    [Fact]
+    public async Task StartStory_AppliesInitialRevealedAndMetConditionSetsFromTheOpeningResponse()
+    {
+        var victory = new StoryCondition(Guid.NewGuid(), "Defeat the dragon.", false);
+        var loss = new StoryCondition(Guid.NewGuid(), "The kingdom falls.", true);
+        var snapshot = new StoryDefinitionSnapshot(
+            "Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, new([victory]), new([loss]));
+        var draft = new StartStoryDraft(Guid.NewGuid(), snapshot);
+        var provider = new FakeProvider
+        {
+            // The response can only reference the conditions' NEW ids, which are assigned during this
+            // very call - StoryResponseFactory reads them back off the context NarratorApplication built.
+            StoryResponseFactory = context => new(
+                "Opening",
+                ["Continue", "Wait"],
+                [], [], [], [],
+                [context.VictoryConditions.Conditions.Entries[0].Id],
+                [],
+                [],
+                [context.LossConditions.Conditions.Entries[0].Id],
+                "provider-id", 10, 20)
+        };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
+
+        var result = await app.StartStoryAsync(draft, Guid.NewGuid());
+
+        var newVictory = Assert.Single(result.State.CurrentVictoryConditions.Entries);
+        var newLoss = Assert.Single(result.State.CurrentLossConditions.Entries);
+
+        Assert.Equal(newVictory.Id, Assert.Single(result.State.RevealedVictoryConditionIds));
+        Assert.Empty(result.State.MetVictoryConditionIds);
+        Assert.Empty(result.State.RevealedLossConditionIds);
+        Assert.Equal(newLoss.Id, Assert.Single(result.State.MetLossConditionIds));
+
+        // The opening StoryTurn only ever carries this turn's own delta - for the very first turn that
+        // happens to equal the state's freshly-initialized cumulative totals.
+        Assert.Equal(newVictory.Id, Assert.Single(result.Opening.RevealedVictoryConditionIds));
+        Assert.Empty(result.Opening.MetVictoryConditionIds);
+        Assert.Empty(result.Opening.RevealedLossConditionIds);
+        Assert.Equal(newLoss.Id, Assert.Single(result.Opening.MetLossConditionIds));
+    }
+
+    [Fact]
+    public async Task PlayTurn_AccumulatesRevealedAndMetConditionIdsCumulativelyWhileEachTurnKeepsOnlyItsOwnDelta()
+    {
+        var condition = new StoryCondition(Guid.NewGuid(), "Defeat the dragon.", false);
+        var stateId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new StoryDefinitionSnapshot(
+            "Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, new([condition]), StoryConditions.Empty);
+        var state = new StoryState(
+            stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [],
+            new([condition]), StoryConditions.Empty, [], [], [], [], 0, now, now, 0);
+        var states = new MemoryStates(state, []);
+        var provider = new FakeProvider
+        {
+            StoryResponse = new("Turn one", ["Continue"], [], [], [], [], [condition.Id], [], [], [], null, null, null)
+        };
+        var app = CreateApplication(new MemoryDefinitions(), states, provider);
+
+        var firstTurn = await app.PlayTurnAsync(stateId, "Approach the dragon");
+
+        Assert.Equal(condition.Id, Assert.Single(firstTurn.Turn.RevealedVictoryConditionIds));
+        Assert.Empty(firstTurn.Turn.MetVictoryConditionIds);
+        Assert.Equal(condition.Id, Assert.Single(firstTurn.State.RevealedVictoryConditionIds));
+        Assert.Empty(firstTurn.State.MetVictoryConditionIds);
+
+        // A condition already revealed must not be reported as revealed again - only the new "met" delta
+        // is reported this turn.
+        provider.StoryResponse = new("Turn two", ["Continue"], [], [], [], [], [], [condition.Id], [], [], null, null, null);
+
+        var secondTurn = await app.PlayTurnAsync(stateId, "Strike the dragon");
+
+        Assert.Empty(secondTurn.Turn.RevealedVictoryConditionIds);
+        Assert.Equal(condition.Id, Assert.Single(secondTurn.Turn.MetVictoryConditionIds));
+        // The state's cumulative totals now include both turns' contributions.
+        Assert.Equal(condition.Id, Assert.Single(secondTurn.State.RevealedVictoryConditionIds));
+        Assert.Equal(condition.Id, Assert.Single(secondTurn.State.MetVictoryConditionIds));
+    }
+
+    [Fact]
     public async Task StartStory_UsesTemporarySnapshotAndCarriesMaintenance()
     {
         var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Fact", ["Content"], [], 3, 0);
-        var snapshot = new StoryDefinitionSnapshot("Snapshot title", "Snapshot prompt", "", new([entry]), PlannedEvents.Empty);
+        var snapshot = new StoryDefinitionSnapshot("Snapshot title", "Snapshot prompt", "", new([entry]), PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
         var change = new AppliedStoryBibleChange(StoryBibleOperation.Replace, entry.Id, entry, entry, StoryBibleChangeSource.ManualEdit);
         var maintenance = new StoryBibleMaintenanceRecord(
             Guid.NewGuid(),
@@ -153,7 +325,7 @@ public sealed class NarratorApplicationTests
         };
         var provider = new FakeProvider
         {
-            StoryResponse = new("Opening", ["Continue", "Wait"], [], [], [], [], "provider-id", 10, 20)
+            StoryResponse = new("Opening", ["Continue", "Wait"], [], [], [], [], [], [], [], [], "provider-id", 10, 20)
         };
         var states = new MemoryStates();
         var app = CreateApplication(new MemoryDefinitions(), states, provider);
@@ -209,8 +381,8 @@ public sealed class NarratorApplicationTests
     {
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty);
-        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], 0, now, now, 2);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, now, 2);
         var turns = Enumerable.Range(0, 3).Select(sequence => new StoryTurn(
             Guid.NewGuid(),
             stateId,
@@ -222,12 +394,16 @@ public sealed class NarratorApplicationTests
             [],
             [],
             [],
+            [],
+            [],
+            [],
+            [],
             now,
             new("old-model", null, null, null))).ToArray();
         var states = new MemoryStates(state, turns);
         var provider = new FakeProvider
         {
-            StoryResponse = new("Next", ["Continue", "Wait"], [], [], [], [], null, null, null)
+            StoryResponse = new("Next", ["Continue", "Wait"], [], [], [], [], [], [], [], [], null, null, null)
         };
         var settings = ConfiguredSettings() with
         {
@@ -248,10 +424,10 @@ public sealed class NarratorApplicationTests
     {
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty);
-        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], 0, now, now, 0);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, now, 0);
         var states = new MemoryStates(state, []);
-        var provider = new FakeProvider { StoryResponse = new("Next", ["Continue"], [], [], [], [], null, null, null) };
+        var provider = new FakeProvider { StoryResponse = new("Next", ["Continue"], [], [], [], [], [], [], [], [], null, null, null) };
         var app = CreateApplication(new MemoryDefinitions(), states, provider);
 
         await Assert.ThrowsAsync<NarratorException>(() => app.PlayTurnAsync(stateId, "   "));
@@ -262,12 +438,12 @@ public sealed class NarratorApplicationTests
     {
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty);
-        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], 0, now, now, 0);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, now, 0);
         var states = new MemoryStates(state, []);
         var provider = new FakeProvider
         {
-            StoryResponse = new("Next", ["Only one"], [], [], [], [], null, null, null)
+            StoryResponse = new("Next", ["Only one"], [], [], [], [], [], [], [], [], null, null, null)
         };
         var app = CreateApplication(new MemoryDefinitions(), states, provider);
 
@@ -281,12 +457,12 @@ public sealed class NarratorApplicationTests
     {
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty);
-        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], 0, now, now, 0);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, now, 0);
         var states = new MemoryStates(state, []);
         var provider = new FakeProvider
         {
-            StoryResponse = new("Next", ["A", "B", "C", "D", "E"], [], [], [], [], null, null, null)
+            StoryResponse = new("Next", ["A", "B", "C", "D", "E"], [], [], [], [], [], [], [], [], null, null, null)
         };
         var app = CreateApplication(new MemoryDefinitions(), states, provider);
 
@@ -300,10 +476,10 @@ public sealed class NarratorApplicationTests
     {
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty);
-        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], 0, now, now, 0);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, now, 0);
         var states = new MemoryStates(state, []);
-        var provider = new FakeProvider { StoryResponse = new("   ", ["Continue"], [], [], [], [], null, null, null) };
+        var provider = new FakeProvider { StoryResponse = new("   ", ["Continue"], [], [], [], [], [], [], [], [], null, null, null) };
         var app = CreateApplication(new MemoryDefinitions(), states, provider);
 
         await Assert.ThrowsAsync<NarratorException>(() => app.PlayTurnAsync(stateId, "Continue"));
@@ -314,13 +490,13 @@ public sealed class NarratorApplicationTests
     {
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty);
-        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], 0, now, now, 0);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, now, 0);
         var states = new MemoryStates(state, []);
         var limits = ConfiguredSettings().ContentLimits;
         var provider = new FakeProvider
         {
-            StoryResponse = new(new string('x', limits.MaxNarrationCharacters + 1), ["Continue"], [], [], [], [], null, null, null)
+            StoryResponse = new(new string('x', limits.MaxNarrationCharacters + 1), ["Continue"], [], [], [], [], [], [], [], [], null, null, null)
         };
         var app = CreateApplication(new MemoryDefinitions(), states, provider);
 
@@ -332,10 +508,10 @@ public sealed class NarratorApplicationTests
     {
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty);
-        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], 0, now, now, 0);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, now, 0);
         var states = new MemoryStates(state, []);
-        var provider = new FakeProvider { StoryResponse = new("Next", ["   "], [], [], [], [], null, null, null) };
+        var provider = new FakeProvider { StoryResponse = new("Next", ["   "], [], [], [], [], [], [], [], [], null, null, null) };
         var app = CreateApplication(new MemoryDefinitions(), states, provider);
 
         await Assert.ThrowsAsync<NarratorException>(() => app.PlayTurnAsync(stateId, "Continue"));
@@ -346,13 +522,13 @@ public sealed class NarratorApplicationTests
     {
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty);
-        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], 0, now, now, 0);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, now, 0);
         var states = new MemoryStates(state, []);
         var limits = ConfiguredSettings().ContentLimits;
         var provider = new FakeProvider
         {
-            StoryResponse = new("Next", [new string('x', limits.MaxSuggestedActionCharacters + 1)], [], [], [], [], null, null, null)
+            StoryResponse = new("Next", [new string('x', limits.MaxSuggestedActionCharacters + 1)], [], [], [], [], [], [], [], [], null, null, null)
         };
         var app = CreateApplication(new MemoryDefinitions(), states, provider);
 
@@ -364,14 +540,14 @@ public sealed class NarratorApplicationTests
     {
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty);
-        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], 0, now, now, 0);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, now, 0);
         var states = new MemoryStates(state, []);
         var limits = ConfiguredSettings().ContentLimits;
         var updates = Enumerable.Range(0, limits.MaxStoryBibleUpdatesPerResponse + 1)
             .Select(_ => new ProposedStoryBibleUpdate(StoryBibleOperation.Remove, Guid.NewGuid(), null))
             .ToArray();
-        var provider = new FakeProvider { StoryResponse = new("Next", ["Continue"], [], updates, [], [], null, null, null) };
+        var provider = new FakeProvider { StoryResponse = new("Next", ["Continue"], [], updates, [], [], [], [], [], [], null, null, null) };
         var app = CreateApplication(new MemoryDefinitions(), states, provider);
 
         await Assert.ThrowsAsync<NarratorException>(() => app.PlayTurnAsync(stateId, "Continue"));
@@ -381,11 +557,11 @@ public sealed class NarratorApplicationTests
     public async Task StartStoryThenPlayTurn_RoundTripsPlannedEventsThroughGenerationContext()
     {
         var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The bridge collapses.", 3, 3, [], 0);
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, new([plannedEvent]));
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, new([plannedEvent]), StoryConditions.Empty, StoryConditions.Empty);
         var draft = new StartStoryDraft(Guid.NewGuid(), snapshot);
         var provider = new FakeProvider
         {
-            StoryResponse = new("Opening", ["Continue", "Wait"], [], [], [], [], "provider-id", 10, 20)
+            StoryResponse = new("Opening", ["Continue", "Wait"], [], [], [], [], [], [], [], [], "provider-id", 10, 20)
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
 
@@ -404,8 +580,12 @@ public sealed class NarratorApplicationTests
             [],
             [
                 new(PlannedEventOperation.Remove, startedPlannedEvent.Id, null, PlannedEventOutcome.Fulfilled),
-                new(PlannedEventOperation.Add, null, new("A new complication arises.", 2, 3, []), null)
+                new(PlannedEventOperation.Add, null, new("A new complication arises.", 2, 3, [], null, []), null)
             ],
+            [],
+            [],
+            [],
+            [],
             null,
             null,
             null);
@@ -427,7 +607,7 @@ public sealed class NarratorApplicationTests
         var mandatory = new PlannedEvent(Guid.NewGuid(), "Must happen", PlannedEventProcessor.MandatoryImportance, 3, [], 0);
         var definitions = new MemoryDefinitions();
         var definition = new StoryDefinition(
-            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], new([mandatory]), [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], new([mandatory]), [], StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         await definitions.SaveAsync(definition);
         var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
 
@@ -446,9 +626,9 @@ public sealed class NarratorApplicationTests
     {
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
         var existing = new PlannedEvent(Guid.NewGuid(), "Existing event", 3, 3, [], 2);
-        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], new([existing]), [], 0, now, now, 2);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], new([existing]), [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, now, 2);
         var states = new MemoryStates(state, []);
         var app = CreateApplication(new MemoryDefinitions(), states, new FakeProvider());
 
@@ -464,13 +644,137 @@ public sealed class NarratorApplicationTests
     }
 
     [Fact]
+    public async Task UpdateInitialVictoryConditions_ManualEditRoundTripsAssigningFreshIdsToNewEntries()
+    {
+        var existing = new StoryCondition(Guid.NewGuid(), "Defeat the dragon.", false);
+        var definitions = new MemoryDefinitions();
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], PlannedEvents.Empty, [],
+            new([existing]), StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        await definitions.SaveAsync(definition);
+        var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
+
+        var added = new StoryCondition(Guid.Empty, "Escape the tower.", true);
+        var updated = await app.UpdateInitialVictoryConditionsAsync(definition.Id, new([existing, added]));
+
+        Assert.Equal(2, updated.InitialVictoryConditions.Entries.Count);
+        Assert.Contains(updated.InitialVictoryConditions.Entries, x => x.Id == existing.Id);
+        var newEntry = Assert.Single(updated.InitialVictoryConditions.Entries, x => x.Id != existing.Id);
+        Assert.NotEqual(Guid.Empty, newEntry.Id);
+        Assert.Equal("Escape the tower.", newEntry.Description);
+        Assert.True(newEntry.Secret);
+        Assert.Empty(updated.InitialLossConditions.Entries);
+    }
+
+    [Fact]
+    public async Task UpdateInitialVictoryConditions_RejectsWhenExceedingConfiguredLimits()
+    {
+        var definitions = new MemoryDefinitions();
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], PlannedEvents.Empty, [],
+            StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        await definitions.SaveAsync(definition);
+        var settings = ConfiguredSettings() with
+        {
+            ContentLimits = ConfiguredSettings().ContentLimits with { MaxConditions = 1 }
+        };
+        var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider(), settings);
+
+        var tooMany = new StoryConditions([
+            new(Guid.Empty, "Defeat the dragon.", false),
+            new(Guid.Empty, "Escape the tower.", false)
+        ]);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.UpdateInitialVictoryConditionsAsync(definition.Id, tooMany));
+    }
+
+    [Fact]
+    public async Task UpdateInitialLossConditions_ManualEditRoundTripsAssigningFreshIdsToNewEntries()
+    {
+        var existing = new StoryCondition(Guid.NewGuid(), "The kingdom falls.", true);
+        var definitions = new MemoryDefinitions();
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], PlannedEvents.Empty, [],
+            StoryConditions.Empty, new([existing]), 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        await definitions.SaveAsync(definition);
+        var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
+
+        var added = new StoryCondition(Guid.Empty, "The hero is captured.", false);
+        var updated = await app.UpdateInitialLossConditionsAsync(definition.Id, new([existing, added]));
+
+        Assert.Equal(2, updated.InitialLossConditions.Entries.Count);
+        Assert.Contains(updated.InitialLossConditions.Entries, x => x.Id == existing.Id);
+        var newEntry = Assert.Single(updated.InitialLossConditions.Entries, x => x.Id != existing.Id);
+        Assert.NotEqual(Guid.Empty, newEntry.Id);
+        Assert.Equal("The hero is captured.", newEntry.Description);
+        Assert.False(newEntry.Secret);
+        Assert.Empty(updated.InitialVictoryConditions.Entries);
+    }
+
+    [Fact]
+    public async Task UpdateInitialLossConditions_RejectsWhenExceedingConfiguredLimits()
+    {
+        var definitions = new MemoryDefinitions();
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], PlannedEvents.Empty, [],
+            StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        await definitions.SaveAsync(definition);
+        var settings = ConfiguredSettings() with
+        {
+            ContentLimits = ConfiguredSettings().ContentLimits with { MaxConditions = 1 }
+        };
+        var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider(), settings);
+
+        var tooMany = new StoryConditions([
+            new(Guid.Empty, "The hero is captured.", false),
+            new(Guid.Empty, "The kingdom falls.", true)
+        ]);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.UpdateInitialLossConditionsAsync(definition.Id, tooMany));
+    }
+
+    [Fact]
+    public async Task UpdateInitialVictoryConditions_RejectsEntryExceedingDescriptionLimit()
+    {
+        var definitions = new MemoryDefinitions();
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], PlannedEvents.Empty, [],
+            StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        await definitions.SaveAsync(definition);
+        var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
+
+        var invalid = new StoryConditions([new(Guid.NewGuid(), "   ", false)]);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.UpdateInitialVictoryConditionsAsync(definition.Id, invalid));
+    }
+
+    [Fact]
+    public async Task UpdateInitialVictoryConditions_RejectsDuplicateConditionIds()
+    {
+        var id = Guid.NewGuid();
+        var definitions = new MemoryDefinitions();
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], PlannedEvents.Empty, [],
+            StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        await definitions.SaveAsync(definition);
+        var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
+
+        var duplicate = new StoryConditions([
+            new(id, "Defeat the dragon.", false),
+            new(id, "Escape the tower.", false)
+        ]);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.UpdateInitialVictoryConditionsAsync(definition.Id, duplicate));
+    }
+
+    [Fact]
     public async Task CullDefinition_AlsoCullsPlannedEventsExceedingLimits()
     {
         var lowImportance = new PlannedEvent(Guid.NewGuid(), "Low", 1, 3, [], 0);
         var highImportance = new PlannedEvent(Guid.NewGuid(), "High", 5, 3, [], 0);
         var definitions = new MemoryDefinitions();
         var definition = new StoryDefinition(
-            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], new([lowImportance, highImportance]), [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], new([lowImportance, highImportance]), [], StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         await definitions.SaveAsync(definition);
         var settings = ConfiguredSettings() with { StoryGeneration = ConfiguredSettings().StoryGeneration with { MaxPlannedEvents = 1 } };
         var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider(), settings);
@@ -490,8 +794,8 @@ public sealed class NarratorApplicationTests
         var highImportance = new PlannedEvent(Guid.NewGuid(), "High", 5, 3, [], 0);
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty);
-        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], new([lowImportance, highImportance]), [], 0, now, null, 0);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], new([lowImportance, highImportance]), [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, null, 0);
         var states = new MemoryStates(state, []);
         var settings = ConfiguredSettings() with { StoryGeneration = ConfiguredSettings().StoryGeneration with { MaxPlannedEvents = 1 } };
         var app = CreateApplication(new MemoryDefinitions(), states, new FakeProvider(), settings);
@@ -511,7 +815,7 @@ public sealed class NarratorApplicationTests
         var remove = new StoryBibleEntry(Guid.NewGuid(), "fact", "Remove me", ["Content"], [], 2, 0);
         var definitions = new MemoryDefinitions();
         var definition = new StoryDefinition(
-            Guid.NewGuid(), "Story", "Prompt", "", new([keep, remove]), [], PlannedEvents.Empty, [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            Guid.NewGuid(), "Story", "Prompt", "", new([keep, remove]), [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         await definitions.SaveAsync(definition);
         var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
 
@@ -538,7 +842,7 @@ public sealed class NarratorApplicationTests
     {
         var definitions = new MemoryDefinitions();
         var definition = new StoryDefinition(
-            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], PlannedEvents.Empty, [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         await definitions.SaveAsync(definition);
         var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
 
@@ -552,7 +856,7 @@ public sealed class NarratorApplicationTests
     {
         var definitions = new MemoryDefinitions();
         var definition = new StoryDefinition(
-            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], PlannedEvents.Empty, [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         await definitions.SaveAsync(definition);
         var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
 
@@ -567,7 +871,7 @@ public sealed class NarratorApplicationTests
         var id = Guid.NewGuid();
         var definitions = new MemoryDefinitions();
         var definition = new StoryDefinition(
-            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], PlannedEvents.Empty, [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         await definitions.SaveAsync(definition);
         var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
 
@@ -582,9 +886,9 @@ public sealed class NarratorApplicationTests
     {
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
         var existing = new StoryBibleEntry(Guid.NewGuid(), "fact", "Existing", ["Content"], [], 3, 2);
-        var state = new StoryState(stateId, "Story", null, new(snapshot), new([existing]), [], PlannedEvents.Empty, [], 0, now, now, 2);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), new([existing]), [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, now, 2);
         var states = new MemoryStates(state, []);
         var app = CreateApplication(new MemoryDefinitions(), states, new FakeProvider());
 
@@ -606,7 +910,7 @@ public sealed class NarratorApplicationTests
         var highImportance = new StoryBibleEntry(Guid.NewGuid(), "fact", "High", ["Content"], [], 5, 0);
         var definitions = new MemoryDefinitions();
         var definition = new StoryDefinition(
-            Guid.NewGuid(), "Story", "Prompt", "", new([lowImportance, highImportance]), [], PlannedEvents.Empty, [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            Guid.NewGuid(), "Story", "Prompt", "", new([lowImportance, highImportance]), [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         await definitions.SaveAsync(definition);
         var settings = ConfiguredSettings() with { StoryGeneration = ConfiguredSettings().StoryGeneration with { MaxStoryBibleEntries = 1 } };
         var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider(), settings);
@@ -626,7 +930,7 @@ public sealed class NarratorApplicationTests
         var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Entry", ["Content"], [], 3, 0);
         var definitions = new MemoryDefinitions();
         var definition = new StoryDefinition(
-            Guid.NewGuid(), "Story", "Prompt", "", new([entry]), [], PlannedEvents.Empty, [], 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            Guid.NewGuid(), "Story", "Prompt", "", new([entry]), [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         await definitions.SaveAsync(definition);
         var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
 
@@ -642,8 +946,8 @@ public sealed class NarratorApplicationTests
         var highImportance = new StoryBibleEntry(Guid.NewGuid(), "fact", "High", ["Content"], [], 5, 0);
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty);
-        var state = new StoryState(stateId, "Story", null, new(snapshot), new([lowImportance, highImportance]), [], PlannedEvents.Empty, [], 0, now, null, 0);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), new([lowImportance, highImportance]), [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, null, 0);
         var states = new MemoryStates(state, []);
         var settings = ConfiguredSettings() with { StoryGeneration = ConfiguredSettings().StoryGeneration with { MaxStoryBibleEntries = 1 } };
         var app = CreateApplication(new MemoryDefinitions(), states, new FakeProvider(), settings);
@@ -662,8 +966,8 @@ public sealed class NarratorApplicationTests
         var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Entry", ["Content"], [], 3, 0);
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
-        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty);
-        var state = new StoryState(stateId, "Story", null, new(snapshot), new([entry]), [], PlannedEvents.Empty, [], 0, now, null, 0);
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), new([entry]), [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, null, 0);
         var states = new MemoryStates(state, []);
         var app = CreateApplication(new MemoryDefinitions(), states, new FakeProvider());
 
@@ -750,17 +1054,17 @@ public sealed class NarratorApplicationTests
 
         var definitions = new MemoryDefinitions();
         var now = DateTimeOffset.UtcNow;
-        await definitions.SaveAsync(new StoryDefinition(Guid.NewGuid(), "Fits", "Prompt", "", new([withinLimits]), [], PlannedEvents.Empty, [], 0, now, now));
-        await definitions.SaveAsync(new StoryDefinition(Guid.NewGuid(), "TooBig", "Prompt", "", overLimits, [], PlannedEvents.Empty, [], 1, now, now));
+        await definitions.SaveAsync(new StoryDefinition(Guid.NewGuid(), "Fits", "Prompt", "", new([withinLimits]), [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now));
+        await definitions.SaveAsync(new StoryDefinition(Guid.NewGuid(), "TooBig", "Prompt", "", overLimits, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, 1, now, now));
 
-        var fittingSnapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", new([withinLimits]), PlannedEvents.Empty);
-        var overSnapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", overLimits, PlannedEvents.Empty);
+        var fittingSnapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", new([withinLimits]), PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
+        var overSnapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", overLimits, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
         var states = new MemoryStates();
         await states.CreateAsync(
-            new StoryState(Guid.NewGuid(), "Fits", null, new(fittingSnapshot), new([withinLimits]), [], PlannedEvents.Empty, [], 0, now, null, 0),
+            new StoryState(Guid.NewGuid(), "Fits", null, new(fittingSnapshot), new([withinLimits]), [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, null, 0),
             OpeningTurn());
         await states.CreateAsync(
-            new StoryState(Guid.NewGuid(), "TooBig", null, new(overSnapshot), overLimits, [], PlannedEvents.Empty, [], 1, now, null, 0),
+            new StoryState(Guid.NewGuid(), "TooBig", null, new(overSnapshot), overLimits, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 1, now, null, 0),
             OpeningTurn());
 
         var app = CreateApplication(definitions, states, new FakeProvider());
@@ -779,8 +1083,8 @@ public sealed class NarratorApplicationTests
         var targetStateId = Guid.NewGuid();
         using var lease = coordinator.Enter(targetStateId);
 
-        var draft = new StartStoryDraft(Guid.NewGuid(), new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty));
-        var provider = new FakeProvider { StoryResponse = new("Opening", ["Continue"], [], [], [], [], "id", 10, 20) };
+        var draft = new StartStoryDraft(Guid.NewGuid(), new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty));
+        var provider = new FakeProvider { StoryResponse = new("Opening", ["Continue"], [], [], [], [], [], [], [], [], "id", 10, 20) };
         var app = new NarratorApplication(
             new MemoryDefinitions(),
             new MemoryStates(),
@@ -819,7 +1123,7 @@ public sealed class NarratorApplicationTests
     };
 
     private static StoryTurn OpeningTurn() => new(
-        Guid.NewGuid(), Guid.NewGuid(), 0, null, "Opening", ["Continue"], [], [], [], [], DateTimeOffset.UtcNow, new("model", null, null, null));
+        Guid.NewGuid(), Guid.NewGuid(), 0, null, "Opening", ["Continue"], [], [], [], [], [], [], [], [], DateTimeOffset.UtcNow, new("model", null, null, null));
 
     private sealed class MemorySettings(ApiConnectionSettings value) : IApiConnectionSettingsStore
     {
@@ -859,8 +1163,12 @@ public sealed class NarratorApplicationTests
     {
         // Settable, not init-only: some tests need to change the canned response between two calls
         // made through the same app/provider instance (e.g. StartStoryAsync then PlayTurnAsync).
-        public StoryGenerationResponse StoryResponse { get; set; } = new("", [], [], [], [], [], null, null, null);
-        public StoryDefinitionGenerationResponse DefinitionResponse { get; set; } = new("", "", "", [], []);
+        public StoryGenerationResponse StoryResponse { get; set; } = new("", [], [], [], [], [], [], [], [], [], null, null, null);
+        public StoryDefinitionGenerationResponse DefinitionResponse { get; set; } = new("", "", "", [], [], [], []);
+        // Used instead of StoryResponse when a test needs to reference ids that only exist once
+        // NarratorApplication has remapped them (e.g. Story Condition ids freshly assigned during
+        // StartStoryAsync) - the context passed to Generate*Async carries those new ids.
+        public Func<GenerationContext, StoryGenerationResponse>? StoryResponseFactory { get; set; }
         public int OpeningCalls { get; private set; }
         public GenerationContext? LastContext { get; private set; }
         public ApiConnectionSettings? DiscoverySettings { get; private set; }
@@ -878,12 +1186,12 @@ public sealed class NarratorApplicationTests
         {
             OpeningCalls++;
             LastContext = context;
-            return Task.FromResult(StoryResponse);
+            return Task.FromResult(StoryResponseFactory?.Invoke(context) ?? StoryResponse);
         }
         public Task<StoryGenerationResponse> GenerateTurnAsync(ApiConnectionSettings settings, string? credential, GenerationContext context, CancellationToken cancellationToken = default)
         {
             LastContext = context;
-            return Task.FromResult(StoryResponse);
+            return Task.FromResult(StoryResponseFactory?.Invoke(context) ?? StoryResponse);
         }
     }
 }

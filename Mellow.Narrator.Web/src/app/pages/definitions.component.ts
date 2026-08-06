@@ -46,7 +46,7 @@ import { NarratorService } from '../core/narrator.service';
             </mat-card-header>
             <mat-card-content>
               <p>{{ item.storyPrompt }}</p>
-              <mat-chip-set><mat-chip>{{ item.initialStoryBible.length }} Bible entries</mat-chip></mat-chip-set>
+              <mat-chip-set><mat-chip>{{ item.initialStoryBible.length }} Bible entries</mat-chip><mat-chip>{{ item.initialPlannedEvents.length }} Planned Events</mat-chip></mat-chip-set>
             </mat-card-content>
             <mat-card-actions align="end">
               <button mat-button [disabled]="index === 0" (click)="move(index, -1)">Earlier</button>
@@ -106,6 +106,9 @@ export class DefinitionsComponent implements OnInit {
       const raw = JSON.parse(await file.text());
       const source = raw.definition ?? raw.data?.definition ?? raw;
       const bible = source.initialStoryBible?.entries ?? source.initialStoryBible ?? [];
+      const plannedEvents = source.initialPlannedEvents?.entries ?? source.initialPlannedEvents ?? [];
+      const victoryConditions = source.initialVictoryConditions?.entries ?? source.initialVictoryConditions ?? [];
+      const lossConditions = source.initialLossConditions?.entries ?? source.initialLossConditions ?? [];
       const definitions = await this.db.definitions();
       const imported: StoryDefinition = {
         id: await this.db.definition(source.id) ? uuid() : String(source.id ?? uuid()),
@@ -113,6 +116,9 @@ export class DefinitionsComponent implements OnInit {
         storyPrompt: String(source.storyPrompt ?? ''),
         initialEventsPrompt: String(source.initialEventsPrompt ?? ''),
         initialStoryBible: bible,
+        initialPlannedEvents: plannedEvents,
+        initialVictoryConditions: victoryConditions,
+        initialLossConditions: lossConditions,
         sortOrder: definitions.length ? Math.max(...definitions.map(x => x.sortOrder)) + 1 : 0,
         createdAtUtc: source.createdAtUtc ?? nowIso(),
         updatedAtUtc: nowIso(),

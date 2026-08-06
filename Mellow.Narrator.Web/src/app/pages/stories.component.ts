@@ -37,7 +37,7 @@ import { NarratorService } from '../core/narrator.service';
             </mat-card-header>
             <mat-card-content>
               <p>{{ lastNarration(story) }}</p>
-              <mat-chip-set><mat-chip>{{ story.currentStoryBible.length }} Bible entries</mat-chip><mat-chip>Started {{ story.startedAtUtc | date:'mediumDate' }}</mat-chip></mat-chip-set>
+              <mat-chip-set><mat-chip>{{ story.currentStoryBible.length }} Bible entries</mat-chip><mat-chip>{{ story.currentPlannedEvents.length }} Planned Events</mat-chip><mat-chip>Started {{ story.startedAtUtc | date:'mediumDate' }}</mat-chip></mat-chip-set>
               @if (renaming === story.id) {
                 <mat-form-field appearance="outline" class="rename"><mat-label>Story label</mat-label><input matInput [(ngModel)]="story.label" (keyup.enter)="saveLabel(story)"></mat-form-field>
               }
@@ -110,17 +110,31 @@ export class StoriesComponent implements OnInit {
           ...state,
           definition: state.setup?.definition ?? state.definition,
           currentStoryBible: state.currentStoryBible?.entries ?? state.currentStoryBible ?? [],
+          currentPlannedEvents: state.currentPlannedEvents?.entries ?? state.currentPlannedEvents ?? [],
           turns,
         };
       }
       const stories = await this.db.stories();
       const id = await this.db.story(source.id) ? uuid() : String(source.id ?? uuid());
+      const definition = source.definition ?? {};
       const imported: StoryState = {
         id,
         label: String(source.label ?? source.definition?.title ?? 'Imported story'),
         sourceStoryDefinitionId: source.sourceStoryDefinitionId ?? null,
-        definition: source.definition,
+        definition: {
+          ...definition,
+          initialPlannedEvents: definition.initialPlannedEvents?.entries ?? definition.initialPlannedEvents ?? [],
+          initialVictoryConditions: definition.initialVictoryConditions?.entries ?? definition.initialVictoryConditions ?? [],
+          initialLossConditions: definition.initialLossConditions?.entries ?? definition.initialLossConditions ?? [],
+        },
         currentStoryBible: source.currentStoryBible?.entries ?? source.currentStoryBible ?? [],
+        currentPlannedEvents: source.currentPlannedEvents?.entries ?? source.currentPlannedEvents ?? [],
+        currentVictoryConditions: source.currentVictoryConditions?.entries ?? source.currentVictoryConditions ?? [],
+        currentLossConditions: source.currentLossConditions?.entries ?? source.currentLossConditions ?? [],
+        revealedVictoryConditionIds: source.revealedVictoryConditionIds ?? [],
+        metVictoryConditionIds: source.metVictoryConditionIds ?? [],
+        revealedLossConditionIds: source.revealedLossConditionIds ?? [],
+        metLossConditionIds: source.metLossConditionIds ?? [],
         sortOrder: stories.length ? Math.max(...stories.map(x => x.sortOrder)) + 1 : 0,
         startedAtUtc: source.startedAtUtc ?? nowIso(),
         lastActionAtUtc: source.lastActionAtUtc ?? null,
@@ -130,6 +144,12 @@ export class StoriesComponent implements OnInit {
           storyStateId: id,
           sequenceNumber: turn.sequenceNumber ?? index,
           modelId: turn.modelId ?? turn.generation?.modelId ?? 'imported',
+          relevantPlannedEventIds: turn.relevantPlannedEventIds ?? [],
+          plannedEventUpdates: turn.plannedEventUpdates ?? [],
+          revealedVictoryConditionIds: turn.revealedVictoryConditionIds ?? [],
+          metVictoryConditionIds: turn.metVictoryConditionIds ?? [],
+          revealedLossConditionIds: turn.revealedLossConditionIds ?? [],
+          metLossConditionIds: turn.metLossConditionIds ?? [],
         })),
       };
       await this.db.saveStory(imported);

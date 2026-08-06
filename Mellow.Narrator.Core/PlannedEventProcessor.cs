@@ -35,15 +35,32 @@ public static class PlannedEventProcessor
         if (relevant.Any(x => !entries.ContainsKey(x)))
             throw new NarratorException("The model marked an unknown Planned Event as relevant.");
 
+        // Assign every Add a real id up front and collect a Key -> id map, so any proposal in this same
+        // batch (including another Add) can reference a sibling Add's id via PrerequisiteKeys before the
+        // loop below actually creates it - order within the batch doesn't matter, and the model still
+        // never invents a real id itself. See the ProposedPlannedEvent comment in Models.cs.
+        var addedIds = new Guid?[updates.Count];
+        var keyToId = new Dictionary<string, Guid>();
+        for (var i = 0; i < updates.Count; i++)
+        {
+            if (updates[i].Operation != PlannedEventOperation.Add || updates[i].Entry is null) continue;
+            var id = createId();
+            addedIds[i] = id;
+            var key = updates[i].Entry!.Key;
+            if (!string.IsNullOrWhiteSpace(key) && !keyToId.TryAdd(key, id))
+                throw new NarratorException($"Duplicate Planned Event key '{key}' in the same batch.");
+        }
+
         var touched = new HashSet<Guid>();
         var changes = new List<AppliedPlannedEventChange>();
-        foreach (var update in updates)
+        for (var i = 0; i < updates.Count; i++)
         {
+            var update = updates[i];
             if (update.Operation == PlannedEventOperation.Add)
             {
                 ValidateProposal(update.Entry, before: null, knownIds);
-                var id = createId();
-                var after = ToEntry(id, update.Entry!, turnNumber);
+                var id = addedIds[i]!.Value;
+                var after = ToEntry(id, update.Entry!, turnNumber, keyToId);
                 entries.Add(id, after);
                 relevant.Add(id);
                 changes.Add(new(PlannedEventOperation.Add, id, null, after, PlannedEventChangeSource.LlmUpdate, null));
@@ -71,7 +88,7 @@ public static class PlannedEventProcessor
                 ValidateProposal(update.Entry, before, knownIds);
                 if (before.Importance == MandatoryImportance && update.Entry!.Importance != MandatoryImportance)
                     throw new NarratorException("A mandatory Planned Event's importance cannot be reduced; remove it as fulfilled once it occurs.");
-                var after = ToEntry(before.Id, update.Entry!, turnNumber);
+                var after = ToEntry(before.Id, update.Entry!, turnNumber, keyToId);
                 entries[before.Id] = after;
                 relevant.Add(before.Id);
                 changes.Add(new(PlannedEventOperation.Replace, before.Id, before, after, PlannedEventChangeSource.LlmUpdate, null));
@@ -94,6 +111,30 @@ public static class PlannedEventProcessor
             throw new NarratorException(relationshipError);
         ValidateSize(events, limits);
         return new(events, relevant.Where(entries.ContainsKey).Order().ToArray(), changes);
+    }
+
+    // Resolves a batch of brand-new proposals with no pre-existing entries and no updates - the initial
+    // Planned Events proposed alongside a Story Definition - into real Planned Events, assigning each an
+    // id via createId and resolving PrerequisiteKeys against each other's Key the same way Apply resolves
+    // an Add's PrerequisiteKeys against its batch siblings. Throws if two proposals share a Key, if a
+    // PrerequisiteKeys entry doesn't match any proposal's Key, or if the resolved result has a
+    // self-reference or a cycle.
+    public static PlannedEvents ResolveInitialPlannedEvents(IReadOnlyList<ProposedPlannedEvent> proposals, Func<Guid> createId)
+    {
+        var ids = proposals.Select(_ => createId()).ToArray();
+        var keyToId = new Dictionary<string, Guid>();
+        for (var i = 0; i < proposals.Count; i++)
+        {
+            var key = proposals[i].Key;
+            if (!string.IsNullOrWhiteSpace(key) && !keyToId.TryAdd(key, ids[i]))
+                throw new NarratorException($"Duplicate Planned Event key '{key}' in the same batch.");
+        }
+        var entries = proposals.Select((proposal, i) =>
+            new PlannedEvent(ids[i], proposal.Description.Trim(), proposal.Importance, proposal.Urgency,
+                ResolvePrerequisites(proposal, keyToId), 0)).ToArray();
+        var events = new PlannedEvents(entries);
+        if (ValidateRelationships(events) is { } error) throw new NarratorException(error);
+        return events;
     }
 
     public static (PlannedEvents Events, IReadOnlyList<AppliedPlannedEventChange> Changes) CullToLimits(
@@ -167,8 +208,25 @@ public static class PlannedEventProcessor
         changes.Add(new(PlannedEventOperation.Remove, entry.Id, entry, null, PlannedEventChangeSource.AutomaticCull, null));
     }
 
-    private static PlannedEvent ToEntry(Guid id, ProposedPlannedEvent value, int turn) =>
-        new(id, value.Description.Trim(), value.Importance, value.Urgency, value.PrerequisiteEventIds.Distinct().ToArray(), turn);
+    private static PlannedEvent ToEntry(Guid id, ProposedPlannedEvent value, int turn, IReadOnlyDictionary<string, Guid> keyToId) =>
+        new(id, value.Description.Trim(), value.Importance, value.Urgency, ResolvePrerequisites(value, keyToId), turn);
+
+    // Merges PrerequisiteEventIds (real ids, already validated against knownIds by ValidateProposal) with
+    // PrerequisiteKeys resolved through the batch's Key -> id map. An unresolvable key means the model
+    // referenced a label no proposal in this batch actually declared - a hallucinated/invented reference,
+    // same failure mode ValidateProposal already guards against for real ids, so it's rejected the same way.
+    private static IReadOnlyList<Guid> ResolvePrerequisites(ProposedPlannedEvent value, IReadOnlyDictionary<string, Guid> keyToId)
+    {
+        if (value.PrerequisiteKeys.Count == 0) return value.PrerequisiteEventIds.Distinct().ToArray();
+        var resolved = new List<Guid>(value.PrerequisiteEventIds);
+        foreach (var key in value.PrerequisiteKeys)
+        {
+            if (!keyToId.TryGetValue(key, out var id))
+                throw new NarratorException($"A Planned Event references an unknown prerequisite key '{key}'.");
+            resolved.Add(id);
+        }
+        return resolved.Distinct().ToArray();
+    }
 
     // knownIds is the set of ids the model could have seen this turn (see the comment in Apply). before
     // is the entry being replaced, or null for an Add; any prerequisite id the entry already carried is

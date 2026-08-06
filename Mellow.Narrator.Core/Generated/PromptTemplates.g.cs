@@ -46,14 +46,28 @@ internal static class GeneratedPromptTemplates
         for recording current state.
 
         Each Planned Event also has prerequisiteEventIds, a list of other Planned Event IDs that must occur
-        first. Leave it empty here: at this stage no Planned Event has an ID yet, so there is nothing valid
-        to reference. If one event should logically depend on another, describe that ordering in its
-        description instead (for example, "once the hero has learned the prophecy, ..."), and the dependency
-        can be formalized with a real prerequisiteEventIds reference in a later turn once both events have
-        been assigned IDs and appear in the plannedEvents context.
+        first; leave it empty here, since no Planned Event has a real ID yet at this stage. To make one
+        proposed event depend on another within this same batch, use key and prerequisiteKeys instead: give
+        the prerequisite event a key, a short label you invent (for example "prophecy" or "a") that is
+        meaningful only within this one response and never used again afterward, then list that key in the
+        dependent event's prerequisiteKeys. Each key you invent must be unique within initialPlannedEvents,
+        and every value in prerequisiteKeys must exactly match another proposed event's key — never invent
+        one that doesn't correspond to a key you actually assigned. Leave key empty unless another event in
+        this batch depends on this one, and leave prerequisiteKeys empty unless this event genuinely depends
+        on another you are proposing right now.
+
+        Also propose initialVictoryConditions and initialLossConditions: the fixed win/lose conditions for this
+        story. Each has a description and a secret flag. A secret condition must never be stated or implied to
+        the player directly, in the same way a Planned Event's content must stay implied through ordinary
+        events rather than being spelled out. A non-secret condition is meant to be revealed to the player
+        later, once the unfolding story makes it relevant - never state it in the definition-generation
+        response itself, and never as an upfront list; that happens turn by turn during narration instead (see
+        story-narration.md). Propose only conditions that meaningfully define how this particular story can be
+        won or lost; an ordinary story may have as few as one of each, or none of one kind if it has no natural
+        loss condition, but never invent one that doesn't fit the premise just to fill the list.
 
         Return JSON only with refinedStoryPrompt, suggestedTitle, initialEventsPrompt,
-        initialStoryBibleEntries, and initialPlannedEvents.
+        initialStoryBibleEntries, initialPlannedEvents, initialVictoryConditions, and initialLossConditions.
         """;
 
     public const string StoryNarrationInstruction = """
@@ -193,13 +207,61 @@ internal static class GeneratedPromptTemplates
         only reference an ID currently present in plannedEvents, never one you invent, and an event can never
         list itself.
 
-        Add new planned events sparingly as the story develops and replace an existing one (same rules as
-        Story Bible replace) when its description, importance, urgency, or prerequisiteEventIds needs
-        updating without changing what event it represents — for example, raising urgency as the story
-        approaches the point where the event must occur, or adding a prerequisite once it becomes clear this
-        event should not happen before another. In relevantPlannedEventIds, use only IDs copied exactly from
-        the current planned events; mark any planned event the current scene is actively working toward or
-        that meaningfully constrains it.
+        Same-turn dependencies: when this turn's plannedEventUpdates add more than one new planned event, one
+        can depend on another you are adding right now, even though neither has a real ID yet. Give the
+        prerequisite event a key — a short label you invent, meaningful only within this one response — and
+        list that key in the dependent event's prerequisiteKeys. Each key must be unique among this turn's add
+        operations, and every prerequisiteKeys value must exactly match another add operation's key in the
+        same response; never invent one that doesn't correspond to a key you actually assigned. An event being
+        replaced or removed this turn already has a real ID, so reference it directly via prerequisiteEventIds
+        instead of a key — key and prerequisiteKeys exist only to link new events to each other within the
+        same turn, and are discarded once the turn is processed.
+
+        Capacity: the plannedEventCapacity object supplied with every request reports count, max, remaining,
+        usedPercent, and warningPercent for the planned events list. Scale how readily you propose new planned
+        events to how much room is left, not to a fixed cadence. While usedPercent is comfortably below
+        warningPercent, there is plenty of room: feel free to plan liberally, adding a new planned event
+        whenever one would meaningfully enrich the story. Once usedPercent reaches or passes warningPercent,
+        become more discerning: only add one that is clearly important or urgent enough to earn a place among
+        those already held, and prefer resolving existing ones (fulfilled or abandoned) or replacing one in
+        place over adding another. When remaining is down to only one or two, add a new planned event only for
+        something that must be tracked, and actively resolve lower-value ones first to make room rather than
+        letting the list simply fill up.
+
+        Add new planned events as the story develops (see Capacity above for how freely to do so) and replace
+        an existing one (same rules as Story Bible replace) when its description, importance, urgency, or
+        prerequisiteEventIds needs updating without changing what event it represents — for example, raising
+        urgency as the story approaches the point where the event must occur, or adding a prerequisite once it
+        becomes clear this event should not happen before another. In relevantPlannedEventIds, use only IDs
+        copied exactly from the current planned events; mark any planned event the current scene is actively
+        working toward or that meaningfully constrains it.
+
+        Victory and Loss Conditions: the victoryConditions and lossConditions arrays supplied with every
+        request list this story's fixed win/lose conditions, each with an id, a description, and a secret
+        flag; unlike the Story Bible and Planned Events these lists never change — you only ever report a
+        condition as revealed and/or met, never add, replace, or remove one. Once a request stops listing a
+        condition at all, it has already been met in an earlier turn and needs no further attention.
+
+        A secret condition (secret true) must never be stated or implied to the player, in the exact same way
+        a Planned Event's content stays hidden — only the ordinary in-scene events that satisfy it may appear,
+        never a direct statement of the goal itself. A non-secret condition (secret false) should instead be
+        revealed to the player once, at whatever moment the unfolding story first makes it genuinely relevant —
+        weave a clear statement of that goal directly into the prose of the narration itself at that moment,
+        never as a separate list or aside, and never before it is relevant. For example, if a planned event
+        turns the player character into a frog and a victory condition is becoming human again, do not mention
+        that goal until the transformation has actually happened. Each condition object reports whether it has
+        already been revealed; once revealed, do not restate it as a fresh revelation again, though the
+        ordinary consequences of pursuing it can of course continue to appear in narration. Report the id of
+        any condition your narration just revealed for the first time in revealedVictoryConditionIds or
+        revealedLossConditionIds as appropriate; never include a secret condition's id there.
+
+        Each turn, decide whether anything that just happened in the narration actually satisfies one of the
+        still-listed victory or loss conditions — secret or not — and report its id in metVictoryConditionIds
+        or metLossConditionIds. A condition can be revealed and met in the same turn if the event that makes it
+        relevant is the same event that satisfies it. Do not force a condition to be met merely because it was
+        just revealed or because many turns have passed; only report it when the story has genuinely resolved
+        it. Leave metVictoryConditionIds, metLossConditionIds, revealedVictoryConditionIds, and
+        revealedLossConditionIds empty whenever nothing changed this turn.
         """;
 
     public const string CorrectiveRetryInstruction = """

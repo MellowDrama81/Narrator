@@ -186,6 +186,10 @@ public sealed class NarratorApplication(
             throw new NarratorException("The generated initial Planned Events contain too many entries.");
         foreach (var plannedEvent in generated.InitialPlannedEvents)
             ValidateGeneratedPlannedEvent(plannedEvent, settings.ContentLimits);
+        if (generated.InitialVictoryConditions.Count > SettingsValidator.MaxConditionsUpperBound)
+            throw new NarratorException("The generated initial Victory Conditions contain too many entries.");
+        if (generated.InitialLossConditions.Count > SettingsValidator.MaxConditionsUpperBound)
+            throw new NarratorException("The generated initial Loss Conditions contain too many entries.");
         var now = timeProvider.GetUtcNow();
         StoryDefinition? source = null;
         if (overwrite && draft.SourceStoryDefinitionId is { } sourceId)
@@ -205,15 +209,18 @@ public sealed class NarratorApplication(
         if (culls.Count > 0)
             maintenance.Add(new(idGenerator.NewId(), StoryBibleMaintenanceReason.GeneratedBibleLimitCull,
                 Limits(settings), culls, now));
-        var rawPlannedEvents = new PlannedEvents(generated.InitialPlannedEvents.Select(x =>
-            new PlannedEvent(idGenerator.NewId(), x.Description.Trim(), x.Importance, x.Urgency, x.PrerequisiteEventIds, 0)).ToArray());
-        if (PlannedEventProcessor.ValidateRelationships(rawPlannedEvents) is { } initialRelationshipError)
-            throw new NarratorException(initialRelationshipError);
+        var rawPlannedEvents = PlannedEventProcessor.ResolveInitialPlannedEvents(generated.InitialPlannedEvents, idGenerator.NewId);
         var (plannedEvents, plannedEventCulls) = PlannedEventProcessor.CullToLimits(rawPlannedEvents, settings.StoryGeneration);
         var plannedEventMaintenance = source?.PlannedEventMaintenanceHistory.ToList() ?? [];
         if (plannedEventCulls.Count > 0)
             plannedEventMaintenance.Add(new(idGenerator.NewId(), PlannedEventMaintenanceReason.GeneratedLimitCull,
                 PlannedEventLimits(settings), plannedEventCulls, now));
+        var victoryConditions = StoryConditionProcessor.ResolveInitial(generated.InitialVictoryConditions, idGenerator.NewId, settings.ContentLimits);
+        if (!StoryConditionProcessor.IsWithinLimits(victoryConditions, settings.ContentLimits))
+            throw new NarratorException("The generated initial Victory Conditions exceed the configured limits.");
+        var lossConditions = StoryConditionProcessor.ResolveInitial(generated.InitialLossConditions, idGenerator.NewId, settings.ContentLimits);
+        if (!StoryConditionProcessor.IsWithinLimits(lossConditions, settings.ContentLimits))
+            throw new NarratorException("The generated initial Loss Conditions exceed the configured limits.");
         StoryDefinition definition;
         await _definitionCreateGate.WaitAsync(cancellationToken);
         try
@@ -228,6 +235,8 @@ public sealed class NarratorApplication(
                 maintenance,
                 plannedEvents,
                 plannedEventMaintenance,
+                victoryConditions,
+                lossConditions,
                 source?.SortOrder ?? (definitionSummaries.Count == 0 ? 0 : definitionSummaries.Max(x => x.SortOrder) + 1),
                 source?.CreatedAtUtc ?? now,
                 now);
@@ -235,10 +244,13 @@ public sealed class NarratorApplication(
         }
         finally { _definitionCreateGate.Release(); }
         _logger.LogInformation(
-            "Story Definition {StoryDefinitionId} saved with {BibleEntryCount} initial Story Bible entries and {PlannedEventCount} initial Planned Events.",
+            "Story Definition {StoryDefinitionId} saved with {BibleEntryCount} initial Story Bible entries, {PlannedEventCount} initial Planned Events, " +
+            "{VictoryConditionCount} Victory Conditions, and {LossConditionCount} Loss Conditions.",
             definition.Id,
             definition.InitialStoryBible.Entries.Count,
-            definition.InitialPlannedEvents.Entries.Count);
+            definition.InitialPlannedEvents.Entries.Count,
+            definition.InitialVictoryConditions.Entries.Count,
+            definition.InitialLossConditions.Entries.Count);
         return definition;
     }
 
@@ -393,6 +405,33 @@ public sealed class NarratorApplication(
         return updated;
     }
 
+    public Task<StoryDefinition> UpdateInitialVictoryConditionsAsync(Guid definitionId, StoryConditions conditions, CancellationToken cancellationToken = default) =>
+        UpdateInitialConditionsAsync(definitionId, conditions, isVictory: true, cancellationToken);
+
+    public Task<StoryDefinition> UpdateInitialLossConditionsAsync(Guid definitionId, StoryConditions conditions, CancellationToken cancellationToken = default) =>
+        UpdateInitialConditionsAsync(definitionId, conditions, isVictory: false, cancellationToken);
+
+    private async Task<StoryDefinition> UpdateInitialConditionsAsync(
+        Guid definitionId, StoryConditions conditions, bool isVictory, CancellationToken cancellationToken)
+    {
+        var definition = await definitions.GetAsync(definitionId, cancellationToken) ?? throw new NarratorException("Story Definition not found.");
+        var settings = await settingsStore.LoadAsync(cancellationToken);
+        var normalized = NormalizeManualConditions(conditions, settings.ContentLimits);
+        if (!StoryConditionProcessor.IsWithinLimits(normalized, settings.ContentLimits))
+            throw new NarratorException("The conditions exceed current limits.");
+        var now = timeProvider.GetUtcNow();
+        var updated = isVictory
+            ? definition with { InitialVictoryConditions = normalized, UpdatedAtUtc = now }
+            : definition with { InitialLossConditions = normalized, UpdatedAtUtc = now };
+        await definitions.SaveAsync(updated, cancellationToken);
+        _logger.LogInformation(
+            "Story Definition {StoryDefinitionId} {ConditionKind} Conditions manually updated with {ConditionCount} entries.",
+            definitionId,
+            isVictory ? "Victory" : "Loss",
+            normalized.Entries.Count);
+        return updated;
+    }
+
     public async Task<(StoryState State, StoryTurn Opening)> StartStoryAsync(
         StartStoryDraft draft,
         Guid targetStateId,
@@ -409,12 +448,16 @@ public sealed class NarratorApplication(
             throw new NarratorException("The initial Story Bible exceeds current limits. Increase the limits or cull it first.");
         if (!PlannedEventProcessor.IsWithinLimits(draft.Definition.InitialPlannedEvents, settings.StoryGeneration))
             throw new NarratorException("The initial Planned Events exceed current limits. Increase the limits or cull them first.");
+        if (!StoryConditionProcessor.IsWithinLimits(draft.Definition.InitialVictoryConditions, settings.ContentLimits))
+            throw new NarratorException("The initial Victory Conditions exceed current limits.");
+        if (!StoryConditionProcessor.IsWithinLimits(draft.Definition.InitialLossConditions, settings.ContentLimits))
+            throw new NarratorException("The initial Loss Conditions exceed current limits.");
 
         // Entries removed by an earlier cull can still be referenced by StoryBibleMaintenanceHistory/
         // PlannedEventMaintenanceHistory below, so ids are mapped lazily (not just for the entries
         // currently in the bible/planned events) to keep every reference to the same old id pointing at
-        // the same new id. Bible entry ids and planned event ids are both freshly generated GUIDs and
-        // never collide, so one shared map safely covers both.
+        // the same new id. Bible entry ids, planned event ids, and condition ids are all freshly
+        // generated GUIDs and never collide, so one shared map safely covers all three.
         var idMap = new Dictionary<Guid, Guid>();
         Guid MapId(Guid oldId) => idMap.TryGetValue(oldId, out var mapped) ? mapped : idMap[oldId] = idGenerator.NewId();
 
@@ -422,8 +465,22 @@ public sealed class NarratorApplication(
             .Select(x => x with { Id = MapId(x.Id), LastRelevantTurnNumber = 0 }).ToArray());
         var initialPlannedEvents = new PlannedEvents(draft.Definition.InitialPlannedEvents.Entries
             .Select(x => x with { Id = MapId(x.Id), LastRelevantTurnNumber = 0 }).ToArray());
-        var snapshot = draft.Definition with { InitialStoryBible = initial, InitialPlannedEvents = initialPlannedEvents };
-        var context = new GenerationContext(snapshot, initial, initialPlannedEvents, [], null, 0);
+        var initialVictoryConditions = new StoryConditions(draft.Definition.InitialVictoryConditions.Entries
+            .Select(x => x with { Id = MapId(x.Id) }).ToArray());
+        var initialLossConditions = new StoryConditions(draft.Definition.InitialLossConditions.Entries
+            .Select(x => x with { Id = MapId(x.Id) }).ToArray());
+        var snapshot = draft.Definition with
+        {
+            InitialStoryBible = initial,
+            InitialPlannedEvents = initialPlannedEvents,
+            InitialVictoryConditions = initialVictoryConditions,
+            InitialLossConditions = initialLossConditions
+        };
+        var context = new GenerationContext(
+            snapshot, initial, initialPlannedEvents,
+            new(initialVictoryConditions, [], []),
+            new(initialLossConditions, [], []),
+            [], null, 0);
         var response = await provider.GenerateOpeningAsync(settings, credential, context, cancellationToken);
         response = ValidateGenerationResponse(response, settings.ContentLimits);
         var relevant = response.RelevantStoryBibleEntryIds
@@ -437,6 +494,10 @@ public sealed class NarratorApplication(
             .ToArray();
         var appliedPlannedEvents = PlannedEventProcessor.Apply(
             initialPlannedEvents, relevantPlannedEvents, response.PlannedEventUpdates, 0, settings.StoryGeneration, idGenerator.NewId);
+        var (revealedVictory, metVictory) = StoryConditionProcessor.ApplyTurn(
+            initialVictoryConditions, [], [], response.RevealedVictoryConditionIds, response.MetVictoryConditionIds);
+        var (revealedLoss, metLoss) = StoryConditionProcessor.ApplyTurn(
+            initialLossConditions, [], [], response.RevealedLossConditionIds, response.MetLossConditionIds);
         var maintenanceHistory = draft.StoryBibleMaintenanceHistory.Select(x => x with
         {
             Changes = x.Changes.Select(change => change with
@@ -466,8 +527,11 @@ public sealed class NarratorApplication(
             state = new StoryState(stateId, snapshot.Title, draft.SourceStoryDefinitionId,
                 new(snapshot), applied.Bible, maintenanceHistory,
                 appliedPlannedEvents.Events, plannedEventMaintenanceHistory,
+                initialVictoryConditions, initialLossConditions,
+                revealedVictory, metVictory, revealedLoss, metLoss,
                 stateSummaries.Count == 0 ? 0 : stateSummaries.Max(x => x.SortOrder) + 1, now, null, 0);
-            turn = CreateTurn(stateId, 0, null, response, applied, appliedPlannedEvents, settings.ModelId!, now);
+            turn = CreateTurn(stateId, 0, null, response, applied, appliedPlannedEvents,
+                revealedVictory, metVictory, revealedLoss, metLoss, settings.ModelId!, now);
             await states.CreateAsync(state, turn, cancellationToken);
         }
         finally { _stateCreateGate.Release(); }
@@ -491,6 +555,8 @@ public sealed class NarratorApplication(
             state.Setup.Definition,
             state.CurrentStoryBible,
             state.CurrentPlannedEvents,
+            new(state.CurrentVictoryConditions, state.RevealedVictoryConditionIds, state.MetVictoryConditionIds),
+            new(state.CurrentLossConditions, state.RevealedLossConditionIds, state.MetLossConditionIds),
             recent,
             action,
             state.LastCommittedTurnSequence + 1);
@@ -516,15 +582,26 @@ public sealed class NarratorApplication(
             sequence,
             settings.StoryGeneration,
             idGenerator.NewId);
+        var (revealedVictory, metVictory) = StoryConditionProcessor.ApplyTurn(
+            state.CurrentVictoryConditions, state.RevealedVictoryConditionIds, state.MetVictoryConditionIds,
+            response.RevealedVictoryConditionIds, response.MetVictoryConditionIds);
+        var (revealedLoss, metLoss) = StoryConditionProcessor.ApplyTurn(
+            state.CurrentLossConditions, state.RevealedLossConditionIds, state.MetLossConditionIds,
+            response.RevealedLossConditionIds, response.MetLossConditionIds);
         var now = timeProvider.GetUtcNow();
         var next = state with
         {
             CurrentStoryBible = applied.Bible,
             CurrentPlannedEvents = appliedPlannedEvents.Events,
+            RevealedVictoryConditionIds = state.RevealedVictoryConditionIds.Concat(revealedVictory).ToArray(),
+            MetVictoryConditionIds = state.MetVictoryConditionIds.Concat(metVictory).ToArray(),
+            RevealedLossConditionIds = state.RevealedLossConditionIds.Concat(revealedLoss).ToArray(),
+            MetLossConditionIds = state.MetLossConditionIds.Concat(metLoss).ToArray(),
             LastActionAtUtc = now,
             LastCommittedTurnSequence = sequence
         };
-        var turn = CreateTurn(stateId, sequence, action, response, applied, appliedPlannedEvents, settings.ModelId!, now);
+        var turn = CreateTurn(stateId, sequence, action, response, applied, appliedPlannedEvents,
+            revealedVictory, metVictory, revealedLoss, metLoss, settings.ModelId!, now);
         await states.CommitTurnAsync(next, turn, cancellationToken);
         _logger.LogInformation(
             "Turn {TurnSequence} committed for Story State {StoryStateId}.",
@@ -555,10 +632,14 @@ public sealed class NarratorApplication(
     }
 
     private StoryTurn CreateTurn(Guid stateId, int sequence, string? action, StoryGenerationResponse response,
-        StoryBibleApplyResult applied, PlannedEventApplyResult appliedPlannedEvents, string model, DateTimeOffset now) =>
+        StoryBibleApplyResult applied, PlannedEventApplyResult appliedPlannedEvents,
+        IReadOnlyList<Guid> revealedVictory, IReadOnlyList<Guid> metVictory,
+        IReadOnlyList<Guid> revealedLoss, IReadOnlyList<Guid> metLoss,
+        string model, DateTimeOffset now) =>
         new(idGenerator.NewId(), stateId, sequence, action, response.Narration, response.SuggestedActions,
             applied.RelevantEntryIds, applied.Changes,
             appliedPlannedEvents.RelevantEntryIds, appliedPlannedEvents.Changes,
+            revealedVictory, metVictory, revealedLoss, metLoss,
             now, new(model, response.ProviderResponseId, response.InputTokens, response.OutputTokens));
 
     private static StoryBibleLimitSnapshot Limits(ApiConnectionSettings settings) =>
@@ -612,6 +693,26 @@ public sealed class NarratorApplication(
     {
         if (PlannedEventProcessor.ValidateEntry(description, importance, urgency, lastRelevantTurnNumber, limits) is { } error)
             throw new NarratorException(error);
+    }
+
+    // Manual edits have no notion of already-revealed/already-met ids (those only exist on a live Story
+    // State, not the Story Definition), so a manually re-authored condition's id is preserved when
+    // present and assigned fresh only when missing - matching NormalizeManualBible/
+    // NormalizeManualPlannedEvents for the same reason.
+    private StoryConditions NormalizeManualConditions(StoryConditions conditions, ContentLimitSettings limits)
+    {
+        var seenIds = new HashSet<Guid>();
+        var entries = new List<StoryCondition>(conditions.Entries.Count);
+        foreach (var entry in conditions.Entries)
+        {
+            var id = entry.Id == Guid.Empty ? idGenerator.NewId() : entry.Id;
+            if (!seenIds.Add(id)) throw new NarratorException("Condition IDs must be unique.");
+            var description = entry.Description.Trim();
+            if (StoryConditionProcessor.ValidateEntry(description, limits) is { } error)
+                throw new NarratorException(error);
+            entries.Add(entry with { Id = id, Description = description });
+        }
+        return new StoryConditions(entries);
     }
 
     private StoryBible NormalizeManualBible(StoryBible bible, ContentLimitSettings limits)

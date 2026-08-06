@@ -87,7 +87,7 @@ public sealed class ImportExportProcessorTests
             Guid.NewGuid(), PlannedEventMaintenanceReason.ManualEdit, new(50, 2000, 20000), [change], now);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
-            new([plannedEvent]), [maintenance], 0, now, now);
+            new([plannedEvent]), [maintenance], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
 
         var copy = ImportExportProcessor.CopyDefinition(
             definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration);
@@ -102,13 +102,81 @@ public sealed class ImportExportProcessorTests
     }
 
     [Fact]
+    public void DefinitionCopy_RemapsConditionIdsConsistentlyAndPreservesDescriptionAndSecret()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var victory = new StoryCondition(Guid.NewGuid(), "Defeat the dragon.", false);
+        var loss = new StoryCondition(Guid.NewGuid(), "The kingdom falls.", true);
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
+            PlannedEvents.Empty, [], new([victory]), new([loss]), 0, now, now);
+
+        var copy = ImportExportProcessor.CopyDefinition(
+            definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration);
+
+        var newVictory = Assert.Single(copy.InitialVictoryConditions.Entries);
+        Assert.NotEqual(victory.Id, newVictory.Id);
+        Assert.Equal(victory.Description, newVictory.Description);
+        Assert.Equal(victory.Secret, newVictory.Secret);
+        var newLoss = Assert.Single(copy.InitialLossConditions.Entries);
+        Assert.NotEqual(loss.Id, newLoss.Id);
+        Assert.Equal(loss.Description, newLoss.Description);
+        Assert.Equal(loss.Secret, newLoss.Secret);
+        // Victory and Loss Conditions are separate id spaces and must never collide with each other.
+        Assert.NotEqual(newVictory.Id, newLoss.Id);
+    }
+
+    [Fact]
+    public void DefinitionCopy_RejectsConditionWithEmptyDescription()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var invalid = new StoryCondition(Guid.NewGuid(), "   ", false);
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
+            PlannedEvents.Empty, [], new([invalid]), StoryConditions.Empty, 0, now, now);
+
+        Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
+            definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
+    }
+
+    [Fact]
+    public void DefinitionCopy_RejectsDuplicateVictoryConditionIds()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var id = Guid.NewGuid();
+        var first = new StoryCondition(id, "Defeat the dragon.", false);
+        var second = new StoryCondition(id, "Escape the tower.", false);
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
+            PlannedEvents.Empty, [], new([first, second]), StoryConditions.Empty, 0, now, now);
+
+        Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
+            definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
+    }
+
+    [Fact]
+    public void DefinitionCopy_RejectsDuplicateLossConditionIds()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var id = Guid.NewGuid();
+        var first = new StoryCondition(id, "The kingdom falls.", true);
+        var second = new StoryCondition(id, "The hero is captured.", false);
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
+            PlannedEvents.Empty, [], StoryConditions.Empty, new([first, second]), 0, now, now);
+
+        Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
+            definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
+    }
+
+    [Fact]
     public void DefinitionCopy_RejectsPlannedEventWithEmptyDescription()
     {
         var now = DateTimeOffset.UtcNow;
         var plannedEvent = new PlannedEvent(Guid.NewGuid(), "   ", 3, 3, [], 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
-            new([plannedEvent]), [], 0, now, now);
+            new([plannedEvent]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
 
         Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
             definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
@@ -121,7 +189,7 @@ public sealed class ImportExportProcessorTests
         var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The tower must fall.", 6, 3, [], 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
-            new([plannedEvent]), [], 0, now, now);
+            new([plannedEvent]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
 
         Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
             definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
@@ -136,7 +204,7 @@ public sealed class ImportExportProcessorTests
         var second = new PlannedEvent(id, "Second event.", 3, 3, [], 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
-            new([first, second]), [], 0, now, now);
+            new([first, second]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
 
         Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
             definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
@@ -150,7 +218,7 @@ public sealed class ImportExportProcessorTests
         var second = new PlannedEvent(Guid.NewGuid(), "Second event.", 3, 3, [], 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
-            new([first, second]), [], 0, now, now);
+            new([first, second]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
         var storyGeneration = NarratorDefaults.Create().StoryGeneration with { MaxPlannedEvents = 1 };
 
         Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
@@ -164,7 +232,7 @@ public sealed class ImportExportProcessorTests
         var plannedEvent = new PlannedEvent(Guid.NewGuid(), "Event", 3, 3, [Guid.Empty], 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
-            new([plannedEvent]), [], 0, now, now);
+            new([plannedEvent]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
 
         Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
             definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
@@ -178,7 +246,7 @@ public sealed class ImportExportProcessorTests
         var plannedEvent = new PlannedEvent(id, "Event", 3, 3, [id], 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
-            new([plannedEvent]), [], 0, now, now);
+            new([plannedEvent]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
 
         Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
             definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
@@ -194,7 +262,7 @@ public sealed class ImportExportProcessorTests
         var b = new PlannedEvent(bId, "B", 3, 3, [aId], 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
-            new([a, b]), [], 0, now, now);
+            new([a, b]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
 
         Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
             definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
@@ -209,7 +277,7 @@ public sealed class ImportExportProcessorTests
         var plannedEvent = new PlannedEvent(Guid.NewGuid(), "Event", 3, 3, [Guid.NewGuid()], 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
-            new([plannedEvent]), [], 0, now, now);
+            new([plannedEvent]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
 
         var copy = ImportExportProcessor.CopyDefinition(
             definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration);
@@ -232,6 +300,82 @@ public sealed class ImportExportProcessorTests
     }
 
     [Fact]
+    public void StateCopy_RemapsConditionIdsConsistentlyAndIndependentlyFromOtherIdSpaces()
+    {
+        var (state, turn) = CreateStateWithConditions();
+        var originalVictoryId = state.CurrentVictoryConditions.Entries[0].Id;
+        var originalLossId = state.CurrentLossConditions.Entries[0].Id;
+
+        var copy = ImportExportProcessor.CopyState(
+            state, [turn], 7, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration);
+
+        var newVictory = Assert.Single(copy.State.CurrentVictoryConditions.Entries);
+        Assert.NotEqual(originalVictoryId, newVictory.Id);
+        Assert.Equal("Defeat the dragon.", newVictory.Description);
+        Assert.False(newVictory.Secret);
+        var newLoss = Assert.Single(copy.State.CurrentLossConditions.Entries);
+        Assert.NotEqual(originalLossId, newLoss.Id);
+        Assert.Equal("The kingdom falls.", newLoss.Description);
+        Assert.True(newLoss.Secret);
+        // Victory, Loss, and Story Bible ids are all separate id spaces and must never collide.
+        Assert.NotEqual(newVictory.Id, newLoss.Id);
+        Assert.NotEqual(copy.State.CurrentStoryBible.Entries[0].Id, newVictory.Id);
+        Assert.NotEqual(copy.State.CurrentStoryBible.Entries[0].Id, newLoss.Id);
+
+        // The snapshot embedded in Setup carries the same remapped ids as the live current conditions.
+        Assert.Equal(newVictory.Id, Assert.Single(copy.State.Setup.Definition.InitialVictoryConditions.Entries).Id);
+        Assert.Equal(newLoss.Id, Assert.Single(copy.State.Setup.Definition.InitialLossConditions.Entries).Id);
+
+        // State-level revealed/met sets and the turn-level delta both follow the same remapping.
+        Assert.Equal(newVictory.Id, Assert.Single(copy.State.RevealedVictoryConditionIds));
+        Assert.Empty(copy.State.MetVictoryConditionIds);
+        Assert.Empty(copy.State.RevealedLossConditionIds);
+        Assert.Equal(newLoss.Id, Assert.Single(copy.State.MetLossConditionIds));
+
+        var copiedTurn = Assert.Single(copy.Turns);
+        Assert.Equal(newVictory.Id, Assert.Single(copiedTurn.RevealedVictoryConditionIds));
+        Assert.Empty(copiedTurn.MetVictoryConditionIds);
+        Assert.Empty(copiedTurn.RevealedLossConditionIds);
+        Assert.Equal(newLoss.Id, Assert.Single(copiedTurn.MetLossConditionIds));
+    }
+
+    [Fact]
+    public void StateCopy_RejectsConditionWithEmptyDescription()
+    {
+        var (state, turn) = CreateState();
+        var invalid = new StoryCondition(Guid.NewGuid(), "   ", false);
+        var withInvalid = state with
+        {
+            Setup = state.Setup with { Definition = state.Setup.Definition with { InitialVictoryConditions = new([invalid]) } },
+            CurrentVictoryConditions = new([invalid])
+        };
+
+        Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyState(
+            withInvalid, [turn], 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
+    }
+
+    [Fact]
+    public void StateCopy_RejectsDanglingRevealedVictoryConditionId()
+    {
+        var (state, turn) = CreateState();
+        var withDangling = state with { RevealedVictoryConditionIds = [Guid.NewGuid()] };
+
+        Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyState(
+            withDangling, [turn], 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
+    }
+
+    [Fact]
+    public void StateCopy_RejectsDuplicateMetLossConditionId()
+    {
+        var (state, turn) = CreateStateWithConditions();
+        var lossId = state.CurrentLossConditions.Entries[0].Id;
+        var withDuplicate = state with { MetLossConditionIds = [lossId, lossId] };
+
+        Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyState(
+            withDuplicate, [turn], 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
+    }
+
+    [Fact]
     public void DefinitionCopy_RejectsNonUtcTimestamp()
     {
         var now = DateTimeOffset.UtcNow;
@@ -244,6 +388,8 @@ public sealed class ImportExportProcessorTests
             [],
             PlannedEvents.Empty,
             [],
+            StoryConditions.Empty,
+            StoryConditions.Empty,
             0,
             now.ToOffset(TimeSpan.FromHours(2)),
             now);
@@ -261,7 +407,7 @@ public sealed class ImportExportProcessorTests
         var now = DateTimeOffset.UtcNow;
         var definition = new StoryDefinition(
             Guid.Empty, "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
-            PlannedEvents.Empty, [], 0, now, now);
+            PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
 
         Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
             definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
@@ -281,6 +427,8 @@ public sealed class ImportExportProcessorTests
             [],
             PlannedEvents.Empty,
             [],
+            StoryConditions.Empty,
+            StoryConditions.Empty,
             0,
             now,
             now);
@@ -303,6 +451,8 @@ public sealed class ImportExportProcessorTests
             [],
             PlannedEvents.Empty,
             [],
+            StoryConditions.Empty,
+            StoryConditions.Empty,
             0,
             now,
             now);
@@ -318,7 +468,7 @@ public sealed class ImportExportProcessorTests
         var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Name", [], [], 3, 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", new([entry]), [],
-            PlannedEvents.Empty, [], 0, now, now);
+            PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
 
         Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
             definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
@@ -331,7 +481,7 @@ public sealed class ImportExportProcessorTests
         var entry = new StoryBibleEntry(Guid.NewGuid(), "fact", "Name", ["Content"], [], 6, 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", new([entry]), [],
-            PlannedEvents.Empty, [], 0, now, now);
+            PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
 
         Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
             definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
@@ -346,7 +496,7 @@ public sealed class ImportExportProcessorTests
         var second = new StoryBibleEntry(id, "fact", "Second", ["Content"], [], 3, 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", new([first, second]), [],
-            PlannedEvents.Empty, [], 0, now, now);
+            PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
 
         Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
             definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
@@ -360,7 +510,7 @@ public sealed class ImportExportProcessorTests
         var second = new StoryBibleEntry(Guid.NewGuid(), "fact", "Second", ["Content"], [], 3, 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", new([first, second]), [],
-            PlannedEvents.Empty, [], 0, now, now);
+            PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
         var storyGeneration = NarratorDefaults.Create().StoryGeneration with { MaxStoryBibleEntries = 1 };
 
         Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
@@ -501,9 +651,11 @@ public sealed class ImportExportProcessorTests
             "A sufficiently long prompt for validation.",
             "",
             bible,
-            PlannedEvents.Empty);
+            PlannedEvents.Empty,
+            StoryConditions.Empty,
+            StoryConditions.Empty);
         var now = DateTimeOffset.UtcNow;
-        var state = new StoryState(stateId, "Story", null, new(snapshot), bible, [], PlannedEvents.Empty, [], 0, now, null, 0);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), bible, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, null, 0);
         var turn = new StoryTurn(
             Guid.NewGuid(),
             stateId,
@@ -512,6 +664,10 @@ public sealed class ImportExportProcessorTests
             "Opening",
             ["Continue"],
             [entry.Id],
+            [],
+            [],
+            [],
+            [],
             [],
             [],
             [],
@@ -559,5 +715,33 @@ public sealed class ImportExportProcessorTests
             CurrentPlannedEvents = new([prerequisite, dependent])
         };
         return (withPlannedEvents, turn);
+    }
+
+    private static (StoryState State, StoryTurn Turn) CreateStateWithConditions()
+    {
+        var (state, turn) = CreateState();
+        var victory = new StoryCondition(Guid.NewGuid(), "Defeat the dragon.", false);
+        var loss = new StoryCondition(Guid.NewGuid(), "The kingdom falls.", true);
+        var withConditions = state with
+        {
+            Setup = state.Setup with
+            {
+                Definition = state.Setup.Definition with
+                {
+                    InitialVictoryConditions = new([victory]),
+                    InitialLossConditions = new([loss])
+                }
+            },
+            CurrentVictoryConditions = new([victory]),
+            CurrentLossConditions = new([loss]),
+            RevealedVictoryConditionIds = [victory.Id],
+            MetLossConditionIds = [loss.Id]
+        };
+        var turnWithConditions = turn with
+        {
+            RevealedVictoryConditionIds = [victory.Id],
+            MetLossConditionIds = [loss.Id]
+        };
+        return (withConditions, turnWithConditions);
     }
 }

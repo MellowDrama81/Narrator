@@ -329,6 +329,8 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
         if (string.IsNullOrWhiteSpace(_action.Text) || _request is not null) return;
         var retry = false;
         var committed = false;
+        StoryState? resultState = null;
+        StoryTurn? resultTurn = null;
         try
         {
             _request = new();
@@ -347,7 +349,7 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
                 state.LastCommittedTurnSequence + 1,
                 DateTimeOffset.UtcNow);
             await _tabs.SaveWorkspaceNowAsync();
-            await _app.PlayTurnAsync(_stateId, action, _request.Token);
+            (resultState, resultTurn) = await _app.PlayTurnAsync(_stateId, action, _request.Token);
             _action.Text = "";
             committed = true;
         }
@@ -376,8 +378,32 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
         // The request is complete as soon as the turn is durably committed. Rebuilding and scrolling
         // the page is presentation work, so it runs only after the busy/request state has been cleared.
         if (committed) await Refresh(scrollToLatestTurn: true);
+        if (committed && resultState is not null && resultTurn is not null) await ShowMetConditionsAsync(resultState, resultTurn);
         if (retry) Play(null, EventArgs.Empty);
     }
+
+    // Only this turn's own MetVictoryConditionIds/MetLossConditionIds (the delta - see StoryTurn) are
+    // considered, never the state's cumulative totals, so a condition met in an earlier turn is never
+    // re-announced here.
+    private async Task ShowMetConditionsAsync(StoryState state, StoryTurn turn)
+    {
+        var metVictories = ResolveDescriptions(state.CurrentVictoryConditions, turn.MetVictoryConditionIds);
+        var metLosses = ResolveDescriptions(state.CurrentLossConditions, turn.MetLossConditionIds);
+        if (metVictories.Count == 0 && metLosses.Count == 0) return;
+        var lines = new List<string>();
+        if (metVictories.Count > 0) lines.Add("Victory condition(s) met:" + Environment.NewLine + string.Join(Environment.NewLine, metVictories.Select(x => $"• {x}")));
+        if (metLosses.Count > 0) lines.Add("Loss condition(s) met:" + Environment.NewLine + string.Join(Environment.NewLine, metLosses.Select(x => $"• {x}")));
+        var title = metVictories.Count > 0 && metLosses.Count > 0
+            ? "Victory and loss conditions met"
+            : metVictories.Count > 0 ? "Victory condition met" : "Loss condition met";
+        await DisplayAlertAsync(title, string.Join(Environment.NewLine + Environment.NewLine, lines), "Keep Playing");
+    }
+
+    private static List<string> ResolveDescriptions(StoryConditions conditions, IReadOnlyList<Guid> ids) =>
+        ids.Select(id => conditions.Entries.FirstOrDefault(x => x.Id == id)?.Description)
+            .Where(description => description is not null)
+            .Select(description => description!)
+            .ToList();
 
     private void SetSuggestionsEnabled(bool enabled)
     {

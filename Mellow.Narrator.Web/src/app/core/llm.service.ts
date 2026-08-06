@@ -1,6 +1,17 @@
 import { Injectable } from '@angular/core';
-import { AppSettings, DefinitionGeneration, StoryDefinition, StoryState, TurnGeneration } from './models';
+import { AppSettings, DefinitionGeneration, StoryCondition, StoryDefinition, StoryState, TurnGeneration } from './models';
+import { plannedEventCapacity } from './planned-events';
 import { promptTemplates } from './prompt-templates.generated';
+import { conditionPayload, normalizeConditionIds } from './story-conditions';
+
+// Bundles one condition list (victory or loss) with the running totals generateTurn needs to build the
+// outgoing storyContext payload and to leniently normalize the model's response - see conditionPayload
+// and normalizeConditionIds in story-conditions.ts.
+interface ConditionsContext {
+  conditions: StoryCondition[];
+  revealedIds: string[];
+  metIds: string[];
+}
 
 type JsonSchema = Record<string, unknown>;
 
@@ -50,11 +61,37 @@ export class LlmService {
         secretFacts: Array.isArray(entry.secretFacts) ? entry.secretFacts.map(String) : [],
         importance: Math.min(5, Math.max(1, Number(entry.importance) || 3)),
       })).filter(entry => entry.name && (entry.knownFacts.length || entry.secretFacts.length)),
+      initialPlannedEvents: Array.isArray(result.initialPlannedEvents)
+        ? result.initialPlannedEvents.map(entry => ({
+            description: String(entry.description ?? '').trim(),
+            importance: Math.min(5, Math.max(1, Number(entry.importance) || 3)),
+            urgency: Math.min(5, Math.max(1, Number(entry.urgency) || 3)),
+            prerequisiteEventIds: Array.isArray(entry.prerequisiteEventIds) ? entry.prerequisiteEventIds.map(String) : [],
+            key: entry.key ? String(entry.key) : null,
+            prerequisiteKeys: Array.isArray(entry.prerequisiteKeys) ? entry.prerequisiteKeys.map(String) : [],
+          })).filter(entry => entry.description)
+        : [],
+      initialVictoryConditions: this.parseProposedConditions(result.initialVictoryConditions),
+      initialLossConditions: this.parseProposedConditions(result.initialLossConditions),
     };
   }
 
+  private parseProposedConditions(value: unknown): DefinitionGeneration['initialVictoryConditions'] {
+    return Array.isArray(value)
+      ? value.map(entry => ({
+          description: String((entry as { description?: unknown })?.description ?? '').trim(),
+          secret: Boolean((entry as { secret?: unknown })?.secret),
+        })).filter(entry => entry.description)
+      : [];
+  }
+
   opening(settings: AppSettings, definition: StoryDefinition): Promise<TurnGeneration> {
-    return this.generateTurn(settings, definition, [], definition.initialStoryBible, null);
+    return this.generateTurn(
+      settings, definition, [], definition.initialStoryBible, definition.initialPlannedEvents,
+      { conditions: definition.initialVictoryConditions, revealedIds: [], metIds: [] },
+      { conditions: definition.initialLossConditions, revealedIds: [], metIds: [] },
+      null,
+    );
   }
 
   turn(settings: AppSettings, story: StoryState, action: string): Promise<TurnGeneration> {
@@ -63,6 +100,9 @@ export class LlmService {
       story.definition,
       story.turns.slice(-settings.recentTurnCount),
       story.currentStoryBible,
+      story.currentPlannedEvents,
+      { conditions: story.currentVictoryConditions, revealedIds: story.revealedVictoryConditionIds, metIds: story.metVictoryConditionIds },
+      { conditions: story.currentLossConditions, revealedIds: story.revealedLossConditionIds, metIds: story.metLossConditionIds },
       action,
     );
   }
@@ -72,6 +112,9 @@ export class LlmService {
     definition: Pick<StoryDefinition, 'storyPrompt' | 'initialEventsPrompt'>,
     turns: StoryState['turns'],
     bible: StoryState['currentStoryBible'],
+    plannedEvents: StoryState['currentPlannedEvents'],
+    victory: ConditionsContext,
+    loss: ConditionsContext,
     action: string | null,
   ): Promise<TurnGeneration> {
     const next = turns.length ? turns[turns.length - 1].sequenceNumber + 1 : 0;
@@ -83,6 +126,10 @@ export class LlmService {
           contextType: 'storyContext',
           storyPrompt: definition.storyPrompt,
           storyBible: bible,
+          plannedEvents,
+          plannedEventCapacity: plannedEventCapacity(plannedEvents, settings.maxPlannedEvents, settings.plannedEventsWarningPercent),
+          victoryConditions: conditionPayload(victory.conditions, victory.revealedIds, victory.metIds),
+          lossConditions: conditionPayload(loss.conditions, loss.revealedIds, loss.metIds),
         }),
       },
     ];
@@ -123,6 +170,24 @@ export class LlmService {
       suggestedActions: value.suggestedActions.map(String).filter(Boolean).slice(0, settings.maxSuggestedActions),
       relevantStoryBibleEntryIds: Array.isArray(value.relevantStoryBibleEntryIds) ? value.relevantStoryBibleEntryIds.map(String) : [],
       storyBibleUpdates: Array.isArray(value.storyBibleUpdates) ? value.storyBibleUpdates : [],
+      relevantPlannedEventIds: Array.isArray(value.relevantPlannedEventIds) ? value.relevantPlannedEventIds.map(String) : [],
+      plannedEventUpdates: Array.isArray(value.plannedEventUpdates) ? value.plannedEventUpdates : [],
+      revealedVictoryConditionIds: normalizeConditionIds(
+        Array.isArray(value.revealedVictoryConditionIds) ? value.revealedVictoryConditionIds : [],
+        victory.conditions, victory.revealedIds, victory.metIds, true,
+      ),
+      metVictoryConditionIds: normalizeConditionIds(
+        Array.isArray(value.metVictoryConditionIds) ? value.metVictoryConditionIds : [],
+        victory.conditions, victory.revealedIds, victory.metIds, false,
+      ),
+      revealedLossConditionIds: normalizeConditionIds(
+        Array.isArray(value.revealedLossConditionIds) ? value.revealedLossConditionIds : [],
+        loss.conditions, loss.revealedIds, loss.metIds, true,
+      ),
+      metLossConditionIds: normalizeConditionIds(
+        Array.isArray(value.metLossConditionIds) ? value.metLossConditionIds : [],
+        loss.conditions, loss.revealedIds, loss.metIds, false,
+      ),
     };
   }
 
@@ -201,6 +266,21 @@ export class LlmService {
         maxItems: 2000,
         items: this.proposedEntrySchema(),
       },
+      initialPlannedEvents: {
+        type: 'array',
+        maxItems: 500,
+        items: this.proposedPlannedEventSchema(),
+      },
+      initialVictoryConditions: {
+        type: 'array',
+        maxItems: 50,
+        items: this.proposedConditionSchema(),
+      },
+      initialLossConditions: {
+        type: 'array',
+        maxItems: 50,
+        items: this.proposedConditionSchema(),
+      },
     });
   }
 
@@ -227,6 +307,37 @@ export class LlmService {
           entry: { anyOf: [this.proposedEntrySchema(), { type: 'null' }] },
         }),
       },
+      relevantPlannedEventIds: {
+        type: 'array',
+        items: { type: 'string', format: 'uuid' },
+      },
+      plannedEventUpdates: {
+        type: 'array',
+        items: this.objectSchema({
+          operation: { type: 'string', enum: ['add', 'replace', 'remove'] },
+          entryId: { type: ['string', 'null'] },
+          entry: { anyOf: [this.proposedPlannedEventSchema(), { type: 'null' }] },
+          outcome: { type: ['string', 'null'], enum: ['fulfilled', 'abandoned', null] },
+        }),
+      },
+      revealedVictoryConditionIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
+      metVictoryConditionIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
+      revealedLossConditionIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
+      metLossConditionIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
+    });
+  }
+
+  // key/prerequisiteKeys let a batch of proposals (this response's plannedEventUpdates or
+  // initialPlannedEvents) reference each other before any of them has a real id - see the
+  // ProposedPlannedEvent comment in models.ts. key is nullable: most proposals need no label.
+  private proposedPlannedEventSchema(): JsonSchema {
+    return this.objectSchema({
+      description: { type: 'string' },
+      importance: { type: 'integer', minimum: 1, maximum: 5 },
+      urgency: { type: 'integer', minimum: 1, maximum: 5 },
+      prerequisiteEventIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
+      key: { type: ['string', 'null'] },
+      prerequisiteKeys: { type: 'array', items: { type: 'string' } },
     });
   }
 
@@ -237,6 +348,13 @@ export class LlmService {
       knownFacts: { type: 'array', items: { type: 'string' } },
       secretFacts: { type: 'array', items: { type: 'string' } },
       importance: { type: 'integer', minimum: 1, maximum: 5 },
+    });
+  }
+
+  private proposedConditionSchema(): JsonSchema {
+    return this.objectSchema({
+      description: { type: 'string' },
+      secret: { type: 'boolean' },
     });
   }
 

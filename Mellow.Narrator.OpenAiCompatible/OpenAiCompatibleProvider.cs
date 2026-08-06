@@ -123,7 +123,7 @@ public sealed class OpenAiCompatibleProvider(
     private async Task<StoryGenerationResponse> GenerateStoryAsync(
         ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
     {
-        var messages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration.RecentTurnCount, context, opening);
+        var messages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration, context, opening);
         return await CompleteWithCorrectionAsync(
             settings,
             credential,
@@ -520,7 +520,7 @@ public sealed class OpenAiCompatibleProvider(
 
     private static IReadOnlyList<JsonObject> BuildStoryMessages(
         ContentLimitSettings limits,
-        int recentTurnCount,
+        StoryGenerationSettings storyGeneration,
         GenerationContext context,
         bool opening)
     {
@@ -535,14 +535,31 @@ public sealed class OpenAiCompatibleProvider(
         // The add/replace/remove ID rules and the relevant-entry ID rule live only in the system prompt
         // (StoryNarrationInstruction) - they're static across every turn, so repeating them here would
         // just burn tokens on every single request without adding any information.
+        var plannedEventCount = context.PlannedEvents.Entries.Count;
         messages.Add(Message("user", JsonSerializer.Serialize(new
         {
             contextType = "storyContext",
             storyPrompt = context.Definition.StoryPrompt,
             storyBible = context.StoryBible.Entries,
-            plannedEvents = context.PlannedEvents.Entries
+            plannedEvents = context.PlannedEvents.Entries,
+            // Reported so the model can scale its own eagerness to propose new Planned Events against
+            // remaining room, using the same warning threshold the app itself uses to flag the list as
+            // approaching capacity (see PlannedEventProcessor.IsApproachingLimits) - if that threshold is
+            // reconfigured, the model's behavior tracks it automatically without a prompt change.
+            plannedEventCapacity = new
+            {
+                count = plannedEventCount,
+                max = storyGeneration.MaxPlannedEvents,
+                remaining = Math.Max(0, storyGeneration.MaxPlannedEvents - plannedEventCount),
+                usedPercent = storyGeneration.MaxPlannedEvents <= 0
+                    ? 100
+                    : (int)Math.Round(100.0 * plannedEventCount / storyGeneration.MaxPlannedEvents),
+                warningPercent = storyGeneration.PlannedEventsWarningPercent
+            },
+            victoryConditions = ConditionPayload(context.VictoryConditions),
+            lossConditions = ConditionPayload(context.LossConditions)
         }, Json)));
-        if (context.RecentTurns.Count < recentTurnCount && !string.IsNullOrWhiteSpace(context.Definition.InitialEventsPrompt))
+        if (context.RecentTurns.Count < storyGeneration.RecentTurnCount && !string.IsNullOrWhiteSpace(context.Definition.InitialEventsPrompt))
             messages.Add(Message("user", JsonSerializer.Serialize(new
             {
                 contextType = "initialEvents",
@@ -571,13 +588,22 @@ public sealed class OpenAiCompatibleProvider(
         return messages;
     }
 
+    // Already-met conditions are dropped entirely - nothing left to evaluate for them - while the rest
+    // are sent with a revealed flag so the model never re-reveals a non-secret condition already
+    // established in the narration.
+    private static IReadOnlyList<object> ConditionPayload(ConditionsContext context) =>
+        context.Conditions.Entries
+            .Where(x => !context.MetIds.Contains(x.Id))
+            .Select(x => new { id = x.Id, description = x.Description, secret = x.Secret, revealed = context.RevealedIds.Contains(x.Id) })
+            .ToArray();
 
     private static StoryDefinitionGenerationResponse ParseDefinitionResponse(
         JsonObject node,
         ApiConnectionSettings settings)
     {
         node.Remove("_transport");
-        RequireProperties(node, settings, "refinedStoryPrompt", "suggestedTitle", "initialEventsPrompt", "initialStoryBibleEntries", "initialPlannedEvents");
+        RequireProperties(node, settings, "refinedStoryPrompt", "suggestedTitle", "initialEventsPrompt", "initialStoryBibleEntries",
+            "initialPlannedEvents", "initialVictoryConditions", "initialLossConditions");
         var refinedStoryPrompt = RequiredString(node, "refinedStoryPrompt");
         if (string.IsNullOrWhiteSpace(refinedStoryPrompt) || refinedStoryPrompt.Length > settings.ContentLimits.MaxStoryPromptCharacters)
             throw new JsonException("The refined Story Prompt is empty or exceeds the configured limit.");
@@ -596,8 +622,23 @@ public sealed class OpenAiCompatibleProvider(
             throw new JsonException("The initial Planned Events contain too many entries.");
         foreach (var item in plannedEvents)
             ValidateProposedPlannedEvent(item as JsonObject ?? throw new JsonException("A Planned Event must be an object."), settings);
+        var victoryConditions = RequiredArray(node, "initialVictoryConditions");
+        if (victoryConditions.Count > SettingsValidator.MaxConditionsUpperBound)
+            throw new JsonException("The initial Victory Conditions contain too many entries.");
+        foreach (var item in victoryConditions)
+            ValidateProposedCondition(item as JsonObject ?? throw new JsonException("A Victory Condition must be an object."), settings);
+        var lossConditions = RequiredArray(node, "initialLossConditions");
+        if (lossConditions.Count > SettingsValidator.MaxConditionsUpperBound)
+            throw new JsonException("The initial Loss Conditions contain too many entries.");
+        foreach (var item in lossConditions)
+            ValidateProposedCondition(item as JsonObject ?? throw new JsonException("A Loss Condition must be an object."), settings);
         var result = node.Deserialize<StoryDefinitionGenerationResponse>(Json)
             ?? throw new JsonException("Empty Story Definition response.");
+        // Dry run: resolves Key/PrerequisiteKeys against each other (catching a duplicate or unresolvable
+        // key) and checks the result for a self-reference or cycle, using throwaway ids since nothing here
+        // is actually committed - NarratorApplication repeats this for real with the real id generator.
+        // Surfacing the failure here lets a bad batch get one corrective retry instead of a hard failure.
+        _ = PlannedEventProcessor.ResolveInitialPlannedEvents(result.InitialPlannedEvents, Guid.NewGuid);
         return result;
     }
 
@@ -619,7 +660,11 @@ public sealed class OpenAiCompatibleProvider(
             "relevantStoryBibleEntryIds",
             "storyBibleUpdates",
             "relevantPlannedEventIds",
-            "plannedEventUpdates");
+            "plannedEventUpdates",
+            "revealedVictoryConditionIds",
+            "metVictoryConditionIds",
+            "revealedLossConditionIds",
+            "metLossConditionIds");
         var turnNumber = RequiredInteger(node, "turnNumber");
         if (turnNumber != context.NextTurnNumber)
             throw new JsonException(
@@ -686,6 +731,18 @@ public sealed class OpenAiCompatibleProvider(
         }
         node["relevantPlannedEventIds"] = new JsonArray(
             normalizedRelevantPlannedEventIds.Select(id => (JsonNode)id.ToString("D")).ToArray());
+
+        // Same lenient-drop treatment as the relevant-id lists above: an unknown id, a duplicate mention,
+        // an attempt to reveal an already-revealed/already-met/secret condition, or to re-report an
+        // already-met one is a low-stakes narrative-pacing slip, not data corruption, so it's silently
+        // dropped rather than spent as a corrective retry. NormalizeConditionIds rewrites node in place,
+        // so the dto deserialized below and the response returned to NarratorApplication both see only
+        // the cleaned ids - NarratorApplication's own StoryConditionProcessor.ApplyTurn call is then
+        // guaranteed to accept them.
+        var (revealedVictoryIds, metVictoryIds) = NormalizeConditionIds(
+            node, "revealedVictoryConditionIds", "metVictoryConditionIds", context.VictoryConditions);
+        var (revealedLossIds, metLossIds) = NormalizeConditionIds(
+            node, "revealedLossConditionIds", "metLossConditionIds", context.LossConditions);
 
         var updates = RequiredArray(node, "storyBibleUpdates");
         if (updates.Count > settings.ContentLimits.MaxStoryBibleUpdatesPerResponse)
@@ -772,6 +829,10 @@ public sealed class OpenAiCompatibleProvider(
             dto.StoryBibleUpdates,
             dto.RelevantPlannedEventIds,
             dto.PlannedEventUpdates,
+            revealedVictoryIds,
+            metVictoryIds,
+            revealedLossIds,
+            metLossIds,
             meta?["responseId"]?.GetValue<string>(),
             meta?["inputTokens"]?.GetValue<int?>(),
             meta?["outputTokens"]?.GetValue<int?>());
@@ -798,7 +859,7 @@ public sealed class OpenAiCompatibleProvider(
 
     private static void ValidateProposedPlannedEvent(JsonObject entry, ApiConnectionSettings settings)
     {
-        RequireProperties(entry, settings, "description", "importance", "urgency", "prerequisiteEventIds");
+        RequireProperties(entry, settings, "description", "importance", "urgency", "prerequisiteEventIds", "key", "prerequisiteKeys");
         var description = RequiredString(entry, "description");
         if (string.IsNullOrWhiteSpace(description) || description.Length > settings.ContentLimits.MaxPlannedEventDescriptionCharacters)
             throw new JsonException("A Planned Event description is empty or exceeds the configured limit.");
@@ -807,6 +868,55 @@ public sealed class OpenAiCompatibleProvider(
         var urgency = RequiredInteger(entry, "urgency");
         if (urgency is < 1 or > 5) throw new JsonException("Planned Event urgency must be from 1 to 5.");
         RequiredArray(entry, "prerequisiteEventIds");
+        // "key" is nullable and freeform (a label scoped to this one response) - presence is all that's
+        // checked here; RequiredArray on prerequisiteKeys confirms shape, resolution happens downstream.
+        RequiredArray(entry, "prerequisiteKeys");
+    }
+
+    private static void ValidateProposedCondition(JsonObject entry, ApiConnectionSettings settings)
+    {
+        RequireProperties(entry, settings, "description", "secret");
+        var description = RequiredString(entry, "description");
+        if (string.IsNullOrWhiteSpace(description) || description.Length > settings.ContentLimits.MaxConditionDescriptionCharacters)
+            throw new JsonException("A condition description is empty or exceeds the configured limit.");
+        RequiredBoolean(entry, "secret");
+    }
+
+    // Rewrites node's two named id-array properties in place with only the ids that are valid candidates
+    // for revealed/met respectively - see the call sites' comments for what "valid" excludes and why.
+    private static (IReadOnlyList<Guid> Revealed, IReadOnlyList<Guid> Met) NormalizeConditionIds(
+        JsonObject node, string revealedProperty, string metProperty, ConditionsContext context)
+    {
+        var byId = context.Conditions.Entries.ToDictionary(x => x.Id);
+        var alreadyRevealed = context.RevealedIds.ToHashSet();
+        var alreadyMet = context.MetIds.ToHashSet();
+        var revealCandidates = byId.Values
+            .Where(x => !x.Secret && !alreadyRevealed.Contains(x.Id) && !alreadyMet.Contains(x.Id))
+            .Select(x => x.Id)
+            .ToHashSet();
+        var metCandidates = byId.Keys.Where(id => !alreadyMet.Contains(id)).ToHashSet();
+
+        var revealed = FilterKnownIds(RequiredArray(node, revealedProperty), revealCandidates);
+        node[revealedProperty] = new JsonArray(revealed.Select(id => (JsonNode)id.ToString("D")).ToArray());
+        var met = FilterKnownIds(RequiredArray(node, metProperty), metCandidates);
+        node[metProperty] = new JsonArray(met.Select(id => (JsonNode)id.ToString("D")).ToArray());
+        return (revealed, met);
+    }
+
+    private static IReadOnlyList<Guid> FilterKnownIds(JsonArray nodes, IReadOnlySet<Guid> candidateIds)
+    {
+        var seen = new HashSet<Guid>();
+        var result = new List<Guid>();
+        foreach (var idNode in nodes)
+        {
+            if (idNode is JsonValue value &&
+                value.TryGetValue<string>(out var text) &&
+                Guid.TryParse(text, out var id) &&
+                candidateIds.Contains(id) &&
+                seen.Add(id))
+                result.Add(id);
+        }
+        return result;
     }
 
     private static void RequireProperties(JsonObject value, ApiConnectionSettings settings, params string[] expected)
@@ -843,6 +953,12 @@ public sealed class OpenAiCompatibleProvider(
         catch (InvalidOperationException ex) { throw new JsonException($"'{name}' must be an integer.", ex); }
     }
 
+    private static bool RequiredBoolean(JsonObject value, string name)
+    {
+        try { return value[name]?.GetValue<bool>() ?? throw new JsonException($"'{name}' must be a boolean."); }
+        catch (InvalidOperationException ex) { throw new JsonException($"'{name}' must be a boolean.", ex); }
+    }
+
     private static JsonObject Message(string role, string content) => new() { ["role"] = role, ["content"] = content };
 
     private static JsonObject SimpleProbeSchema() => ObjectSchema(new Dictionary<string, JsonNode?> { ["ok"] = new JsonObject { ["type"] = "boolean" } }, ["ok"]);
@@ -863,8 +979,21 @@ public sealed class OpenAiCompatibleProvider(
             ["type"] = "array",
             ["maxItems"] = SettingsValidator.MaxPlannedEventsUpperBound,
             ["items"] = ProposedPlannedEventSchema(settings)
+        },
+        ["initialVictoryConditions"] = new JsonObject
+        {
+            ["type"] = "array",
+            ["maxItems"] = SettingsValidator.MaxConditionsUpperBound,
+            ["items"] = ProposedConditionSchema(settings)
+        },
+        ["initialLossConditions"] = new JsonObject
+        {
+            ["type"] = "array",
+            ["maxItems"] = SettingsValidator.MaxConditionsUpperBound,
+            ["items"] = ProposedConditionSchema(settings)
         }
-    }, ["refinedStoryPrompt", "suggestedTitle", "initialEventsPrompt", "initialStoryBibleEntries", "initialPlannedEvents"]);
+    }, ["refinedStoryPrompt", "suggestedTitle", "initialEventsPrompt", "initialStoryBibleEntries", "initialPlannedEvents",
+        "initialVictoryConditions", "initialLossConditions"]);
 
     private static JsonObject TurnSchema(ApiConnectionSettings settings) => ObjectSchema(new Dictionary<string, JsonNode?>
     {
@@ -906,9 +1035,14 @@ public sealed class OpenAiCompatibleProvider(
                 ["entry"] = new JsonObject { ["anyOf"] = new JsonArray(ProposedPlannedEventSchema(settings), new JsonObject { ["type"] = "null" }) },
                 ["outcome"] = new JsonObject { ["type"] = new JsonArray("string", "null"), ["enum"] = new JsonArray("fulfilled", "abandoned", null) }
             }, ["operation", "entryId", "entry", "outcome"])
-        }
+        },
+        ["revealedVictoryConditionIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } },
+        ["metVictoryConditionIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } },
+        ["revealedLossConditionIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } },
+        ["metLossConditionIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } }
     }, ["turnNumber", "acknowledgedPlayerAction", "narration", "suggestedActions", "relevantStoryBibleEntryIds", "storyBibleUpdates",
-        "relevantPlannedEventIds", "plannedEventUpdates"]);
+        "relevantPlannedEventIds", "plannedEventUpdates",
+        "revealedVictoryConditionIds", "metVictoryConditionIds", "revealedLossConditionIds", "metLossConditionIds"]);
 
     private static bool IsSubstantiallyDuplicate(string candidate, string previous)
     {
@@ -965,8 +1099,19 @@ public sealed class OpenAiCompatibleProvider(
         ["description"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxPlannedEventDescriptionCharacters },
         ["importance"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 5 },
         ["urgency"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 5 },
-        ["prerequisiteEventIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } }
-    }, ["description", "importance", "urgency", "prerequisiteEventIds"]);
+        ["prerequisiteEventIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } },
+        // key/prerequisiteKeys let a batch of proposals (this response's plannedEventUpdates or
+        // initialPlannedEvents) reference each other before any of them has a real id - see the
+        // ProposedPlannedEvent comment in Models.cs. key is nullable: most proposals need no label.
+        ["key"] = new JsonObject { ["type"] = new JsonArray("string", "null") },
+        ["prerequisiteKeys"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } }
+    }, ["description", "importance", "urgency", "prerequisiteEventIds", "key", "prerequisiteKeys"]);
+
+    private static JsonObject ProposedConditionSchema(ApiConnectionSettings settings) => ObjectSchema(new Dictionary<string, JsonNode?>
+    {
+        ["description"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxConditionDescriptionCharacters },
+        ["secret"] = new JsonObject { ["type"] = "boolean" }
+    }, ["description", "secret"]);
 
     // Weak models handling the PromptedJson fallback tier tend to follow a concrete example far more
     // reliably than raw JSON Schema syntax (nullable-as-type-array, anyOf, format:uuid). This walks any
@@ -1046,7 +1191,11 @@ public sealed class OpenAiCompatibleProvider(
         IReadOnlyList<Guid> RelevantStoryBibleEntryIds,
         IReadOnlyList<ProposedStoryBibleUpdate> StoryBibleUpdates,
         IReadOnlyList<Guid> RelevantPlannedEventIds,
-        IReadOnlyList<ProposedPlannedEventUpdate> PlannedEventUpdates);
+        IReadOnlyList<ProposedPlannedEventUpdate> PlannedEventUpdates,
+        IReadOnlyList<Guid> RevealedVictoryConditionIds,
+        IReadOnlyList<Guid> MetVictoryConditionIds,
+        IReadOnlyList<Guid> RevealedLossConditionIds,
+        IReadOnlyList<Guid> MetLossConditionIds);
 }
 
 public sealed class ProviderException(string message, HttpStatusCode? statusCode, Exception? innerException = null)

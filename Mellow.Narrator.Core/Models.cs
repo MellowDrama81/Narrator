@@ -132,7 +132,20 @@ public enum PlannedEventOutcome { Fulfilled, Abandoned }
 public enum PlannedEventChangeSource { LlmUpdate, AutomaticCull, ManualEdit }
 public enum PlannedEventMaintenanceReason { GeneratedLimitCull, UserApprovedLimitCull, ManualEdit }
 
-public sealed record ProposedPlannedEvent(string Description, int Importance, int Urgency, IReadOnlyList<Guid> PrerequisiteEventIds);
+// Key/PrerequisiteKeys exist only on the wire-format proposal, never on the materialized PlannedEvent:
+// they let a batch of proposals (this turn's plannedEventUpdates, or the initial batch proposed
+// alongside a Story Definition) reference each other before any of them has a real id. Key is a label
+// this proposal can be referred to by, meaningful only within the same batch/response; PrerequisiteKeys
+// references OTHER proposals' Key values in that same batch. Both are resolved into real ids (merged
+// into the final PrerequisiteEventIds) and discarded once the response is processed - see
+// PlannedEventProcessor.Apply and ResolveInitialPlannedEvents.
+public sealed record ProposedPlannedEvent(
+    string Description,
+    int Importance,
+    int Urgency,
+    IReadOnlyList<Guid> PrerequisiteEventIds,
+    string? Key,
+    IReadOnlyList<string> PrerequisiteKeys);
 
 public sealed record ProposedPlannedEventUpdate(
     PlannedEventOperation Operation,
@@ -155,6 +168,26 @@ public sealed record PlannedEventMaintenanceRecord(
     IReadOnlyList<AppliedPlannedEventChange> Changes,
     DateTimeOffset CompletedAtUtc);
 
+// A Story Condition is a fixed victory or loss condition defined on the Story Definition and copied
+// verbatim (with remapped ids, same as Story Bible/Planned Events - see NarratorApplication.StartStoryAsync)
+// into every Story State started from it. Unlike Planned Events, the set never grows or shrinks during
+// play - the narrator only ever reports a condition as revealed and/or met, never adds, replaces, or
+// removes one - so no maintenance/cull machinery exists for it. Secret controls whether the narrator may
+// ever state the condition's content directly in narration: a secret condition must stay implied only
+// through the ordinary events that satisfy it, exactly like a Planned Event, while a non-secret one
+// should be woven into the prose once something in the story makes it relevant (never as an upfront
+// list) and is then tracked as "revealed". Both secret and non-secret conditions are tracked as "met"
+// once actually satisfied; a condition, once met, stays met for the rest of the story even though the
+// player may choose to keep playing past it.
+public sealed record StoryCondition(Guid Id, string Description, bool Secret);
+
+public sealed record StoryConditions(IReadOnlyList<StoryCondition> Entries)
+{
+    public static StoryConditions Empty { get; } = new([]);
+}
+
+public sealed record ProposedStoryCondition(string Description, bool Secret);
+
 public sealed record StoryDefinition(
     Guid Id,
     string Title,
@@ -164,6 +197,8 @@ public sealed record StoryDefinition(
     IReadOnlyList<StoryBibleMaintenanceRecord> StoryBibleMaintenanceHistory,
     PlannedEvents InitialPlannedEvents,
     IReadOnlyList<PlannedEventMaintenanceRecord> PlannedEventMaintenanceHistory,
+    StoryConditions InitialVictoryConditions,
+    StoryConditions InitialLossConditions,
     int SortOrder,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
@@ -173,7 +208,9 @@ public sealed record StoryDefinitionSnapshot(
     string StoryPrompt,
     string InitialEventsPrompt,
     StoryBible InitialStoryBible,
-    PlannedEvents InitialPlannedEvents);
+    PlannedEvents InitialPlannedEvents,
+    StoryConditions InitialVictoryConditions,
+    StoryConditions InitialLossConditions);
 
 public sealed record StorySetupSnapshot(StoryDefinitionSnapshot Definition);
 
@@ -186,6 +223,12 @@ public sealed record StoryState(
     IReadOnlyList<StoryBibleMaintenanceRecord> StoryBibleMaintenanceHistory,
     PlannedEvents CurrentPlannedEvents,
     IReadOnlyList<PlannedEventMaintenanceRecord> PlannedEventMaintenanceHistory,
+    StoryConditions CurrentVictoryConditions,
+    StoryConditions CurrentLossConditions,
+    IReadOnlyList<Guid> RevealedVictoryConditionIds,
+    IReadOnlyList<Guid> MetVictoryConditionIds,
+    IReadOnlyList<Guid> RevealedLossConditionIds,
+    IReadOnlyList<Guid> MetLossConditionIds,
     int SortOrder,
     DateTimeOffset StartedAtUtc,
     DateTimeOffset? LastActionAtUtc,
@@ -208,6 +251,12 @@ public sealed record StoryTurn(
     IReadOnlyList<AppliedStoryBibleChange> StoryBibleChanges,
     IReadOnlyList<Guid> RelevantPlannedEventIds,
     IReadOnlyList<AppliedPlannedEventChange> PlannedEventChanges,
+    // Newly revealed/met this turn only - not cumulative (see StoryState for the running totals). A
+    // condition already revealed or met in an earlier turn is never repeated here.
+    IReadOnlyList<Guid> RevealedVictoryConditionIds,
+    IReadOnlyList<Guid> MetVictoryConditionIds,
+    IReadOnlyList<Guid> RevealedLossConditionIds,
+    IReadOnlyList<Guid> MetLossConditionIds,
     DateTimeOffset CompletedAtUtc,
     GenerationMetadata Generation);
 

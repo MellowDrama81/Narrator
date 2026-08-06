@@ -10,14 +10,15 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DbService } from '../core/db.service';
 import { downloadJson, downloadText, safeFilename } from '../core/download';
-import { nowIso, StoryBibleEntry, StoryState } from '../core/models';
+import { nowIso, PlannedEvent, StoryBibleEntry, StoryState, StoryTurn } from '../core/models';
 import { NarratorService } from '../core/narrator.service';
 import { BibleEditorComponent } from '../shared/bible-editor.component';
+import { PlannedEventsEditorComponent } from '../shared/planned-events-editor.component';
 
 @Component({
   imports: [
     CommonModule, FormsModule, RouterLink, MatButtonModule, MatCardModule, MatFormFieldModule,
-    MatInputModule, MatProgressSpinnerModule, BibleEditorComponent,
+    MatInputModule, MatProgressSpinnerModule, BibleEditorComponent, PlannedEventsEditorComponent,
   ],
   template: `
     @if (story) {
@@ -25,11 +26,12 @@ import { BibleEditorComponent } from '../shared/bible-editor.component';
         <div><a class="back-link" routerLink="/stories">← Stories</a><p class="eyebrow">Turn {{ story.turns.length }}</p><h1>{{ story.label }}</h1></div>
         <div class="actions">
           <button mat-button (click)="bibleOpen = !bibleOpen">{{ bibleOpen ? 'Hide' : 'Open' }} Story Bible</button>
+          <button mat-button (click)="plannedEventsOpen = !plannedEventsOpen">{{ plannedEventsOpen ? 'Hide' : 'Open' }} Planned Events</button>
           <button mat-stroked-button (click)="copy()">Copy story</button>
           <button mat-button (click)="export()">Export</button>
         </div>
       </header>
-      <div class="play-layout" [class.bible-open]="bibleOpen">
+      <div class="play-layout" [class.bible-open]="bibleOpen || plannedEventsOpen">
         <main class="narrative">
           @for (turn of story.turns; track turn.id) {
             <article class="turn" [class.opening]="turn.playerAction === null">
@@ -63,9 +65,14 @@ import { BibleEditorComponent } from '../shared/bible-editor.component';
             <button mat-button class="danger" (click)="remove()">Move story to trash</button>
           </div>
         </main>
-        @if (bibleOpen) {
+        @if (bibleOpen || plannedEventsOpen) {
           <aside class="bible-panel">
-            <app-bible-editor [(entries)]="story.currentStoryBible" (entriesChange)="saveBible($event)"></app-bible-editor>
+            @if (bibleOpen) {
+              <app-bible-editor [(entries)]="story.currentStoryBible" (entriesChange)="saveBible($event)"></app-bible-editor>
+            }
+            @if (plannedEventsOpen) {
+              <app-planned-events-editor [(entries)]="story.currentPlannedEvents" (entriesChange)="savePlannedEvents($event)"></app-planned-events-editor>
+            }
           </aside>
         }
       </div>
@@ -98,6 +105,7 @@ export class PlayComponent implements OnInit {
   action = '';
   busy = false;
   bibleOpen = false;
+  plannedEventsOpen = false;
   private pendingKey = '';
 
   constructor(
@@ -131,6 +139,7 @@ export class PlayComponent implements OnInit {
       this.story = await this.narrator.play(this.story.id, value);
       this.action = '';
       await this.db.saveMeta(this.pendingKey, '');
+      this.notifyMetConditions(this.story.turns.at(-1)!);
       setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }));
     } catch (error) {
       this.snack.open(error instanceof Error ? error.message : 'The story request failed.', 'Dismiss', { duration: 8000 });
@@ -140,9 +149,31 @@ export class PlayComponent implements OnInit {
     }
   }
 
+  // Only ever called right after narrator.play() resolves, looking at that just-produced turn's own
+  // delta fields (never cumulative) - so a condition met in an earlier turn never surfaces this notice
+  // again. The narration prose is expected to already read naturally for a revealed condition; only a
+  // freshly met one gets a dedicated notice here.
+  private notifyMetConditions(turn: StoryTurn): void {
+    if (!this.story) return;
+    const metIds = [...turn.metVictoryConditionIds, ...turn.metLossConditionIds];
+    if (!metIds.length) return;
+    const all = [...this.story.currentVictoryConditions, ...this.story.currentLossConditions];
+    const descriptions = metIds
+      .map(id => all.find(condition => condition.id === id)?.description)
+      .filter((description): description is string => !!description);
+    if (!descriptions.length) return;
+    this.snack.open(`Condition met: ${descriptions.join(' · ')}`, 'Keep playing', { duration: 15000 });
+  }
+
   async saveBible(entries: StoryBibleEntry[]): Promise<void> {
     if (!this.story) return;
     this.story.currentStoryBible = entries;
+    await this.db.saveStory(this.story);
+  }
+
+  async savePlannedEvents(entries: PlannedEvent[]): Promise<void> {
+    if (!this.story) return;
+    this.story.currentPlannedEvents = entries;
     await this.db.saveStory(this.story);
   }
 
