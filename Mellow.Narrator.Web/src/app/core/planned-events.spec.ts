@@ -7,9 +7,7 @@ const proposal = (overrides: Partial<ProposedPlannedEvent> = {}): ProposedPlanne
   description: 'The lighthouse keeper vanishes.',
   importance: 3,
   urgency: 3,
-  prerequisiteEventIds: [],
-  key: null,
-  prerequisiteKeys: [],
+  condition: null,
   ...overrides,
 });
 
@@ -22,7 +20,7 @@ const event = (overrides: Partial<PlannedEvent> = {}): PlannedEvent => ({
   description: 'The lighthouse keeper vanishes.',
   importance: 3,
   urgency: 3,
-  prerequisiteEventIds: [],
+  condition: null,
   lastRelevantTurnNumber: 0,
   ...overrides,
 });
@@ -33,47 +31,6 @@ describe('applyPlannedEvents', () => {
     expect(result).toHaveLength(1);
     expect(result[0].description).toBe('The lighthouse keeper vanishes.');
     expect(result[0].lastRelevantTurnNumber).toBe(1);
-  });
-
-  it('resolves prerequisiteKeys against a sibling Add in the same batch', () => {
-    const updates: PlannedEventUpdate[] = [
-      add({ key: 'storm', description: 'A storm rolls in.' }),
-      add({ description: 'The keeper vanishes.', prerequisiteKeys: ['storm'] }),
-    ];
-    const result = applyPlannedEvents([], updates, [], 1, 50);
-    const storm = result.find(entry => entry.description === 'A storm rolls in.')!;
-    const keeper = result.find(entry => entry.description === 'The keeper vanishes.')!;
-    expect(keeper.prerequisiteEventIds).toEqual([storm.id]);
-  });
-
-  it('throws on a duplicate key within the same batch', () => {
-    const updates: PlannedEventUpdate[] = [add({ key: 'storm' }), add({ key: 'storm' })];
-    expect(() => applyPlannedEvents([], updates, [], 1, 50)).toThrow(/duplicate/i);
-  });
-
-  it('throws when a prerequisiteKeys reference does not resolve', () => {
-    const updates: PlannedEventUpdate[] = [add({ prerequisiteKeys: ['missing'] })];
-    expect(() => applyPlannedEvents([], updates, [], 1, 50)).toThrow(/unknown prerequisite key/i);
-  });
-
-  it('throws when a replace lists an unknown prerequisite id', () => {
-    const original = [event()];
-    const updates: PlannedEventUpdate[] = [{
-      operation: 'replace', entryId: 'event-1', outcome: null,
-      entry: proposal({ prerequisiteEventIds: ['nonexistent'] }),
-    }];
-    expect(() => applyPlannedEvents(original, updates, [], 1, 50)).toThrow(/unknown prerequisite/i);
-  });
-
-  it('allows a replace to keep an existing prerequisite id even if not otherwise known this turn', () => {
-    const prerequisite = event({ id: 'prereq-1' });
-    const dependent = event({ id: 'event-1', prerequisiteEventIds: ['prereq-1'] });
-    const updates: PlannedEventUpdate[] = [{
-      operation: 'replace', entryId: 'event-1', outcome: null,
-      entry: proposal({ prerequisiteEventIds: ['prereq-1'], description: 'Updated.' }),
-    }];
-    const result = applyPlannedEvents([prerequisite, dependent], updates, [], 1, 50);
-    expect(result.find(entry => entry.id === 'event-1')!.prerequisiteEventIds).toEqual(['prereq-1']);
   });
 
   it('removes an event when fulfilled', () => {
@@ -141,25 +98,43 @@ describe('applyPlannedEvents', () => {
     });
   });
 
-  describe('relationship validation', () => {
-    it('rejects an event that lists itself as a prerequisite', () => {
-      const updates: PlannedEventUpdate[] = [add({ key: 'self', prerequisiteKeys: ['self'] })];
-      expect(() => applyPlannedEvents([], updates, [], 1, 50)).toThrow(/itself as a prerequisite/i);
+  describe('condition normalization', () => {
+    it('normalizes a null condition on add', () => {
+      const result = applyPlannedEvents([], [add({ condition: null })], [], 1, 50);
+      expect(result[0].condition).toBeNull();
     });
 
-    it('rejects a two-event prerequisite cycle', () => {
-      const updates: PlannedEventUpdate[] = [
-        add({ key: 'a', prerequisiteKeys: ['b'] }),
-        add({ key: 'b', prerequisiteKeys: ['a'] }),
-      ];
-      expect(() => applyPlannedEvents([], updates, [], 1, 50)).toThrow(/cycle/i);
+    it('normalizes an empty condition to null on add', () => {
+      const result = applyPlannedEvents([], [add({ condition: '' })], [], 1, 50);
+      expect(result[0].condition).toBeNull();
     });
 
-    it('treats a prerequisite id that no longer names a live entry as resolved, not an error', () => {
-      const original = [event({ id: 'event-1', prerequisiteEventIds: ['already-gone'] })];
-      const result = applyPlannedEvents(original, [], [], 1, 50);
-      expect(result).toHaveLength(1);
-      expect(result[0].prerequisiteEventIds).toEqual(['already-gone']);
+    it('normalizes a whitespace-only condition to null on add', () => {
+      const result = applyPlannedEvents([], [add({ condition: '   ' })], [], 1, 50);
+      expect(result[0].condition).toBeNull();
+    });
+
+    it('trims a condition on add', () => {
+      const result = applyPlannedEvents([], [add({ condition: '  the storm must pass  ' })], [], 1, 50);
+      expect(result[0].condition).toBe('the storm must pass');
+    });
+
+    it('normalizes and trims a condition on replace', () => {
+      const original = [event({ condition: 'old condition' })];
+      const updates: PlannedEventUpdate[] = [{
+        operation: 'replace', entryId: 'event-1', outcome: null, entry: proposal({ condition: '  new condition  ' }),
+      }];
+      const result = applyPlannedEvents(original, updates, [], 1, 50);
+      expect(result[0].condition).toBe('new condition');
+    });
+
+    it('normalizes an empty condition to null on replace', () => {
+      const original = [event({ condition: 'old condition' })];
+      const updates: PlannedEventUpdate[] = [{
+        operation: 'replace', entryId: 'event-1', outcome: null, entry: proposal({ condition: '' }),
+      }];
+      const result = applyPlannedEvents(original, updates, [], 1, 50);
+      expect(result[0].condition).toBeNull();
     });
   });
 
@@ -177,25 +152,35 @@ describe('applyPlannedEvents', () => {
 });
 
 describe('resolveInitialPlannedEvents', () => {
-  it('resolves keys and prerequisiteKeys across the whole batch', () => {
+  it('resolves a batch of proposals into real Planned Events', () => {
     const result = resolveInitialPlannedEvents([
-      proposal({ key: 'storm', description: 'A storm rolls in.' }),
-      proposal({ description: 'The keeper vanishes.', prerequisiteKeys: ['storm'] }),
+      proposal({ description: 'A storm rolls in.' }),
+      proposal({ description: 'The keeper vanishes.' }),
     ]);
-    const storm = result.find(entry => entry.description === 'A storm rolls in.')!;
-    const keeper = result.find(entry => entry.description === 'The keeper vanishes.')!;
-    expect(keeper.prerequisiteEventIds).toEqual([storm.id]);
+    expect(result).toHaveLength(2);
+    expect(result.map(entry => entry.description)).toEqual(['A storm rolls in.', 'The keeper vanishes.']);
   });
 
-  it('throws on a duplicate key', () => {
-    expect(() => resolveInitialPlannedEvents([proposal({ key: 'a' }), proposal({ key: 'a' })])).toThrow(/duplicate/i);
-  });
+  describe('condition normalization', () => {
+    it('normalizes a null condition to null', () => {
+      const result = resolveInitialPlannedEvents([proposal({ condition: null })]);
+      expect(result[0].condition).toBeNull();
+    });
 
-  it('throws on a cycle across the initial batch', () => {
-    expect(() => resolveInitialPlannedEvents([
-      proposal({ key: 'a', prerequisiteKeys: ['b'] }),
-      proposal({ key: 'b', prerequisiteKeys: ['a'] }),
-    ])).toThrow(/cycle/i);
+    it('normalizes an empty condition to null', () => {
+      const result = resolveInitialPlannedEvents([proposal({ condition: '' })]);
+      expect(result[0].condition).toBeNull();
+    });
+
+    it('normalizes a whitespace-only condition to null', () => {
+      const result = resolveInitialPlannedEvents([proposal({ condition: '   ' })]);
+      expect(result[0].condition).toBeNull();
+    });
+
+    it('trims a condition', () => {
+      const result = resolveInitialPlannedEvents([proposal({ condition: '  the storm must pass  ' })]);
+      expect(result[0].condition).toBe('the storm must pass');
+    });
   });
 });
 

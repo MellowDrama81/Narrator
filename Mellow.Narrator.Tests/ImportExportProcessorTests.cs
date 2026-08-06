@@ -60,27 +60,32 @@ public sealed class ImportExportProcessorTests
     }
 
     [Fact]
-    public void StateCopy_RemapsPrerequisiteReferenceToTheSiblingsNewId()
+    public void StateCopy_PreservesConditionOnPlannedEventDuringRemap()
     {
-        var (state, turn) = CreateStateWithPlannedEventPrerequisite();
-        var prerequisiteId = state.CurrentPlannedEvents.Entries.Single(x => x.Description == "Prerequisite").Id;
-        var dependentId = state.CurrentPlannedEvents.Entries.Single(x => x.Description == "Dependent").Id;
+        var (state, turn) = CreateState();
+        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The tower falls.", 3, 3, "The hero must reach the tower first.", 0);
+        var withPlannedEvents = state with
+        {
+            Setup = state.Setup with
+            {
+                Definition = state.Setup.Definition with { InitialPlannedEvents = new([plannedEvent]) }
+            },
+            CurrentPlannedEvents = new([plannedEvent])
+        };
 
         var copy = ImportExportProcessor.CopyState(
-            state, [turn], 7, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration);
+            withPlannedEvents, [turn], 7, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration);
 
-        var copiedPrerequisite = copy.State.CurrentPlannedEvents.Entries.Single(x => x.Description == "Prerequisite");
-        var copiedDependent = copy.State.CurrentPlannedEvents.Entries.Single(x => x.Description == "Dependent");
-        Assert.NotEqual(prerequisiteId, copiedPrerequisite.Id);
-        Assert.NotEqual(dependentId, copiedDependent.Id);
-        Assert.Equal(copiedPrerequisite.Id, Assert.Single(copiedDependent.PrerequisiteEventIds));
+        var copiedEvent = Assert.Single(copy.State.CurrentPlannedEvents.Entries);
+        Assert.NotEqual(plannedEvent.Id, copiedEvent.Id);
+        Assert.Equal("The hero must reach the tower first.", copiedEvent.Condition);
     }
 
     [Fact]
     public void DefinitionCopy_RemapsPlannedEventIdsConsistently()
     {
         var now = DateTimeOffset.UtcNow;
-        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The tower must fall.", 5, 3, [], 0);
+        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The tower must fall.", 5, 3, null, 0);
         var change = new AppliedPlannedEventChange(
             PlannedEventOperation.Replace, plannedEvent.Id, plannedEvent, plannedEvent, PlannedEventChangeSource.ManualEdit, null);
         var maintenance = new PlannedEventMaintenanceRecord(
@@ -173,7 +178,7 @@ public sealed class ImportExportProcessorTests
     public void DefinitionCopy_RejectsPlannedEventWithEmptyDescription()
     {
         var now = DateTimeOffset.UtcNow;
-        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "   ", 3, 3, [], 0);
+        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "   ", 3, 3, null, 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
             new([plannedEvent]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
@@ -186,7 +191,7 @@ public sealed class ImportExportProcessorTests
     public void DefinitionCopy_RejectsPlannedEventWithInvalidImportance()
     {
         var now = DateTimeOffset.UtcNow;
-        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The tower must fall.", 6, 3, [], 0);
+        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The tower must fall.", 6, 3, null, 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
             new([plannedEvent]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
@@ -200,8 +205,8 @@ public sealed class ImportExportProcessorTests
     {
         var now = DateTimeOffset.UtcNow;
         var id = Guid.NewGuid();
-        var first = new PlannedEvent(id, "First event.", 3, 3, [], 0);
-        var second = new PlannedEvent(id, "Second event.", 3, 3, [], 0);
+        var first = new PlannedEvent(id, "First event.", 3, 3, null, 0);
+        var second = new PlannedEvent(id, "Second event.", 3, 3, null, 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
             new([first, second]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
@@ -214,8 +219,8 @@ public sealed class ImportExportProcessorTests
     public void DefinitionCopy_RejectsPlannedEventsExceedingStoryGenerationCountLimit()
     {
         var now = DateTimeOffset.UtcNow;
-        var first = new PlannedEvent(Guid.NewGuid(), "First event.", 3, 3, [], 0);
-        var second = new PlannedEvent(Guid.NewGuid(), "Second event.", 3, 3, [], 0);
+        var first = new PlannedEvent(Guid.NewGuid(), "First event.", 3, 3, null, 0);
+        var second = new PlannedEvent(Guid.NewGuid(), "Second event.", 3, 3, null, 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
             new([first, second]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
@@ -226,55 +231,10 @@ public sealed class ImportExportProcessorTests
     }
 
     [Fact]
-    public void DefinitionCopy_RejectsEmptyGuidPrerequisite()
+    public void DefinitionCopy_PreservesAConditionOnAPlannedEvent()
     {
         var now = DateTimeOffset.UtcNow;
-        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "Event", 3, 3, [Guid.Empty], 0);
-        var definition = new StoryDefinition(
-            Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
-            new([plannedEvent]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
-
-        Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
-            definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
-    }
-
-    [Fact]
-    public void DefinitionCopy_RejectsSelfReferencingPrerequisite()
-    {
-        var now = DateTimeOffset.UtcNow;
-        var id = Guid.NewGuid();
-        var plannedEvent = new PlannedEvent(id, "Event", 3, 3, [id], 0);
-        var definition = new StoryDefinition(
-            Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
-            new([plannedEvent]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
-
-        Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
-            definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
-    }
-
-    [Fact]
-    public void DefinitionCopy_RejectsALivePrerequisiteCycle()
-    {
-        var now = DateTimeOffset.UtcNow;
-        var aId = Guid.NewGuid();
-        var bId = Guid.NewGuid();
-        var a = new PlannedEvent(aId, "A", 3, 3, [bId], 0);
-        var b = new PlannedEvent(bId, "B", 3, 3, [aId], 0);
-        var definition = new StoryDefinition(
-            Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
-            new([a, b]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
-
-        Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
-            definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration));
-    }
-
-    [Fact]
-    public void DefinitionCopy_AcceptsADanglingPrerequisite()
-    {
-        // A prerequisite id that doesn't correspond to any entry in the collection represents a
-        // prerequisite already resolved in earlier, unmodeled history - valid, not an error.
-        var now = DateTimeOffset.UtcNow;
-        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "Event", 3, 3, [Guid.NewGuid()], 0);
+        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The dam bursts.", 3, 3, "The reservoir must be filled first.", 0);
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
             new([plannedEvent]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
@@ -282,7 +242,41 @@ public sealed class ImportExportProcessorTests
         var copy = ImportExportProcessor.CopyDefinition(
             definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration);
 
-        Assert.Single(copy.InitialPlannedEvents.Entries);
+        var copied = Assert.Single(copy.InitialPlannedEvents.Entries);
+        Assert.Equal("The reservoir must be filled first.", copied.Condition);
+    }
+
+    [Fact]
+    public void DefinitionCopy_AllowsANullCondition()
+    {
+        // Most Planned Events have no prerequisite condition at all - null must round-trip cleanly,
+        // not be rejected or coerced into an empty string.
+        var now = DateTimeOffset.UtcNow;
+        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The dam bursts.", 3, 3, null, 0);
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
+            new([plannedEvent]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
+
+        var copy = ImportExportProcessor.CopyDefinition(
+            definition, 1, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration);
+
+        var copied = Assert.Single(copy.InitialPlannedEvents.Entries);
+        Assert.Null(copied.Condition);
+    }
+
+    [Fact]
+    public void DefinitionCopy_RejectsPlannedEventWithConditionExceedingConfiguredLimit()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var limits = NarratorDefaults.Create().ContentLimits;
+        var plannedEvent = new PlannedEvent(
+            Guid.NewGuid(), "The dam bursts.", 3, 3, new string('x', limits.MaxPlannedEventConditionCharacters + 1), 0);
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "A sufficiently long prompt for validation.", "", StoryBible.Empty, [],
+            new([plannedEvent]), [], StoryConditions.Empty, StoryConditions.Empty, 0, now, now);
+
+        Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyDefinition(
+            definition, 1, limits, NarratorDefaults.Create().StoryGeneration));
     }
 
     [Fact]
@@ -593,6 +587,26 @@ public sealed class ImportExportProcessorTests
     }
 
     [Fact]
+    public void StateCopy_RejectsPlannedEventWithConditionExceedingConfiguredLimit()
+    {
+        var (state, opening) = CreateState();
+        var limits = NarratorDefaults.Create().ContentLimits;
+        var plannedEvent = new PlannedEvent(
+            Guid.NewGuid(), "The dam bursts.", 3, 3, new string('x', limits.MaxPlannedEventConditionCharacters + 1), 0);
+        var withPlannedEvents = state with
+        {
+            Setup = state.Setup with
+            {
+                Definition = state.Setup.Definition with { InitialPlannedEvents = new([plannedEvent]) }
+            },
+            CurrentPlannedEvents = new([plannedEvent])
+        };
+
+        Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyState(
+            withPlannedEvents, [opening], 1, limits, NarratorDefaults.Create().StoryGeneration));
+    }
+
+    [Fact]
     public async Task ReadLimitedAsync_RejectsStreamExceedingMaximumImportBytes()
     {
         using var stream = new MemoryStream(new byte[ImportExportProcessor.MaximumImportBytes + 1]);
@@ -679,7 +693,7 @@ public sealed class ImportExportProcessorTests
     private static (StoryState State, StoryTurn Turn) CreateStateWithPlannedEvent()
     {
         var (state, turn) = CreateState();
-        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The tower must fall.", 5, 3, [], 0);
+        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The tower must fall.", 5, 3, null, 0);
         var change = new AppliedPlannedEventChange(
             PlannedEventOperation.Replace, plannedEvent.Id, plannedEvent, plannedEvent, PlannedEventChangeSource.ManualEdit, null);
         var maintenance = new PlannedEventMaintenanceRecord(
@@ -699,22 +713,6 @@ public sealed class ImportExportProcessorTests
             PlannedEventChanges = [change]
         };
         return (withPlannedEvents, turnWithPlannedEvents);
-    }
-
-    private static (StoryState State, StoryTurn Turn) CreateStateWithPlannedEventPrerequisite()
-    {
-        var (state, turn) = CreateState();
-        var prerequisite = new PlannedEvent(Guid.NewGuid(), "Prerequisite", 3, 3, [], 0);
-        var dependent = new PlannedEvent(Guid.NewGuid(), "Dependent", 3, 3, [prerequisite.Id], 0);
-        var withPlannedEvents = state with
-        {
-            Setup = state.Setup with
-            {
-                Definition = state.Setup.Definition with { InitialPlannedEvents = new([prerequisite, dependent]) }
-            },
-            CurrentPlannedEvents = new([prerequisite, dependent])
-        };
-        return (withPlannedEvents, turn);
     }
 
     private static (StoryState State, StoryTurn Turn) CreateStateWithConditions()

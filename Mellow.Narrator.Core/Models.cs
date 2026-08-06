@@ -82,43 +82,17 @@ public sealed record StoryBibleMaintenanceRecord(
 // means let it emerge naturally whenever the story happens to head that way, 5 means actively work
 // it into the very next scene(s). A mandatory event can still have low urgency (inevitable, but not
 // due yet) or a minor event can have high urgency (small, but should happen very soon if at all).
-// PrerequisiteEventIds references other Planned Events (by Id) that must occur before this one is
-// pursued. An id that no longer corresponds to a live entry is not an error: it means that
-// prerequisite has already been resolved (fulfilled or abandoned) and no longer blocks anything -
-// PlannedEventProcessor never rewrites this list to prune such ids, it just stops treating them as
-// blocking. Only an id that still names a live entry counts as an outstanding prerequisite.
+// Condition is an optional freeform description of what must happen, or what state the story must be
+// in, before this event can be pursued - narrative prose the narrator interprets each turn, not a
+// structured reference to another entry. Null or empty means the event has no prerequisite and is
+// pursuable immediately according to its own importance and urgency.
 public sealed record PlannedEvent(
     Guid Id,
     string Description,
     int Importance,
     int Urgency,
-    IReadOnlyList<Guid> PrerequisiteEventIds,
-    int LastRelevantTurnNumber)
-{
-    // Default record equality would compare PrerequisiteEventIds by reference (it's a list, not a
-    // value type), so a freshly re-allocated but content-identical array would always compare unequal -
-    // same issue StoryBibleEntry works around for its KnownFacts/SecretFacts lists.
-    public bool Equals(PlannedEvent? other) =>
-        other is not null &&
-        Id == other.Id &&
-        Description == other.Description &&
-        Importance == other.Importance &&
-        Urgency == other.Urgency &&
-        LastRelevantTurnNumber == other.LastRelevantTurnNumber &&
-        PrerequisiteEventIds.SequenceEqual(other.PrerequisiteEventIds);
-
-    public override int GetHashCode()
-    {
-        var hash = new HashCode();
-        hash.Add(Id);
-        hash.Add(Description);
-        hash.Add(Importance);
-        hash.Add(Urgency);
-        hash.Add(LastRelevantTurnNumber);
-        foreach (var id in PrerequisiteEventIds) hash.Add(id);
-        return hash.ToHashCode();
-    }
-}
+    string? Condition,
+    int LastRelevantTurnNumber);
 
 public sealed record PlannedEvents(IReadOnlyList<PlannedEvent> Entries)
 {
@@ -132,20 +106,11 @@ public enum PlannedEventOutcome { Fulfilled, Abandoned }
 public enum PlannedEventChangeSource { LlmUpdate, AutomaticCull, ManualEdit }
 public enum PlannedEventMaintenanceReason { GeneratedLimitCull, UserApprovedLimitCull, ManualEdit }
 
-// Key/PrerequisiteKeys exist only on the wire-format proposal, never on the materialized PlannedEvent:
-// they let a batch of proposals (this turn's plannedEventUpdates, or the initial batch proposed
-// alongside a Story Definition) reference each other before any of them has a real id. Key is a label
-// this proposal can be referred to by, meaningful only within the same batch/response; PrerequisiteKeys
-// references OTHER proposals' Key values in that same batch. Both are resolved into real ids (merged
-// into the final PrerequisiteEventIds) and discarded once the response is processed - see
-// PlannedEventProcessor.Apply and ResolveInitialPlannedEvents.
 public sealed record ProposedPlannedEvent(
     string Description,
     int Importance,
     int Urgency,
-    IReadOnlyList<Guid> PrerequisiteEventIds,
-    string? Key,
-    IReadOnlyList<string> PrerequisiteKeys);
+    string? Condition);
 
 public sealed record ProposedPlannedEventUpdate(
     PlannedEventOperation Operation,

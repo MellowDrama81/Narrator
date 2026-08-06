@@ -123,7 +123,7 @@ public sealed class NarratorApplicationTests
         var draft = new StoryPromptDraft(null, "Title", "Raw prompt");
         var provider = new FakeProvider
         {
-            DefinitionResponse = new("Refined prompt", "Suggested Title", "", [], [new("The tower must fall.", 5, 4, [], null, [])], [], [])
+            DefinitionResponse = new("Refined prompt", "Suggested Title", "", [], [new("The tower must fall.", 5, 4, null)], [], [])
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
 
@@ -136,15 +136,15 @@ public sealed class NarratorApplicationTests
     }
 
     [Fact]
-    public async Task GenerateDefinition_ResolvesPrerequisiteKeysAmongInitialPlannedEvents()
+    public async Task GenerateDefinition_PersistsGeneratedInitialPlannedEventCondition()
     {
         var draft = new StoryPromptDraft(null, "Title", "Raw prompt");
         var provider = new FakeProvider
         {
             DefinitionResponse = new("Refined prompt", "Suggested Title", "", [],
             [
-                new("The hero learns the prophecy.", 4, 3, [], "prophecy", []),
-                new("The hero confronts the villain.", 5, 3, [], null, ["prophecy"])
+                new("The hero learns the prophecy.", 4, 3, null),
+                new("The hero confronts the villain.", 5, 3, "The prophecy must already be known.")
             ], [], [])
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
@@ -153,7 +153,8 @@ public sealed class NarratorApplicationTests
 
         var prophecy = Assert.Single(definition.InitialPlannedEvents.Entries, x => x.Description == "The hero learns the prophecy.");
         var confrontation = Assert.Single(definition.InitialPlannedEvents.Entries, x => x.Description == "The hero confronts the villain.");
-        Assert.Equal(prophecy.Id, Assert.Single(confrontation.PrerequisiteEventIds));
+        Assert.Null(prophecy.Condition);
+        Assert.Equal("The prophecy must already be known.", confrontation.Condition);
     }
 
     [Fact]
@@ -556,7 +557,7 @@ public sealed class NarratorApplicationTests
     [Fact]
     public async Task StartStoryThenPlayTurn_RoundTripsPlannedEventsThroughGenerationContext()
     {
-        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The bridge collapses.", 3, 3, [], 0);
+        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The bridge collapses.", 3, 3, "The scouts must have crossed first.", 0);
         var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, new([plannedEvent]), StoryConditions.Empty, StoryConditions.Empty);
         var draft = new StartStoryDraft(Guid.NewGuid(), snapshot);
         var provider = new FakeProvider
@@ -571,6 +572,8 @@ public sealed class NarratorApplicationTests
         // Planned Event ids are remapped on start the same way Story Bible entry ids are.
         Assert.NotEqual(plannedEvent.Id, startedPlannedEvent.Id);
         Assert.Equal(startedPlannedEvent.Id, Assert.Single(provider.LastContext!.PlannedEvents.Entries).Id);
+        // The Condition text carries over unchanged during the id remap.
+        Assert.Equal("The scouts must have crossed first.", startedPlannedEvent.Condition);
 
         provider.StoryResponse = new(
             "Next scene",
@@ -580,7 +583,7 @@ public sealed class NarratorApplicationTests
             [],
             [
                 new(PlannedEventOperation.Remove, startedPlannedEvent.Id, null, PlannedEventOutcome.Fulfilled),
-                new(PlannedEventOperation.Add, null, new("A new complication arises.", 2, 3, [], null, []), null)
+                new(PlannedEventOperation.Add, null, new("A new complication arises.", 2, 3, null), null)
             ],
             [],
             [],
@@ -604,7 +607,7 @@ public sealed class NarratorApplicationTests
     [Fact]
     public async Task UpdateInitialPlannedEvents_ManualEditIsNotSubjectToTheMandatoryRemovalRule()
     {
-        var mandatory = new PlannedEvent(Guid.NewGuid(), "Must happen", PlannedEventProcessor.MandatoryImportance, 3, [], 0);
+        var mandatory = new PlannedEvent(Guid.NewGuid(), "Must happen", PlannedEventProcessor.MandatoryImportance, 3, null, 0);
         var definitions = new MemoryDefinitions();
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], new([mandatory]), [], StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
@@ -627,12 +630,12 @@ public sealed class NarratorApplicationTests
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
         var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
-        var existing = new PlannedEvent(Guid.NewGuid(), "Existing event", 3, 3, [], 2);
+        var existing = new PlannedEvent(Guid.NewGuid(), "Existing event", 3, 3, null, 2);
         var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], new([existing]), [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, now, 2);
         var states = new MemoryStates(state, []);
         var app = CreateApplication(new MemoryDefinitions(), states, new FakeProvider());
 
-        var added = new PlannedEvent(Guid.Empty, "Added mid-play", 4, 3, [], 2);
+        var added = new PlannedEvent(Guid.Empty, "Added mid-play", 4, 3, null, 2);
         var updated = await app.UpdateCurrentPlannedEventsAsync(stateId, new([existing, added]));
 
         Assert.Equal(2, updated.CurrentPlannedEvents.Entries.Count);
@@ -641,6 +644,55 @@ public sealed class NarratorApplicationTests
         var addedChange = Assert.Single(history.Changes);
         Assert.Equal(PlannedEventOperation.Add, addedChange.Operation);
         Assert.Equal("Added mid-play", addedChange.After!.Description);
+    }
+
+    [Fact]
+    public async Task UpdateCurrentPlannedEvents_RoundTripsAndTrimsAConditionOnAManualEdit()
+    {
+        var stateId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), StoryBible.Empty, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, now, 2);
+        var states = new MemoryStates(state, []);
+        var app = CreateApplication(new MemoryDefinitions(), states, new FakeProvider());
+
+        var added = new PlannedEvent(Guid.Empty, "Added mid-play", 4, 3, "  Needs the tower to have fallen.  ", 2);
+        var updated = await app.UpdateCurrentPlannedEventsAsync(stateId, new([added]));
+
+        var persisted = Assert.Single(updated.CurrentPlannedEvents.Entries);
+        Assert.Equal("Needs the tower to have fallen.", persisted.Condition);
+    }
+
+    [Fact]
+    public async Task UpdateInitialPlannedEvents_RoundTripsANullCondition()
+    {
+        var definitions = new MemoryDefinitions();
+        var withCondition = new PlannedEvent(Guid.NewGuid(), "Must happen", 3, 3, "Some condition.", 0);
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], new([withCondition]), [], StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        await definitions.SaveAsync(definition);
+        var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
+
+        var withoutCondition = withCondition with { Condition = null };
+        var updated = await app.UpdateInitialPlannedEventsAsync(definition.Id, new([withoutCondition]));
+
+        Assert.Null(Assert.Single(updated.InitialPlannedEvents.Entries).Condition);
+    }
+
+    [Fact]
+    public async Task UpdateInitialPlannedEvents_RejectsAConditionExceedingConfiguredLimit()
+    {
+        var definitions = new MemoryDefinitions();
+        var definition = new StoryDefinition(
+            Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        await definitions.SaveAsync(definition);
+        var settings = ConfiguredSettings();
+        var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider(), settings);
+
+        var oversized = new PlannedEvent(
+            Guid.NewGuid(), "Event", 3, 3, new string('x', settings.ContentLimits.MaxPlannedEventConditionCharacters + 1), 0);
+
+        await Assert.ThrowsAsync<NarratorException>(() => app.UpdateInitialPlannedEventsAsync(definition.Id, new([oversized])));
     }
 
     [Fact]
@@ -770,8 +822,8 @@ public sealed class NarratorApplicationTests
     [Fact]
     public async Task CullDefinition_AlsoCullsPlannedEventsExceedingLimits()
     {
-        var lowImportance = new PlannedEvent(Guid.NewGuid(), "Low", 1, 3, [], 0);
-        var highImportance = new PlannedEvent(Guid.NewGuid(), "High", 5, 3, [], 0);
+        var lowImportance = new PlannedEvent(Guid.NewGuid(), "Low", 1, 3, null, 0);
+        var highImportance = new PlannedEvent(Guid.NewGuid(), "High", 5, 3, null, 0);
         var definitions = new MemoryDefinitions();
         var definition = new StoryDefinition(
             Guid.NewGuid(), "Story", "Prompt", "", StoryBible.Empty, [], new([lowImportance, highImportance]), [], StoryConditions.Empty, StoryConditions.Empty, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
@@ -790,8 +842,8 @@ public sealed class NarratorApplicationTests
     [Fact]
     public async Task CullStoryState_AlsoCullsPlannedEventsExceedingLimits()
     {
-        var lowImportance = new PlannedEvent(Guid.NewGuid(), "Low", 1, 3, [], 0);
-        var highImportance = new PlannedEvent(Guid.NewGuid(), "High", 5, 3, [], 0);
+        var lowImportance = new PlannedEvent(Guid.NewGuid(), "Low", 1, 3, null, 0);
+        var highImportance = new PlannedEvent(Guid.NewGuid(), "High", 5, 3, null, 0);
         var stateId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
         var snapshot = new StoryDefinitionSnapshot("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);

@@ -51,9 +51,14 @@ internal static class PlannedEventsView
                 var urgencyInput = new Picker { ItemsSource = new[] { "1", "2", "3", "4", "5" } };
                 urgencyInput.SelectedIndex = Math.Clamp(entry.Urgency, 1, 5) - 1;
                 var mandatory = entry.Importance == PlannedEventProcessor.MandatoryImportance;
-                var selectedPrerequisites = entry.PrerequisiteEventIds.ToHashSet();
-                var (prerequisitesSection, _) = BuildPrerequisitesPicker(
-                    events.Entries.Where(x => x.Id != entry.Id), selectedPrerequisites);
+                var conditionInput = new Editor
+                {
+                    Text = entry.Condition ?? "",
+                    Placeholder = "None - pursuable immediately",
+                    MaxLength = limits.MaxPlannedEventConditionCharacters,
+                    AutoSize = EditorAutoSizeOption.TextChanges,
+                    MinimumHeightRequest = 60
+                };
                 var details = new VerticalStackLayout
                 {
                     IsVisible = false,
@@ -63,7 +68,7 @@ internal static class PlannedEventsView
                         new Label { Text = "Description" }, descriptionInput,
                         new Label { Text = "Importance (5 is mandatory: the narrator must force it to happen)" }, importanceInput,
                         new Label { Text = "Urgency (5 = steer toward it now; 1 = let it emerge naturally)" }, urgencyInput,
-                        new Label { Text = "Prerequisites (must occur before this is pursued)" }, prerequisitesSection,
+                        new Label { Text = "Condition (what must happen, or what state the story must be in, first)" }, conditionInput,
                         Ui.Buttons(
                             Ui.Button("Save", async (_, _) =>
                             {
@@ -73,26 +78,21 @@ internal static class PlannedEventsView
                                     await page.DisplayAlertAsync("Description required", "Enter a description for this Planned Event.", "OK");
                                     return;
                                 }
+                                var condition = (conditionInput.Text ?? "").Trim();
                                 var updated = entry with
                                 {
                                     Description = description,
                                     Importance = int.TryParse(importanceInput.SelectedItem?.ToString(), out var parsedImportance) ? parsedImportance : entry.Importance,
                                     Urgency = int.TryParse(urgencyInput.SelectedItem?.ToString(), out var parsedUrgency) ? parsedUrgency : entry.Urgency,
-                                    PrerequisiteEventIds = selectedPrerequisites.ToArray()
+                                    Condition = string.IsNullOrWhiteSpace(condition) ? null : condition
                                 };
                                 await onSaveAsync(new PlannedEvents(events.Entries.Select(x => x.Id == entry.Id ? updated : x).ToArray()));
                             }),
                             Ui.DestructiveButton("Remove", async (_, _) =>
                             {
-                                var dependents = events.Entries
-                                    .Where(x => x.Id != entry.Id && x.PrerequisiteEventIds.Contains(entry.Id))
-                                    .Select(x => Summarize(x.Description))
-                                    .ToArray();
                                 var prompt = mandatory
                                     ? $"\"{entry.Description}\" is a mandatory Planned Event. Remove it anyway?"
                                     : $"Remove \"{entry.Description}\" from Planned Events?";
-                                if (dependents.Length > 0)
-                                    prompt += $" This is a prerequisite for: {string.Join(", ", dependents)}.";
                                 if (!await page.DisplayAlertAsync("Remove Planned Event?", prompt, "Remove", "Cancel")) return;
                                 await onSaveAsync(new PlannedEvents(events.Entries.Where(x => x.Id != entry.Id).ToArray()));
                             })),
@@ -100,14 +100,13 @@ internal static class PlannedEventsView
                     }
                 };
                 var tag = mandatory ? "mandatory" : $"importance {entry.Importance}";
-                var pendingPrerequisites = entry.PrerequisiteEventIds.Count(id => events.Entries.Any(x => x.Id == id));
-                var prerequisiteTag = pendingPrerequisites == 0 ? "" : $", {pendingPrerequisites} prerequisite(s) pending";
+                var conditionTag = string.IsNullOrWhiteSpace(entry.Condition) ? "" : ", conditional";
                 entries.Children.Add(new VerticalStackLayout
                 {
                     Children =
                     {
                         Ui.Button(
-                            $"{Summarize(entry.Description)} [{tag}, urgency {entry.Urgency}, relevant turn {entry.LastRelevantTurnNumber}{prerequisiteTag}]",
+                            $"{Summarize(entry.Description)} [{tag}, urgency {entry.Urgency}, relevant turn {entry.LastRelevantTurnNumber}{conditionTag}]",
                             (_, _) => details.IsVisible = !details.IsVisible),
                         details
                     }
@@ -129,8 +128,13 @@ internal static class PlannedEventsView
         };
         var newImportance = new Picker { ItemsSource = new[] { "1", "2", "3", "4", "5" }, SelectedIndex = 2 };
         var newUrgency = new Picker { ItemsSource = new[] { "1", "2", "3", "4", "5" }, SelectedIndex = 2 };
-        var newSelectedPrerequisites = new HashSet<Guid>();
-        var (newPrerequisitesSection, newPrerequisiteBoxes) = BuildPrerequisitesPicker(events.Entries, newSelectedPrerequisites);
+        var newCondition = new Editor
+        {
+            Placeholder = "None - pursuable immediately",
+            MaxLength = limits.MaxPlannedEventConditionCharacters,
+            AutoSize = EditorAutoSizeOption.TextChanges,
+            MinimumHeightRequest = 60
+        };
         var addForm = new VerticalStackLayout
         {
             IsVisible = false,
@@ -140,7 +144,7 @@ internal static class PlannedEventsView
                 new Label { Text = "Description" }, newDescription,
                 new Label { Text = "Importance (5 is mandatory: the narrator must force it to happen)" }, newImportance,
                 new Label { Text = "Urgency (5 = steer toward it now; 1 = let it emerge naturally)" }, newUrgency,
-                new Label { Text = "Prerequisites (must occur before this is pursued)" }, newPrerequisitesSection
+                new Label { Text = "Condition (what must happen, or what state the story must be in, first)" }, newCondition
             }
         };
         addForm.Children.Add(Ui.Buttons(
@@ -152,12 +156,13 @@ internal static class PlannedEventsView
                     await page.DisplayAlertAsync("Description required", "Enter a description for this Planned Event.", "OK");
                     return;
                 }
+                var condition = (newCondition.Text ?? "").Trim();
                 var added = new PlannedEvent(
                     Guid.Empty,
                     description,
                     int.TryParse(newImportance.SelectedItem?.ToString(), out var parsedNewImportance) ? parsedNewImportance : 3,
                     int.TryParse(newUrgency.SelectedItem?.ToString(), out var parsedNewUrgency) ? parsedNewUrgency : 3,
-                    newSelectedPrerequisites.ToArray(),
+                    string.IsNullOrWhiteSpace(condition) ? null : condition,
                     newEntryRelevantTurn);
                 await onSaveAsync(new PlannedEvents(events.Entries.Append(added).ToArray()));
             }),
@@ -166,7 +171,7 @@ internal static class PlannedEventsView
                 newDescription.Text = "";
                 newImportance.SelectedIndex = 2;
                 newUrgency.SelectedIndex = 2;
-                foreach (var box in newPrerequisiteBoxes) box.IsChecked = false;
+                newCondition.Text = "";
                 addForm.IsVisible = false;
             })));
 
@@ -186,34 +191,6 @@ internal static class PlannedEventsView
         if (alwaysExpanded) return body;
         var toggle = Ui.SecondaryButton("Show / hide Planned Events", (_, _) => body.IsVisible = !body.IsVisible);
         return new VerticalStackLayout { Children = { toggle, body } };
-    }
-
-    // Builds a checklist of candidate Planned Events to depend on, toggling membership in `selected`
-    // (owned by the caller) as boxes are checked/unchecked. Returns the checkboxes too so a Cancel
-    // handler can reset them - unchecking a box fires CheckedChanged, which keeps `selected` in sync.
-    private static (View Section, List<CheckBox> Boxes) BuildPrerequisitesPicker(
-        IEnumerable<PlannedEvent> candidates, HashSet<Guid> selected)
-    {
-        var list = new VerticalStackLayout { Spacing = 2 };
-        var boxes = new List<CheckBox>();
-        foreach (var candidate in candidates.OrderByDescending(x => x.Importance).ThenBy(x => x.LastRelevantTurnNumber))
-        {
-            var checkBox = new CheckBox { IsChecked = selected.Contains(candidate.Id) };
-            checkBox.CheckedChanged += (_, e) =>
-            {
-                if (e.Value) selected.Add(candidate.Id);
-                else selected.Remove(candidate.Id);
-            };
-            boxes.Add(checkBox);
-            list.Children.Add(new HorizontalStackLayout
-            {
-                Spacing = 6,
-                Children = { checkBox, new Label { Text = Summarize(candidate.Description), VerticalOptions = LayoutOptions.Center } }
-            });
-        }
-        if (list.Children.Count == 0)
-            list.Children.Add(new Label { Text = "No other Planned Events to depend on yet.", FontSize = 11, TextColor = Colors.Gray });
-        return (list, boxes);
     }
 
     private static string Summarize(string description) =>

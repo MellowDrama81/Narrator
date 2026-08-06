@@ -65,6 +65,7 @@ public sealed record ContentLimitSettings(
     int MaxStoryBibleNameCharacters,
     int MaxStoryBibleUpdatesPerResponse,
     int MaxPlannedEventDescriptionCharacters,
+    int MaxPlannedEventConditionCharacters,
     int MaxPlannedEventUpdatesPerResponse,
     int MaxConditions,
     int MaxConditionDescriptionCharacters,
@@ -140,6 +141,7 @@ public static class NarratorDefaults
             MaxStoryBibleNameCharacters: 200,
             MaxStoryBibleUpdatesPerResponse: 100,
             MaxPlannedEventDescriptionCharacters: 1000,
+            MaxPlannedEventConditionCharacters: 500,
             MaxPlannedEventUpdatesPerResponse: 50,
             MaxConditions: 20,
             MaxConditionDescriptionCharacters: 1000,
@@ -209,6 +211,7 @@ public static class SettingsValidator
         Range(errors, nameof(c.MaxStoryBibleNameCharacters), c.MaxStoryBibleNameCharacters, 1, 2000);
         Range(errors, nameof(c.MaxStoryBibleUpdatesPerResponse), c.MaxStoryBibleUpdatesPerResponse, 1, 1000);
         Range(errors, nameof(c.MaxPlannedEventDescriptionCharacters), c.MaxPlannedEventDescriptionCharacters, 1, 5000);
+        Range(errors, nameof(c.MaxPlannedEventConditionCharacters), c.MaxPlannedEventConditionCharacters, 1, 5000);
         Range(errors, nameof(c.MaxPlannedEventUpdatesPerResponse), c.MaxPlannedEventUpdatesPerResponse, 1, 1000);
         Range(errors, nameof(c.MaxConditions), c.MaxConditions, 1, MaxConditionsUpperBound);
         Range(errors, nameof(c.MaxConditionDescriptionCharacters), c.MaxConditionDescriptionCharacters, 1, 5000);

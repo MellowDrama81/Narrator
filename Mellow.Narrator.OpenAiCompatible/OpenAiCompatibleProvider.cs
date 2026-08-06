@@ -634,11 +634,6 @@ public sealed class OpenAiCompatibleProvider(
             ValidateProposedCondition(item as JsonObject ?? throw new JsonException("A Loss Condition must be an object."), settings);
         var result = node.Deserialize<StoryDefinitionGenerationResponse>(Json)
             ?? throw new JsonException("Empty Story Definition response.");
-        // Dry run: resolves Key/PrerequisiteKeys against each other (catching a duplicate or unresolvable
-        // key) and checks the result for a self-reference or cycle, using throwaway ids since nothing here
-        // is actually committed - NarratorApplication repeats this for real with the real id generator.
-        // Surfacing the failure here lets a bad batch get one corrective retry instead of a hard failure.
-        _ = PlannedEventProcessor.ResolveInitialPlannedEvents(result.InitialPlannedEvents, Guid.NewGuid);
         return result;
     }
 
@@ -859,7 +854,7 @@ public sealed class OpenAiCompatibleProvider(
 
     private static void ValidateProposedPlannedEvent(JsonObject entry, ApiConnectionSettings settings)
     {
-        RequireProperties(entry, settings, "description", "importance", "urgency", "prerequisiteEventIds", "key", "prerequisiteKeys");
+        RequireProperties(entry, settings, "description", "importance", "urgency", "condition");
         var description = RequiredString(entry, "description");
         if (string.IsNullOrWhiteSpace(description) || description.Length > settings.ContentLimits.MaxPlannedEventDescriptionCharacters)
             throw new JsonException("A Planned Event description is empty or exceeds the configured limit.");
@@ -867,10 +862,9 @@ public sealed class OpenAiCompatibleProvider(
         if (importance is < 1 or > 5) throw new JsonException("Planned Event importance must be from 1 to 5.");
         var urgency = RequiredInteger(entry, "urgency");
         if (urgency is < 1 or > 5) throw new JsonException("Planned Event urgency must be from 1 to 5.");
-        RequiredArray(entry, "prerequisiteEventIds");
-        // "key" is nullable and freeform (a label scoped to this one response) - presence is all that's
-        // checked here; RequiredArray on prerequisiteKeys confirms shape, resolution happens downstream.
-        RequiredArray(entry, "prerequisiteKeys");
+        var condition = entry["condition"] is null ? null : StringValue(entry["condition"], "'condition'");
+        if (condition is { Length: > 0 } && condition.Length > settings.ContentLimits.MaxPlannedEventConditionCharacters)
+            throw new JsonException("A Planned Event condition exceeds the configured limit.");
     }
 
     private static void ValidateProposedCondition(JsonObject entry, ApiConnectionSettings settings)
@@ -1099,13 +1093,11 @@ public sealed class OpenAiCompatibleProvider(
         ["description"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxPlannedEventDescriptionCharacters },
         ["importance"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 5 },
         ["urgency"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 5 },
-        ["prerequisiteEventIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } },
-        // key/prerequisiteKeys let a batch of proposals (this response's plannedEventUpdates or
-        // initialPlannedEvents) reference each other before any of them has a real id - see the
-        // ProposedPlannedEvent comment in Models.cs. key is nullable: most proposals need no label.
-        ["key"] = new JsonObject { ["type"] = new JsonArray("string", "null") },
-        ["prerequisiteKeys"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" } }
-    }, ["description", "importance", "urgency", "prerequisiteEventIds", "key", "prerequisiteKeys"]);
+        // Freeform prose describing what must happen, or what state the story must be in, before this
+        // event can be pursued - not a structured reference to another entry. Nullable: most events have
+        // no prerequisite.
+        ["condition"] = new JsonObject { ["type"] = new JsonArray("string", "null"), ["maxLength"] = settings.ContentLimits.MaxPlannedEventConditionCharacters }
+    }, ["description", "importance", "urgency", "condition"]);
 
     private static JsonObject ProposedConditionSchema(ApiConnectionSettings settings) => ObjectSchema(new Dictionary<string, JsonNode?>
     {

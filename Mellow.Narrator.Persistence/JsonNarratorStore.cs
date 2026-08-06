@@ -699,7 +699,7 @@ public sealed class JsonNarratorStore :
     }
 
     // Fields added to StoryDefinition/StoryState/StoryTurn/PlannedEvent after they first shipped (the
-    // Planned Events feature itself, then Urgency, then PrerequisiteEventIds) are required constructor
+    // Planned Events feature itself, then Urgency, then Victory/Loss Conditions) are required constructor
     // parameters in code, so every in-memory construction path is compiler-checked to supply them. A
     // document written to disk before one of those fields existed has no matching JSON property for it
     // though, and System.Text.Json leaves a missing reference-type constructor parameter as null rather
@@ -748,8 +748,7 @@ public sealed class JsonNarratorStore :
         InitialLossConditions = NormalizeConditions(value.InitialLossConditions)
     };
 
-    private static PlannedEvents NormalizePlannedEvents(PlannedEvents? value) => new(
-        (value?.Entries ?? []).Select(entry => entry with { PrerequisiteEventIds = entry.PrerequisiteEventIds ?? [] }).ToArray());
+    private static PlannedEvents NormalizePlannedEvents(PlannedEvents? value) => new((value?.Entries ?? []).ToArray());
 
     private static StoryConditions NormalizeConditions(StoryConditions? value) => new((value?.Entries ?? []).ToArray());
 

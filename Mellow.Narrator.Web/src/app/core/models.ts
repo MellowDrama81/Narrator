@@ -18,32 +18,28 @@ export interface StoryBibleUpdate {
 // Importance and urgency are independent: importance 5 (the maximum) marks the event mandatory -
 // applyPlannedEvents refuses to remove it except with outcome 'fulfilled', and never culls it, so the
 // narrator is forced to work it into the story rather than letting it quietly drop. Urgency (1-5)
-// instead says how directly and soon to steer toward it. prerequisiteEventIds names other Planned
-// Events that must occur first; an id that no longer names a live entry isn't an error - it just means
-// that prerequisite already resolved (fulfilled or abandoned) and no longer blocks anything.
+// instead says how directly and soon to steer toward it. condition is an optional freeform description
+// of what must happen, or what state the story must be in, before this event can be pursued - narrative
+// prose the narrator interprets each turn, not a structured reference to another entry. Null or empty
+// means the event has no prerequisite and is pursuable immediately according to its own importance and
+// urgency.
 export interface PlannedEvent {
   id: string;
   description: string;
   importance: number;
   urgency: number;
-  prerequisiteEventIds: string[];
+  condition: string | null;
   lastRelevantTurnNumber: number;
 }
 
 export type PlannedEventOutcome = 'fulfilled' | 'abandoned';
 
-// Wire-format proposal only - key/prerequisiteKeys never exist on a materialized PlannedEvent. They let
-// a batch of proposals (one turn's plannedEventUpdates, or the initial batch proposed alongside a Story
-// Definition) reference each other before any of them has a real id: key is a label a proposal invents
-// for itself, meaningful only within that one batch; prerequisiteKeys references another proposal's key
-// in the same batch. Both are resolved into real ids and discarded once the batch is processed.
+// Wire-format proposal for a Planned Event - see the PlannedEvent doc comment for what condition means.
 export interface ProposedPlannedEvent {
   description: string;
   importance: number;
   urgency: number;
-  prerequisiteEventIds: string[];
-  key: string | null;
-  prerequisiteKeys: string[];
+  condition: string | null;
 }
 
 export interface PlannedEventUpdate {

@@ -346,6 +346,29 @@ public sealed class ProviderTests
     }
 
     [Fact]
+    public async Task GenerateOpening_RoundTripsAConditionOnANewPlannedEvent()
+    {
+        var handler = new StubHandler(_ => Task.FromResult(Response($$$"""
+            {"turnNumber":0,"acknowledgedPlayerAction":null,"narration":"The story begins.","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[{"operation":"add","entryId":null,"entry":{"description":"The tower falls.","importance":3,"urgency":3,"condition":"The hero must reach the tower first."},"outcome":null}],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[]}
+            """)));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty),
+            new([]),
+            PlannedEvents.Empty,
+            new(StoryConditions.Empty, [], []),
+            new(StoryConditions.Empty, [], []),
+            [],
+            null,
+            0);
+
+        var result = await provider.GenerateOpeningAsync(Settings(), null, context);
+
+        var update = Assert.Single(result.PlannedEventUpdates);
+        Assert.Equal("The hero must reach the tower first.", update.Entry!.Condition);
+    }
+
+    [Fact]
     public async Task GenerateTurn_SilentlyDropsDuplicateAndUnknownConditionIdsWithoutRetry()
     {
         var known = new StoryCondition(Guid.NewGuid(), "Defeat the dragon.", false);
@@ -497,7 +520,7 @@ public sealed class ProviderTests
                 """);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
-        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The bridge must collapse.", 5, 3, [], 0);
+        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The bridge must collapse.", 5, 3, null, 0);
         var context = new GenerationContext(
             new("Story", "Prompt", "", new([]), PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty),
             new([]),
@@ -542,9 +565,9 @@ public sealed class ProviderTests
     [Fact]
     public async Task GenerateTurn_ParsesPlannedEventUpdatesAndRelevantIds()
     {
-        var existing = new PlannedEvent(Guid.NewGuid(), "Existing plot point.", 3, 3, [], 0);
+        var existing = new PlannedEvent(Guid.NewGuid(), "Existing plot point.", 3, 3, null, 0);
         var handler = new StubHandler(_ => Task.FromResult(Response($$$"""
-            {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":["{{{existing.Id}}}"],"plannedEventUpdates":[{"operation":"add","entryId":null,"entry":{"description":"A new complication.","importance":2,"urgency":4,"prerequisiteEventIds":[],"key":null,"prerequisiteKeys":[]},"outcome":null}],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[]}
+            {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":["{{{existing.Id}}}"],"plannedEventUpdates":[{"operation":"add","entryId":null,"entry":{"description":"A new complication.","importance":2,"urgency":4,"condition":"The bridge must have already fallen."},"outcome":null}],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[]}
             """)));
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
@@ -565,12 +588,36 @@ public sealed class ProviderTests
         Assert.Equal("A new complication.", update.Entry!.Description);
         Assert.Equal(2, update.Entry.Importance);
         Assert.Equal(4, update.Entry.Urgency);
+        Assert.Equal("The bridge must have already fallen.", update.Entry.Condition);
+    }
+
+    [Fact]
+    public async Task GenerateTurn_AcceptsANullConditionOnAPlannedEventUpdate()
+    {
+        var handler = new StubHandler(_ => Task.FromResult(Response($$$"""
+            {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[{"operation":"add","entryId":null,"entry":{"description":"A new complication.","importance":2,"urgency":4,"condition":null},"outcome":null}],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[]}
+            """)));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty),
+            new([]),
+            PlannedEvents.Empty,
+            new(StoryConditions.Empty, [], []),
+            new(StoryConditions.Empty, [], []),
+            [],
+            "Continue",
+            1);
+
+        var result = await provider.GenerateTurnAsync(Settings(), null, context);
+
+        var update = Assert.Single(result.PlannedEventUpdates);
+        Assert.Null(update.Entry!.Condition);
     }
 
     [Fact]
     public async Task GenerateTurn_RejectsPlannedEventRemovalMissingOutcome()
     {
-        var existing = new PlannedEvent(Guid.NewGuid(), "Existing plot point.", 3, 3, [], 0);
+        var existing = new PlannedEvent(Guid.NewGuid(), "Existing plot point.", 3, 3, null, 0);
         var requests = 0;
         var handler = new StubHandler(_ =>
         {
@@ -599,7 +646,7 @@ public sealed class ProviderTests
     [Fact]
     public async Task GenerateTurn_RejectsPlannedEventRemovalWithInvalidOutcome()
     {
-        var existing = new PlannedEvent(Guid.NewGuid(), "Existing plot point.", 3, 3, [], 0);
+        var existing = new PlannedEvent(Guid.NewGuid(), "Existing plot point.", 3, 3, null, 0);
         var handler = new StubHandler(_ => Task.FromResult(Response($$$"""
             {"turnNumber":1,"acknowledgedPlayerAction":"Continue","narration":"Scene","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[{"operation":"remove","entryId":"{{{existing.Id}}}","entry":null,"outcome":"maybe"}],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[]}
             """)));
@@ -621,7 +668,7 @@ public sealed class ProviderTests
     public async Task GenerateDefinition_ParsesInitialPlannedEvents()
     {
         var handler = new StubHandler(_ => Task.FromResult(Response(
-            """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[{"description":"The tower must fall.","importance":5,"urgency":2,"prerequisiteEventIds":[],"key":null,"prerequisiteKeys":[]}],"initialVictoryConditions":[],"initialLossConditions":[]}""")));
+            """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[{"description":"The tower must fall.","importance":5,"urgency":2,"condition":"The hero must reach the tower first."}],"initialVictoryConditions":[],"initialLossConditions":[]}""")));
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
 
         var result = await provider.GenerateStoryDefinitionAsync(Settings(), null, "Story");
@@ -630,6 +677,19 @@ public sealed class ProviderTests
         Assert.Equal("The tower must fall.", plannedEvent.Description);
         Assert.Equal(5, plannedEvent.Importance);
         Assert.Equal(2, plannedEvent.Urgency);
+        Assert.Equal("The hero must reach the tower first.", plannedEvent.Condition);
+    }
+
+    [Fact]
+    public async Task GenerateDefinition_AcceptsANullConditionOnAnInitialPlannedEvent()
+    {
+        var handler = new StubHandler(_ => Task.FromResult(Response(
+            """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[{"description":"The tower must fall.","importance":5,"urgency":2,"condition":null}],"initialVictoryConditions":[],"initialLossConditions":[]}""")));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+
+        var result = await provider.GenerateStoryDefinitionAsync(Settings(), null, "Story");
+
+        Assert.Null(Assert.Single(result.InitialPlannedEvents).Condition);
     }
 
     [Fact]

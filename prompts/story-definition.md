@@ -37,16 +37,11 @@ happen very soon if it happens at all). Do not duplicate a fact already covered 
 entry or the Initial Events prompt; a Planned Event is for something that has not happened yet, not
 for recording current state.
 
-Each Planned Event also has prerequisiteEventIds, a list of other Planned Event IDs that must occur
-first; leave it empty here, since no Planned Event has a real ID yet at this stage. To make one
-proposed event depend on another within this same batch, use key and prerequisiteKeys instead: give
-the prerequisite event a key, a short label you invent (for example "prophecy" or "a") that is
-meaningful only within this one response and never used again afterward, then list that key in the
-dependent event's prerequisiteKeys. Each key you invent must be unique within initialPlannedEvents,
-and every value in prerequisiteKeys must exactly match another proposed event's key — never invent
-one that doesn't correspond to a key you actually assigned. Leave key empty unless another event in
-this batch depends on this one, and leave prerequisiteKeys empty unless this event genuinely depends
-on another you are proposing right now.
+Each Planned Event also has an optional condition: a short prose description of what must happen, or
+what state the story must be in, before this event can be pursued — not a reference to another entry
+by ID, just narrative text you (and later turns) interpret directly, for example "the player has
+learned the guard captain's name" or "the siege has begun." Leave it null or empty when the event has
+no prerequisite and can be pursued immediately according to its own importance and urgency.
 
 Also propose initialVictoryConditions and initialLossConditions: the fixed win/lose conditions for this
 story. Each has a description and a secret flag. A secret condition must never be stated or implied to

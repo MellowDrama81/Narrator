@@ -687,11 +687,11 @@ public sealed class NarratorApplication(
     }
 
     private static void ValidateGeneratedPlannedEvent(ProposedPlannedEvent plannedEvent, ContentLimitSettings limits) =>
-        ValidatePlannedEventFields(plannedEvent.Description, plannedEvent.Importance, plannedEvent.Urgency, null, limits);
+        ValidatePlannedEventFields(plannedEvent.Description, plannedEvent.Importance, plannedEvent.Urgency, plannedEvent.Condition, null, limits);
 
-    private static void ValidatePlannedEventFields(string description, int importance, int urgency, int? lastRelevantTurnNumber, ContentLimitSettings limits)
+    private static void ValidatePlannedEventFields(string description, int importance, int urgency, string? condition, int? lastRelevantTurnNumber, ContentLimitSettings limits)
     {
-        if (PlannedEventProcessor.ValidateEntry(description, importance, urgency, lastRelevantTurnNumber, limits) is { } error)
+        if (PlannedEventProcessor.ValidateEntry(description, importance, urgency, condition, lastRelevantTurnNumber, limits) is { } error)
             throw new NarratorException(error);
     }
 
@@ -764,13 +764,11 @@ public sealed class NarratorApplication(
             var id = entry.Id == Guid.Empty ? idGenerator.NewId() : entry.Id;
             if (!seenIds.Add(id)) throw new NarratorException("Planned Event IDs must be unique.");
             var description = entry.Description.Trim();
-            ValidatePlannedEventFields(description, entry.Importance, entry.Urgency, entry.LastRelevantTurnNumber, limits);
-            entries.Add(entry with { Id = id, Description = description });
+            var condition = string.IsNullOrWhiteSpace(entry.Condition) ? null : entry.Condition.Trim();
+            ValidatePlannedEventFields(description, entry.Importance, entry.Urgency, condition, entry.LastRelevantTurnNumber, limits);
+            entries.Add(entry with { Id = id, Description = description, Condition = condition });
         }
-        var normalized = new PlannedEvents(entries);
-        if (PlannedEventProcessor.ValidateRelationships(normalized) is { } relationshipError)
-            throw new NarratorException(relationshipError);
-        return normalized;
+        return new PlannedEvents(entries);
     }
 
     private static IReadOnlyList<AppliedPlannedEventChange> DiffManualPlannedEventEdit(PlannedEvents before, PlannedEvents after)

@@ -153,14 +153,7 @@ public static class ImportExportProcessor
         public Guid MapEntryId(Guid oldId) =>
             _entryIds.TryGetValue(oldId, out var mapped) ? mapped : _entryIds[oldId] = Guid.NewGuid();
 
-        // A prerequisite id is remapped through the same dictionary as entry ids, so a reference to
-        // another entry (live or already resolved and only surviving in maintenance-history snapshots)
-        // keeps pointing at that same entry's new id after the copy.
-        public PlannedEvent MapEntry(PlannedEvent entry) => entry with
-        {
-            Id = MapEntryId(entry.Id),
-            PrerequisiteEventIds = entry.PrerequisiteEventIds.Select(MapEntryId).ToArray()
-        };
+        public PlannedEvent MapEntry(PlannedEvent entry) => entry with { Id = MapEntryId(entry.Id) };
 
         public PlannedEvents MapEvents(PlannedEvents events) => new(events.Entries.Select(MapEntry).ToArray());
 
@@ -334,13 +327,9 @@ public static class ImportExportProcessor
             throw new InvalidDataException("Planned Event IDs are invalid.");
         foreach (var entry in events.Entries)
         {
-            if (PlannedEventProcessor.ValidateEntry(entry.Description, entry.Importance, entry.Urgency, entry.LastRelevantTurnNumber, limits) is { } error)
+            if (PlannedEventProcessor.ValidateEntry(entry.Description, entry.Importance, entry.Urgency, entry.Condition, entry.LastRelevantTurnNumber, limits) is { } error)
                 throw new InvalidDataException(error);
-            if (entry.PrerequisiteEventIds.Contains(Guid.Empty))
-                throw new InvalidDataException("A Planned Event lists an empty prerequisite ID.");
         }
-        if (PlannedEventProcessor.ValidateRelationships(events) is { } relationshipError)
-            throw new InvalidDataException(relationshipError);
         if (!PlannedEventProcessor.IsWithinLimits(events, storyGeneration))
             throw new InvalidDataException("The Planned Events exceed the configured Planned Event limits.");
     }

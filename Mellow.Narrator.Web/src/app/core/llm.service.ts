@@ -66,9 +66,7 @@ export class LlmService {
             description: String(entry.description ?? '').trim(),
             importance: Math.min(5, Math.max(1, Number(entry.importance) || 3)),
             urgency: Math.min(5, Math.max(1, Number(entry.urgency) || 3)),
-            prerequisiteEventIds: Array.isArray(entry.prerequisiteEventIds) ? entry.prerequisiteEventIds.map(String) : [],
-            key: entry.key ? String(entry.key) : null,
-            prerequisiteKeys: Array.isArray(entry.prerequisiteKeys) ? entry.prerequisiteKeys.map(String) : [],
+            condition: entry.condition && String(entry.condition).trim() ? String(entry.condition).trim() : null,
           })).filter(entry => entry.description)
         : [],
       initialVictoryConditions: this.parseProposedConditions(result.initialVictoryConditions),
@@ -327,17 +325,15 @@ export class LlmService {
     });
   }
 
-  // key/prerequisiteKeys let a batch of proposals (this response's plannedEventUpdates or
-  // initialPlannedEvents) reference each other before any of them has a real id - see the
-  // ProposedPlannedEvent comment in models.ts. key is nullable: most proposals need no label.
+  // condition is freeform prose describing what must happen, or what state the story must be in, before
+  // this event can be pursued - not a structured reference to another entry. Nullable: most events have
+  // no prerequisite. See the ProposedPlannedEvent comment in models.ts.
   private proposedPlannedEventSchema(): JsonSchema {
     return this.objectSchema({
       description: { type: 'string' },
       importance: { type: 'integer', minimum: 1, maximum: 5 },
       urgency: { type: 'integer', minimum: 1, maximum: 5 },
-      prerequisiteEventIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
-      key: { type: ['string', 'null'] },
-      prerequisiteKeys: { type: 'array', items: { type: 'string' } },
+      condition: { type: ['string', 'null'] },
     });
   }
 

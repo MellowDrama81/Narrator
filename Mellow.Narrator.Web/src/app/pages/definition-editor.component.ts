@@ -173,9 +173,12 @@ export class DefinitionEditorComponent implements OnInit {
 
   private cleanPlannedEvents(entries: PlannedEvent[]): PlannedEvent[] {
     return entries
-      .map(entry => ({ ...entry, description: entry.description.trim() }))
-      .filter(entry => entry.description)
-      .map(entry => ({ ...entry, prerequisiteEventIds: entry.prerequisiteEventIds.filter(id => id !== entry.id) }));
+      .map(entry => ({
+        ...entry,
+        description: entry.description.trim(),
+        condition: entry.condition && entry.condition.trim() ? entry.condition.trim() : null,
+      }))
+      .filter(entry => entry.description);
   }
 
   private cleanConditions(entries: StoryCondition[]): StoryCondition[] {

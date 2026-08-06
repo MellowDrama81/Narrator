@@ -121,28 +121,14 @@ protected from being abandoned once its moment passes. Weave the current scene t
 planned events fit naturally given how the player has actually acted and how urgently each is rated;
 do not force a low-urgency event into a scene it has no plausible way to reach yet.
 
-Prerequisites: a planned event's prerequisiteEventIds lists other planned events (by ID, copied
-exactly from the current plannedEvents) that must occur before this one is pursued. Never steer a
-scene toward an event while any ID in its prerequisiteEventIds still names an event currently present
-in plannedEvents — that prerequisite has not happened yet, so the event is not yet reachable and must
-wait, no matter how important or urgent it is. Once every one of its prerequisites has been removed
-from plannedEvents (because each was fulfilled, or because the story moved past it), the event is
-free to be pursued according to its own importance and urgency. Do not manually strip a satisfied
-prerequisite's ID out of prerequisiteEventIds when replacing an event for an unrelated reason (for
-example, rewording its description); leave the list exactly as it was unless you are deliberately
-adding a new prerequisite or the event's dependencies have genuinely changed. A new prerequisite may
-only reference an ID currently present in plannedEvents, never one you invent, and an event can never
-list itself.
-
-Same-turn dependencies: when this turn's plannedEventUpdates add more than one new planned event, one
-can depend on another you are adding right now, even though neither has a real ID yet. Give the
-prerequisite event a key — a short label you invent, meaningful only within this one response — and
-list that key in the dependent event's prerequisiteKeys. Each key must be unique among this turn's add
-operations, and every prerequisiteKeys value must exactly match another add operation's key in the
-same response; never invent one that doesn't correspond to a key you actually assigned. An event being
-replaced or removed this turn already has a real ID, so reference it directly via prerequisiteEventIds
-instead of a key — key and prerequisiteKeys exist only to link new events to each other within the
-same turn, and are discarded once the turn is processed.
+Condition: a planned event's condition, when set, is prose describing what must happen or what state
+the story must be in before this event can be pursued - not a reference to another entry, just a
+description you interpret directly against the unfolding story each turn. Never steer a scene toward
+an event whose condition has not genuinely been satisfied yet, no matter how important or urgent it
+is; once you judge the condition met, the event is free to be pursued according to its own importance
+and urgency. Do not rewrite or clear a condition when replacing an event for an unrelated reason (for
+example, rewording its description); leave it exactly as it was unless the prerequisite itself has
+genuinely changed. Leave condition null when an event has no prerequisite.
 
 Capacity: the plannedEventCapacity object supplied with every request reports count, max, remaining,
 usedPercent, and warningPercent for the planned events list. Scale how readily you propose new planned
@@ -157,9 +143,9 @@ letting the list simply fill up.
 
 Add new planned events as the story develops (see Capacity above for how freely to do so) and replace
 an existing one (same rules as Story Bible replace) when its description, importance, urgency, or
-prerequisiteEventIds needs updating without changing what event it represents — for example, raising
-urgency as the story approaches the point where the event must occur, or adding a prerequisite once it
-becomes clear this event should not happen before another. In relevantPlannedEventIds, use only IDs
+condition needs updating without changing what event it represents — for example, raising urgency as
+the story approaches the point where the event must occur, or adding a condition once it becomes clear
+this event should not happen until something else does. In relevantPlannedEventIds, use only IDs
 copied exactly from the current planned events; mark any planned event the current scene is actively
 working toward or that meaningfully constrains it.
 

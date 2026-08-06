@@ -2,7 +2,6 @@ import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
-import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -14,7 +13,7 @@ import { MANDATORY_IMPORTANCE } from '../core/planned-events';
 @Component({
   selector: 'app-planned-events-editor',
   imports: [
-    CommonModule, FormsModule, MatButtonModule, MatCheckboxModule, MatChipsModule, MatExpansionModule,
+    CommonModule, FormsModule, MatButtonModule, MatChipsModule, MatExpansionModule,
     MatFormFieldModule, MatInputModule, MatSelectModule,
   ],
   template: `
@@ -52,7 +51,7 @@ import { MANDATORY_IMPORTANCE } from '../core/planned-events';
                   <mat-chip-set>
                     <mat-chip>{{ entry.importance === MANDATORY_IMPORTANCE ? 'Mandatory' : 'Importance ' + entry.importance }}</mat-chip>
                     <mat-chip>Urgency {{ entry.urgency }}</mat-chip>
-                    @if (pendingPrerequisites(entry) > 0) { <mat-chip>{{ pendingPrerequisites(entry) }} pending</mat-chip> }
+                    @if (entry.condition) { <mat-chip>Conditional</mat-chip> }
                   </mat-chip-set>
                 </mat-panel-description>
               </mat-expansion-panel-header>
@@ -76,21 +75,12 @@ import { MANDATORY_IMPORTANCE } from '../core/planned-events';
                   <mat-hint>5 = steer toward it now; 1 = let it emerge naturally</mat-hint>
                 </mat-form-field>
                 <span class="relevance">Last relevant turn {{ entry.lastRelevantTurnNumber }}</span>
-                <div class="prerequisites">
-                  <p class="prereq-label">Prerequisites &middot; must occur before this is pursued</p>
-                  @if (candidates(entry).length === 0) {
-                    <span class="no-candidates">No other Planned Events to depend on yet.</span>
-                  } @else {
-                    @for (candidate of candidates(entry); track candidate.id) {
-                      <mat-checkbox
-                        [disabled]="!editable"
-                        [checked]="entry.prerequisiteEventIds.includes(candidate.id)"
-                        (change)="togglePrerequisite(entry, candidate.id, $event.checked)">
-                        {{ summarize(candidate.description) }}
-                      </mat-checkbox>
-                    }
-                  }
-                </div>
+                <mat-form-field appearance="outline" class="condition">
+                  <mat-label>Condition (optional) &middot; what must happen, or what state the story must be in, first</mat-label>
+                  <textarea matInput rows="2" [disabled]="!editable"
+                    [ngModel]="entry.condition ?? ''"
+                    (ngModelChange)="setCondition(entry, $event)"></textarea>
+                </mat-form-field>
               </div>
               @if (editable) {
                 <button mat-button class="danger" (click)="remove(entry)">Remove event</button>
@@ -108,11 +98,8 @@ import { MANDATORY_IMPORTANCE } from '../core/planned-events';
     h2 span { color:var(--muted); font-family:var(--sans); font-size:.9rem; }
     .filters { display:flex; align-items:center; flex-wrap:wrap; gap:.65rem; }
     .entry-grid { display:grid; grid-template-columns:1fr 160px 160px; gap:.8rem; align-items:start; padding-top:.75rem; }
-    .description { grid-column:span 3; }
+    .description, .condition { grid-column:span 3; }
     .relevance { color:var(--muted); font-size:.8rem; align-self:center; }
-    .prerequisites { grid-column:span 3; display:flex; flex-direction:column; gap:.3rem; }
-    .prereq-label { color:var(--muted); font-size:.78rem; margin:0 0 .2rem; }
-    .no-candidates { color:var(--muted); font-size:.8rem; }
     .danger { color:var(--danger) !important; }
     .empty-mini { padding:1.5rem; border:1px dashed var(--line); border-radius:16px; color:var(--muted); }
     mat-expansion-panel { margin-bottom:.7rem; border:1px solid var(--line); box-shadow:none !important; }
@@ -120,7 +107,7 @@ import { MANDATORY_IMPORTANCE } from '../core/planned-events';
     @media (max-width: 800px) {
       .planned-events-tools { align-items:stretch; flex-direction:column; }
       .entry-grid { grid-template-columns:1fr; }
-      .description, .prerequisites { grid-column:auto; }
+      .description, .condition { grid-column:auto; }
       mat-panel-description { display:none; }
     }
   `],
@@ -140,37 +127,22 @@ export class PlannedEventsEditorComponent {
       (!needle || entry.description.toLowerCase().includes(needle)));
   }
 
-  candidates(entry: PlannedEvent): PlannedEvent[] {
-    return this.entries.filter(other => other.id !== entry.id);
-  }
-
-  pendingPrerequisites(entry: PlannedEvent): number {
-    const liveIds = new Set(this.entries.map(other => other.id));
-    return entry.prerequisiteEventIds.filter(id => liveIds.has(id)).length;
-  }
-
-  togglePrerequisite(entry: PlannedEvent, candidateId: string, checked: boolean): void {
-    entry.prerequisiteEventIds = checked
-      ? [...entry.prerequisiteEventIds, candidateId]
-      : entry.prerequisiteEventIds.filter(id => id !== candidateId);
+  setCondition(entry: PlannedEvent, value: string): void {
+    entry.condition = value.trim() ? value : null;
     this.changed();
   }
 
   add(): void {
     this.entries = [...this.entries, {
       id: uuid(), description: 'New planned event', importance: 3, urgency: 3,
-      prerequisiteEventIds: [], lastRelevantTurnNumber: 0,
+      condition: null, lastRelevantTurnNumber: 0,
     }];
     this.changed();
   }
 
   remove(entry: PlannedEvent): void {
-    const dependents = this.entries.filter(other => other.id !== entry.id && other.prerequisiteEventIds.includes(entry.id));
     const mandatoryNotice = entry.importance === MANDATORY_IMPORTANCE ? ' This is a mandatory Planned Event.' : '';
-    const dependentsNotice = dependents.length
-      ? ` This is a prerequisite for: ${dependents.map(x => this.summarize(x.description)).join(', ')}.`
-      : '';
-    if (!confirm(`Remove “${this.summarize(entry.description)}” from Planned Events?${mandatoryNotice}${dependentsNotice}`)) return;
+    if (!confirm(`Remove “${this.summarize(entry.description)}” from Planned Events?${mandatoryNotice}`)) return;
     this.entries = this.entries.filter(value => value.id !== entry.id);
     this.changed();
   }

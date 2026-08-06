@@ -31,6 +31,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         ["plannedEventTotal"] = "default 20000; range 1000–1000000",
         ["plannedEventWarning"] = "default 80%; range 50–95",
         ["plannedEventDescription"] = "default 1000; range 1–5000",
+        ["plannedEventCondition"] = "default 500; range 1–5000",
         ["plannedEventUpdates"] = "default 50; range 1–1000",
         ["conditionCount"] = "default 20; range 1–200",
         ["conditionDescription"] = "default 1000; range 1–5000",
@@ -173,6 +174,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         Add(contentLimits, "Bible name characters", "name");
         Add(contentLimits, "Bible updates per response", "updates");
         Add(contentLimits, "Planned Event description characters", "plannedEventDescription");
+        Add(contentLimits, "Planned Event condition characters", "plannedEventCondition");
         Add(contentLimits, "Planned Event updates per response", "plannedEventUpdates");
         Add(contentLimits, "Victory/Loss Conditions per list", "conditionCount");
         Add(contentLimits, "Condition description characters", "conditionDescription");
@@ -344,7 +346,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
             ContentLimits = new(Int("title"), Int("label"), Int("prompt"), Int("action"), Int("narration"),
                 Int("suggestedCount"), Int("suggestedLength"),
                 Int("category"), Int("name"), Int("updates"),
-                Int("plannedEventDescription"), Int("plannedEventUpdates"),
+                Int("plannedEventDescription"), Int("plannedEventCondition"), Int("plannedEventUpdates"),
                 Int("conditionCount"), Int("conditionDescription"), Int("responseBytes"))
             {
                 MinSuggestedActions = Int("suggestedMin"),
@@ -424,6 +426,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         Set("name", c.MaxStoryBibleNameCharacters);
         Set("updates", c.MaxStoryBibleUpdatesPerResponse);
         Set("plannedEventDescription", c.MaxPlannedEventDescriptionCharacters);
+        Set("plannedEventCondition", c.MaxPlannedEventConditionCharacters);
         Set("plannedEventUpdates", c.MaxPlannedEventUpdatesPerResponse);
         Set("conditionCount", c.MaxConditions);
         Set("conditionDescription", c.MaxConditionDescriptionCharacters);

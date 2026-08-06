@@ -13,7 +13,7 @@ public sealed class PlannedEventProcessorTests
         var result = PlannedEventProcessor.Apply(
             new([first, second]),
             [second.Id],
-            [new(PlannedEventOperation.Add, null, new("New event", 3, 3, [], null, []), null)],
+            [new(PlannedEventOperation.Add, null, new("New event", 3, 3, null), null)],
             3,
             Limits());
 
@@ -81,7 +81,7 @@ public sealed class PlannedEventProcessorTests
         var mandatory = Entry("00000000-0000-0000-0000-000000000001", "Must happen", PlannedEventProcessor.MandatoryImportance, 3, 0);
         var updates = new[]
         {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, mandatory.Id, new("Must happen, reworded", 4, 3, [], null, []), null)
+            new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, mandatory.Id, new("Must happen, reworded", 4, 3, null), null)
         };
 
         Assert.Throws<NarratorException>(() => PlannedEventProcessor.Apply(new([mandatory]), [], updates, 1, Limits()));
@@ -93,7 +93,7 @@ public sealed class PlannedEventProcessorTests
         var mandatory = Entry("00000000-0000-0000-0000-000000000001", "Must happen", PlannedEventProcessor.MandatoryImportance, 3, 0);
         var updates = new[]
         {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, mandatory.Id, new("Must happen, reworded", PlannedEventProcessor.MandatoryImportance, 3, [], null, []), null)
+            new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, mandatory.Id, new("Must happen, reworded", PlannedEventProcessor.MandatoryImportance, 3, null), null)
         };
 
         var result = PlannedEventProcessor.Apply(new([mandatory]), [], updates, 1, Limits());
@@ -111,7 +111,7 @@ public sealed class PlannedEventProcessorTests
         var mandatory = Entry("00000000-0000-0000-0000-000000000001", "Must happen", PlannedEventProcessor.MandatoryImportance, 1, 0);
         var updates = new[]
         {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, mandatory.Id, new("Must happen", PlannedEventProcessor.MandatoryImportance, 5, [], null, []), null)
+            new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, mandatory.Id, new("Must happen", PlannedEventProcessor.MandatoryImportance, 5, null), null)
         };
 
         var result = PlannedEventProcessor.Apply(new([mandatory]), [], updates, 1, Limits());
@@ -145,7 +145,7 @@ public sealed class PlannedEventProcessorTests
     public void Apply_RejectsUpdateReferencingUnknownEntry()
     {
         var entry = Entry("00000000-0000-0000-0000-000000000001", "Event", 3, 3, 0);
-        var updates = new[] { new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, Guid.NewGuid(), new("Different", 3, 3, [], null, []), null) };
+        var updates = new[] { new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, Guid.NewGuid(), new("Different", 3, 3, null), null) };
         Assert.Throws<NarratorException>(() => PlannedEventProcessor.Apply(new([entry]), [], updates, 1, Limits()));
     }
 
@@ -155,7 +155,7 @@ public sealed class PlannedEventProcessorTests
         var entry = Entry("00000000-0000-0000-0000-000000000001", "Event", 3, 3, 0);
         var updates = new[]
         {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, entry.Id, new("First edit", 3, 3, [], null, []), null),
+            new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, entry.Id, new("First edit", 3, 3, null), null),
             new ProposedPlannedEventUpdate(PlannedEventOperation.Remove, entry.Id, null, PlannedEventOutcome.Abandoned)
         };
         Assert.Throws<NarratorException>(() => PlannedEventProcessor.Apply(new([entry]), [], updates, 1, Limits()));
@@ -164,14 +164,14 @@ public sealed class PlannedEventProcessorTests
     [Fact]
     public void Apply_RejectsIncompleteProposedEntry()
     {
-        var updates = new[] { new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("", 3, 3, [], null, []), null) };
+        var updates = new[] { new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("", 3, 3, null), null) };
         Assert.Throws<NarratorException>(() => PlannedEventProcessor.Apply(PlannedEvents.Empty, [], updates, 1, Limits()));
     }
 
     [Fact]
     public void Apply_RejectsAddWithOutOfRangeUrgency()
     {
-        var updates = new[] { new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("Event", 3, 0, [], null, []), null) };
+        var updates = new[] { new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("Event", 3, 0, null), null) };
         Assert.Throws<NarratorException>(() => PlannedEventProcessor.Apply(PlannedEvents.Empty, [], updates, 1, Limits()));
     }
 
@@ -179,7 +179,7 @@ public sealed class PlannedEventProcessorTests
     public void Apply_RejectsReplaceWithOutOfRangeUrgency()
     {
         var entry = Entry("00000000-0000-0000-0000-000000000001", "Event", 3, 3, 0);
-        var updates = new[] { new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, entry.Id, new("Event", 3, 6, [], null, []), null) };
+        var updates = new[] { new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, entry.Id, new("Event", 3, 6, null), null) };
         Assert.Throws<NarratorException>(() => PlannedEventProcessor.Apply(new([entry]), [], updates, 1, Limits()));
     }
 
@@ -190,7 +190,7 @@ public sealed class PlannedEventProcessorTests
         var result = PlannedEventProcessor.Apply(
             PlannedEvents.Empty,
             [],
-            [new(PlannedEventOperation.Add, null, new("New event", 3, 3, [], null, []), null)],
+            [new(PlannedEventOperation.Add, null, new("New event", 3, 3, null), null)],
             4,
             Limits(),
             () => id);
@@ -227,246 +227,20 @@ public sealed class PlannedEventProcessorTests
     }
 
     [Fact]
-    public void Apply_AllowsAddWithPrerequisiteReferencingAKnownEntry()
+    public void Apply_AllowsFulfillingAMandatoryEntryEvenWhileAConditionIsUnresolved()
     {
-        var prerequisite = Entry("00000000-0000-0000-0000-000000000001", "First event", 3, 3, 0);
-        var updates = new[]
-        {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("Second event", 3, 3, [prerequisite.Id], null, []), null)
-        };
-
-        var result = PlannedEventProcessor.Apply(new([prerequisite]), [], updates, 1, Limits());
-
-        var added = Assert.Single(result.Events.Entries, x => x.Description == "Second event");
-        Assert.Equal(prerequisite.Id, Assert.Single(added.PrerequisiteEventIds));
-    }
-
-    [Fact]
-    public void Apply_RejectsAddWithUnknownPrerequisite()
-    {
-        var updates = new[]
-        {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("Event", 3, 3, [Guid.NewGuid()], null, []), null)
-        };
-        Assert.Throws<NarratorException>(() => PlannedEventProcessor.Apply(PlannedEvents.Empty, [], updates, 1, Limits()));
-    }
-
-    [Fact]
-    public void Apply_AllowsReplaceThatEchoesBackAnAlreadyDanglingPrerequisite()
-    {
-        // danglingPrerequisiteId was never present in `current` - it represents a prerequisite that was
-        // resolved (fulfilled or abandoned) in some earlier turn this Apply call has no visibility into.
-        // A Replace resends the full entry, so this must be echoable without tripping the unknown-id check.
-        var danglingPrerequisiteId = Guid.NewGuid();
-        var entry = Entry("00000000-0000-0000-0000-000000000001", "Event", 3, 3, 0, [danglingPrerequisiteId]);
-        var updates = new[]
-        {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, entry.Id, new("Event, reworded", 3, 3, [danglingPrerequisiteId], null, []), null)
-        };
-
-        var result = PlannedEventProcessor.Apply(new([entry]), [], updates, 1, Limits());
-
-        var updated = Assert.Single(result.Events.Entries);
-        Assert.Equal("Event, reworded", updated.Description);
-        Assert.Equal(danglingPrerequisiteId, Assert.Single(updated.PrerequisiteEventIds));
-    }
-
-    [Fact]
-    public void Apply_RejectsReplaceThatIntroducesANewUnknownPrerequisite()
-    {
-        var danglingPrerequisiteId = Guid.NewGuid();
-        var entry = Entry("00000000-0000-0000-0000-000000000001", "Event", 3, 3, 0, [danglingPrerequisiteId]);
-        var updates = new[]
-        {
-            new ProposedPlannedEventUpdate(
-                PlannedEventOperation.Replace, entry.Id,
-                new("Event, reworded", 3, 3, [danglingPrerequisiteId, Guid.NewGuid()], null, []), null)
-        };
-
-        Assert.Throws<NarratorException>(() => PlannedEventProcessor.Apply(new([entry]), [], updates, 1, Limits()));
-    }
-
-    [Fact]
-    public void Apply_RejectsReplaceThatMakesAnEntryReferenceItselfAsPrerequisite()
-    {
-        var entry = Entry("00000000-0000-0000-0000-000000000001", "Event", 3, 3, 0);
-        var updates = new[]
-        {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, entry.Id, new("Event", 3, 3, [entry.Id], null, []), null)
-        };
-
-        Assert.Throws<NarratorException>(() => PlannedEventProcessor.Apply(new([entry]), [], updates, 1, Limits()));
-    }
-
-    [Fact]
-    public void Apply_RejectsReplaceThatWouldCreateAPrerequisiteCycle()
-    {
-        var a = Entry("00000000-0000-0000-0000-000000000001", "A", 3, 3, 0);
-        var b = Entry("00000000-0000-0000-0000-000000000002", "B", 3, 3, 0, [a.Id]);
-        var updates = new[]
-        {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, a.Id, new("A", 3, 3, [b.Id], null, []), null)
-        };
-
-        Assert.Throws<NarratorException>(() => PlannedEventProcessor.Apply(new([a, b]), [], updates, 1, Limits()));
-    }
-
-    [Fact]
-    public void Apply_ResolvesAddPrerequisiteKeyReferencingALaterSiblingInTheSameBatch()
-    {
-        var updates = new[]
-        {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("Dependent", 3, 3, [], null, ["prophecy"]), null),
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("Prerequisite", 3, 3, [], "prophecy", []), null)
-        };
-
-        var result = PlannedEventProcessor.Apply(PlannedEvents.Empty, [], updates, 1, Limits());
-
-        var dependent = Assert.Single(result.Events.Entries, x => x.Description == "Dependent");
-        var prerequisite = Assert.Single(result.Events.Entries, x => x.Description == "Prerequisite");
-        Assert.Equal(prerequisite.Id, Assert.Single(dependent.PrerequisiteEventIds));
-    }
-
-    [Fact]
-    public void Apply_ResolvesAddPrerequisiteKeyReferencingAnEarlierSiblingInTheSameBatch()
-    {
-        // Same as the "later sibling" case above but with the Add order reversed, confirming resolution
-        // doesn't depend on which order the batch lists Add operations in.
-        var updates = new[]
-        {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("Prerequisite", 3, 3, [], "prophecy", []), null),
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("Dependent", 3, 3, [], null, ["prophecy"]), null)
-        };
-
-        var result = PlannedEventProcessor.Apply(PlannedEvents.Empty, [], updates, 1, Limits());
-
-        var dependent = Assert.Single(result.Events.Entries, x => x.Description == "Dependent");
-        var prerequisite = Assert.Single(result.Events.Entries, x => x.Description == "Prerequisite");
-        Assert.Equal(prerequisite.Id, Assert.Single(dependent.PrerequisiteEventIds));
-    }
-
-    [Fact]
-    public void Apply_RejectsDuplicateKeyAmongAddsInTheSameBatch()
-    {
-        var updates = new[]
-        {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("First", 3, 3, [], "shared", []), null),
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("Second", 3, 3, [], "shared", []), null)
-        };
-
-        Assert.Throws<NarratorException>(() => PlannedEventProcessor.Apply(PlannedEvents.Empty, [], updates, 1, Limits()));
-    }
-
-    [Fact]
-    public void Apply_RejectsPrerequisiteKeyThatDoesNotMatchAnyBatchKey()
-    {
-        var updates = new[]
-        {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("Dependent", 3, 3, [], null, ["does-not-exist"]), null)
-        };
-
-        Assert.Throws<NarratorException>(() => PlannedEventProcessor.Apply(PlannedEvents.Empty, [], updates, 1, Limits()));
-    }
-
-    [Fact]
-    public void Apply_RejectsMutualPrerequisiteKeysBetweenTwoAddsAsACycle()
-    {
-        var updates = new[]
-        {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("A", 3, 3, [], "a", ["b"]), null),
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("B", 3, 3, [], "b", ["a"]), null)
-        };
-
-        Assert.Throws<NarratorException>(() => PlannedEventProcessor.Apply(PlannedEvents.Empty, [], updates, 1, Limits()));
-    }
-
-    [Fact]
-    public void Apply_RejectsAnAddWhosePrerequisiteKeysReferencesItsOwnKey()
-    {
-        var updates = new[]
-        {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("Self", 3, 3, [], "self", ["self"]), null)
-        };
-
-        Assert.Throws<NarratorException>(() => PlannedEventProcessor.Apply(PlannedEvents.Empty, [], updates, 1, Limits()));
-    }
-
-    [Fact]
-    public void Apply_MergesPrerequisiteEventIdsAndPrerequisiteKeysOnTheSameAdd()
-    {
-        var existing = Entry("00000000-0000-0000-0000-000000000001", "Existing prerequisite", 3, 3, 0);
-        var updates = new[]
-        {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("Sibling", 3, 3, [], "sibling", []), null),
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("Dependent", 3, 3, [existing.Id], null, ["sibling"]), null)
-        };
-
-        var result = PlannedEventProcessor.Apply(new([existing]), [], updates, 1, Limits());
-
-        var sibling = Assert.Single(result.Events.Entries, x => x.Description == "Sibling");
-        var dependent = Assert.Single(result.Events.Entries, x => x.Description == "Dependent");
-        Assert.Equal(2, dependent.PrerequisiteEventIds.Count);
-        Assert.Contains(existing.Id, dependent.PrerequisiteEventIds);
-        Assert.Contains(sibling.Id, dependent.PrerequisiteEventIds);
-    }
-
-    [Fact]
-    public void Apply_AllowsFulfillingAMandatoryEntryEvenWhileItsPrerequisiteIsStillLive()
-    {
-        // Apply does not mechanically gate removal on outstanding prerequisites - "don't pursue an event
-        // until its prerequisites happen" is a prompt-level instruction to the model, not something this
-        // method enforces.
-        var prerequisite = Entry("00000000-0000-0000-0000-000000000001", "Prerequisite", 3, 3, 0);
+        // Apply does not mechanically gate removal on a Condition - "don't pursue an event until its
+        // condition is met" is a prompt-level instruction to the model, not something this method enforces.
         var mandatory = Entry(
-            "00000000-0000-0000-0000-000000000002", "Must happen", PlannedEventProcessor.MandatoryImportance, 3, 0, [prerequisite.Id]);
+            "00000000-0000-0000-0000-000000000002", "Must happen", PlannedEventProcessor.MandatoryImportance, 3, 0, "The bridge must have collapsed first.");
         var updates = new[]
         {
             new ProposedPlannedEventUpdate(PlannedEventOperation.Remove, mandatory.Id, null, PlannedEventOutcome.Fulfilled)
         };
 
-        var result = PlannedEventProcessor.Apply(new([prerequisite, mandatory]), [], updates, 1, Limits());
+        var result = PlannedEventProcessor.Apply(new([mandatory]), [], updates, 1, Limits());
 
         Assert.DoesNotContain(result.Events.Entries, x => x.Id == mandatory.Id);
-        Assert.Contains(result.Events.Entries, x => x.Id == prerequisite.Id);
-    }
-
-    [Fact]
-    public void ValidateRelationships_RejectsSelfReference()
-    {
-        var id = Guid.NewGuid();
-        var entry = new PlannedEvent(id, "Event", 3, 3, [id], 0);
-        Assert.NotNull(PlannedEventProcessor.ValidateRelationships(new([entry])));
-    }
-
-    [Fact]
-    public void ValidateRelationships_RejectsACycleAmongLiveEntries()
-    {
-        var aId = Guid.NewGuid();
-        var bId = Guid.NewGuid();
-        var a = new PlannedEvent(aId, "A", 3, 3, [bId], 0);
-        var b = new PlannedEvent(bId, "B", 3, 3, [aId], 0);
-        Assert.NotNull(PlannedEventProcessor.ValidateRelationships(new([a, b])));
-    }
-
-    [Fact]
-    public void ValidateRelationships_AcceptsAChainWithoutACycle()
-    {
-        var aId = Guid.NewGuid();
-        var bId = Guid.NewGuid();
-        var cId = Guid.NewGuid();
-        var a = new PlannedEvent(aId, "A", 3, 3, [bId], 0);
-        var b = new PlannedEvent(bId, "B", 3, 3, [cId], 0);
-        var c = new PlannedEvent(cId, "C", 3, 3, [], 0);
-        Assert.Null(PlannedEventProcessor.ValidateRelationships(new([a, b, c])));
-    }
-
-    [Fact]
-    public void ValidateRelationships_TreatsADanglingPrerequisiteAsValidNotACycle()
-    {
-        var aId = Guid.NewGuid();
-        var danglingId = Guid.NewGuid(); // no entry with this id exists in the collection
-        var a = new PlannedEvent(aId, "A", 3, 3, [danglingId], 0);
-        Assert.Null(PlannedEventProcessor.ValidateRelationships(new([a])));
     }
 
     [Fact]
@@ -484,7 +258,7 @@ public sealed class PlannedEventProcessorTests
     {
         var updates = new[]
         {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new(new string('x', 500), 3, 3, [], null, []), null)
+            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new(new string('x', 500), 3, 3, null), null)
         };
         var result = PlannedEventProcessor.Apply(PlannedEvents.Empty, [], updates, 1, Limits(maxPlannedEventCharacters: 200));
         Assert.Empty(result.Events.Entries);
@@ -497,9 +271,9 @@ public sealed class PlannedEventProcessorTests
         var existing = Entry("00000000-0000-0000-0000-000000000001", "Old event", 1, 3, 0);
         var updates = new[]
         {
-            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("New event", 5, 3, [], null, []), null)
+            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("New event", 5, 3, null), null)
         };
-        var withNew = new PlannedEvent(Guid.NewGuid(), "New event", 5, 3, [], 1);
+        var withNew = new PlannedEvent(Guid.NewGuid(), "New event", 5, 3, null, 1);
         var combinedLength = JsonSerializer.Serialize(new PlannedEvents([existing, withNew])).Length;
         var newOnlyLength = JsonSerializer.Serialize(new PlannedEvents([withNew])).Length;
         var limits = Limits(maxPlannedEventsCharacters: (combinedLength + newOnlyLength) / 2);
@@ -514,7 +288,7 @@ public sealed class PlannedEventProcessorTests
     public void ApproachingLimits_UsesConfiguredPercentage()
     {
         var entries = Enumerable.Range(0, 8)
-            .Select(i => new PlannedEvent(Guid.NewGuid(), $"Event {i}", 3, 3, [], 0)).ToArray();
+            .Select(i => new PlannedEvent(Guid.NewGuid(), $"Event {i}", 3, 3, null, 0)).ToArray();
         Assert.True(PlannedEventProcessor.IsApproachingLimits(new(entries), Limits(maxPlannedEvents: 10)));
     }
 
@@ -522,44 +296,44 @@ public sealed class PlannedEventProcessorTests
     public void ValidateEntry_RejectsEmptyDescription()
     {
         var limits = NarratorDefaults.Create().ContentLimits;
-        Assert.NotNull(PlannedEventProcessor.ValidateEntry("   ", 3, 3, 0, limits));
+        Assert.NotNull(PlannedEventProcessor.ValidateEntry("   ", 3, 3, null, 0, limits));
     }
 
     [Fact]
     public void ValidateEntry_RejectsDescriptionExceedingConfiguredLimit()
     {
         var limits = NarratorDefaults.Create().ContentLimits;
-        Assert.NotNull(PlannedEventProcessor.ValidateEntry(new string('x', limits.MaxPlannedEventDescriptionCharacters + 1), 3, 3, 0, limits));
+        Assert.NotNull(PlannedEventProcessor.ValidateEntry(new string('x', limits.MaxPlannedEventDescriptionCharacters + 1), 3, 3, null, 0, limits));
     }
 
     [Fact]
     public void ValidateEntry_RejectsOutOfRangeImportance()
     {
         var limits = NarratorDefaults.Create().ContentLimits;
-        Assert.NotNull(PlannedEventProcessor.ValidateEntry("Event", 0, 3, 0, limits));
-        Assert.NotNull(PlannedEventProcessor.ValidateEntry("Event", 6, 3, 0, limits));
+        Assert.NotNull(PlannedEventProcessor.ValidateEntry("Event", 0, 3, null, 0, limits));
+        Assert.NotNull(PlannedEventProcessor.ValidateEntry("Event", 6, 3, null, 0, limits));
     }
 
     [Fact]
     public void ValidateEntry_RejectsOutOfRangeUrgency()
     {
         var limits = NarratorDefaults.Create().ContentLimits;
-        Assert.NotNull(PlannedEventProcessor.ValidateEntry("Event", 3, 0, 0, limits));
-        Assert.NotNull(PlannedEventProcessor.ValidateEntry("Event", 3, 6, 0, limits));
+        Assert.NotNull(PlannedEventProcessor.ValidateEntry("Event", 3, 0, null, 0, limits));
+        Assert.NotNull(PlannedEventProcessor.ValidateEntry("Event", 3, 6, null, 0, limits));
     }
 
     [Fact]
     public void ValidateEntry_RejectsNegativeLastRelevantTurnNumber()
     {
         var limits = NarratorDefaults.Create().ContentLimits;
-        Assert.NotNull(PlannedEventProcessor.ValidateEntry("Event", 3, 3, -1, limits));
+        Assert.NotNull(PlannedEventProcessor.ValidateEntry("Event", 3, 3, null, -1, limits));
     }
 
     [Fact]
     public void ValidateEntry_AcceptsAValidEntry()
     {
         var limits = NarratorDefaults.Create().ContentLimits;
-        Assert.Null(PlannedEventProcessor.ValidateEntry("Event", 3, 3, 0, limits));
+        Assert.Null(PlannedEventProcessor.ValidateEntry("Event", 3, 3, null, 0, limits));
     }
 
     [Theory]
@@ -571,44 +345,125 @@ public sealed class PlannedEventProcessorTests
     public void ValidateEntry_AcceptsEveryUrgencyInRange(int urgency)
     {
         var limits = NarratorDefaults.Create().ContentLimits;
-        Assert.Null(PlannedEventProcessor.ValidateEntry("Event", 3, urgency, 0, limits));
+        Assert.Null(PlannedEventProcessor.ValidateEntry("Event", 3, urgency, null, 0, limits));
     }
 
     [Fact]
-    public void ResolveInitialPlannedEvents_ResolvesAPrerequisiteKeyAmongProposals()
+    public void ValidateEntry_AcceptsAnEmptyCondition()
+    {
+        var limits = NarratorDefaults.Create().ContentLimits;
+        Assert.Null(PlannedEventProcessor.ValidateEntry("Event", 3, 3, "", 0, limits));
+    }
+
+    [Fact]
+    public void ValidateEntry_AcceptsANonEmptyConditionWithinTheConfiguredLimit()
+    {
+        var limits = NarratorDefaults.Create().ContentLimits;
+        Assert.Null(PlannedEventProcessor.ValidateEntry("Event", 3, 3, "The bridge must have collapsed first.", 0, limits));
+    }
+
+    [Fact]
+    public void ValidateEntry_RejectsConditionExceedingConfiguredLimit()
+    {
+        var limits = NarratorDefaults.Create().ContentLimits;
+        Assert.NotNull(PlannedEventProcessor.ValidateEntry(
+            "Event", 3, 3, new string('x', limits.MaxPlannedEventConditionCharacters + 1), 0, limits));
+    }
+
+    [Fact]
+    public void Apply_TrimsAndPreservesAConditionOnAdd()
+    {
+        var updates = new[]
+        {
+            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("Event", 3, 3, "  Needs the prophecy revealed.  "), null)
+        };
+
+        var result = PlannedEventProcessor.Apply(PlannedEvents.Empty, [], updates, 1, Limits());
+
+        var added = Assert.Single(result.Events.Entries);
+        Assert.Equal("Needs the prophecy revealed.", added.Condition);
+    }
+
+    [Fact]
+    public void Apply_ReplacesAnExistingConditionOnReplace()
+    {
+        var entry = Entry("00000000-0000-0000-0000-000000000001", "Event", 3, 3, 0, "Original condition.");
+        var updates = new[]
+        {
+            new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, entry.Id, new("Event", 3, 3, "Updated condition."), null)
+        };
+
+        var result = PlannedEventProcessor.Apply(new([entry]), [], updates, 1, Limits());
+
+        var updated = Assert.Single(result.Events.Entries);
+        Assert.Equal("Updated condition.", updated.Condition);
+    }
+
+    [Fact]
+    public void Apply_ClearsAConditionOnReplaceWhenOmitted()
+    {
+        var entry = Entry("00000000-0000-0000-0000-000000000001", "Event", 3, 3, 0, "Original condition.");
+        var updates = new[]
+        {
+            new ProposedPlannedEventUpdate(PlannedEventOperation.Replace, entry.Id, new("Event", 3, 3, null), null)
+        };
+
+        var result = PlannedEventProcessor.Apply(new([entry]), [], updates, 1, Limits());
+
+        var updated = Assert.Single(result.Events.Entries);
+        Assert.Null(updated.Condition);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Apply_NormalizesNullOrWhitespaceConditionToNull(string? condition)
+    {
+        var updates = new[]
+        {
+            new ProposedPlannedEventUpdate(PlannedEventOperation.Add, null, new("Event", 3, 3, condition), null)
+        };
+
+        var result = PlannedEventProcessor.Apply(PlannedEvents.Empty, [], updates, 1, Limits());
+
+        Assert.Null(Assert.Single(result.Events.Entries).Condition);
+    }
+
+    [Fact]
+    public void ResolveInitialPlannedEvents_TrimsAndPreservesConditionOnEachProposal()
     {
         var proposals = new[]
         {
-            new ProposedPlannedEvent("Dependent", 3, 3, [], null, ["prophecy"]),
-            new ProposedPlannedEvent("Prerequisite", 3, 3, [], "prophecy", [])
+            new ProposedPlannedEvent("The hero learns the prophecy.", 4, 3, null),
+            new ProposedPlannedEvent("The hero confronts the villain.", 5, 3, "  The prophecy must already be known.  ")
         };
 
         var events = PlannedEventProcessor.ResolveInitialPlannedEvents(proposals, Guid.NewGuid);
 
-        var dependent = Assert.Single(events.Entries, x => x.Description == "Dependent");
-        var prerequisite = Assert.Single(events.Entries, x => x.Description == "Prerequisite");
-        Assert.Equal(prerequisite.Id, Assert.Single(dependent.PrerequisiteEventIds));
+        var prophecy = Assert.Single(events.Entries, x => x.Description == "The hero learns the prophecy.");
+        var confrontation = Assert.Single(events.Entries, x => x.Description == "The hero confronts the villain.");
+        Assert.Null(prophecy.Condition);
+        Assert.Equal("The prophecy must already be known.", confrontation.Condition);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ResolveInitialPlannedEvents_NormalizesNullOrWhitespaceConditionToNull(string? condition)
+    {
+        var proposals = new[] { new ProposedPlannedEvent("Event", 3, 3, condition) };
+
+        var events = PlannedEventProcessor.ResolveInitialPlannedEvents(proposals, Guid.NewGuid);
+
+        Assert.Null(Assert.Single(events.Entries).Condition);
     }
 
     [Fact]
-    public void ResolveInitialPlannedEvents_RejectsDuplicateKeys()
+    public void ResolveInitialPlannedEvents_RejectsAnIncompleteProposal()
     {
-        var proposals = new[]
-        {
-            new ProposedPlannedEvent("First", 3, 3, [], "shared", []),
-            new ProposedPlannedEvent("Second", 3, 3, [], "shared", [])
-        };
-
-        Assert.Throws<NarratorException>(() => PlannedEventProcessor.ResolveInitialPlannedEvents(proposals, Guid.NewGuid));
-    }
-
-    [Fact]
-    public void ResolveInitialPlannedEvents_RejectsAnUnresolvableKey()
-    {
-        var proposals = new[]
-        {
-            new ProposedPlannedEvent("Dependent", 3, 3, [], null, ["does-not-exist"])
-        };
+        var proposals = new[] { new ProposedPlannedEvent("", 3, 3, null) };
 
         Assert.Throws<NarratorException>(() => PlannedEventProcessor.ResolveInitialPlannedEvents(proposals, Guid.NewGuid));
     }
@@ -621,6 +476,6 @@ public sealed class PlannedEventProcessorTests
         new(8, 200, 4000, 60000, 80, maxPlannedEvents, maxPlannedEventCharacters, maxPlannedEventsCharacters, plannedEventsWarningPercent);
 
     private static PlannedEvent Entry(
-        string id, string description, int importance, int urgency, int relevant, IReadOnlyList<Guid>? prerequisiteEventIds = null) =>
-        new(Guid.Parse(id), description, importance, urgency, prerequisiteEventIds ?? [], relevant);
+        string id, string description, int importance, int urgency, int relevant, string? condition = null) =>
+        new(Guid.Parse(id), description, importance, urgency, condition, relevant);
 }
