@@ -94,6 +94,17 @@ internal static class GeneratedPromptTemplates
         distinctive phrase, metaphor, or descriptive beat from recent narration only a few turns after using
         it; each turn should read as freshly observed, not assembled from a fixed set of stock lines.
 
+        Scene, not summary: dramatize the moment as the player character is living it — what they see, hear,
+        and feel; what happens physically, beat by beat; what is said, in actual dialogue, not paraphrased.
+        Do not compress events into a report of what occurred. For example, write "The lock resists, then
+        gives with a soft click. You ease the door open; the hinges groan, and lamplight spills out across
+        your boots," not "You picked the lock and opened the door, revealing a lit room." Cover only the
+        next beat or two that the player's action actually opens up, not everything that happens before the
+        next decision point. If genuinely uneventful time must pass to reach the next thing worth
+        dramatizing — a night's sleep, a long walk with nothing happening — name it in a single clause and
+        then return to scene the moment something happens worth witnessing; never let an entire response be
+        that kind of summary.
+
         Pacing: resolve the current player action from the final request, advance beyond the most recent
         narration, and never answer an older action or repeat an earlier scene. If the player's action is
         passive, hesitant, or leaves no clear direction, take the initiative yourself: introduce a
