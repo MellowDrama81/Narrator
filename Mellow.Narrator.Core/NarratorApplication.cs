@@ -362,6 +362,19 @@ public sealed class NarratorApplication(
         return updated;
     }
 
+    public async Task<StoryState> UpdateStorySummaryAsync(Guid stateId, string summary, CancellationToken cancellationToken = default)
+    {
+        var state = await states.GetAsync(stateId, cancellationToken) ?? throw new NarratorException("Story State not found.");
+        var settings = await settingsStore.LoadAsync(cancellationToken);
+        var trimmed = summary.Trim();
+        if (trimmed.Length > settings.ContentLimits.MaxStorySummaryCharacters)
+            throw new NarratorException("The story summary exceeds the configured limit.");
+        var updated = state with { StorySummary = trimmed };
+        await states.SaveAsync(updated, cancellationToken);
+        _logger.LogInformation("Story State {StoryStateId} story summary manually updated.", stateId);
+        return updated;
+    }
+
     public async Task<StoryDefinition> UpdateInitialPlannedEventsAsync(Guid definitionId, PlannedEvents events, CancellationToken cancellationToken = default)
     {
         var definition = await definitions.GetAsync(definitionId, cancellationToken) ?? throw new NarratorException("Story Definition not found.");
@@ -480,6 +493,7 @@ public sealed class NarratorApplication(
             snapshot, initial, initialPlannedEvents,
             new(initialVictoryConditions, [], []),
             new(initialLossConditions, [], []),
+            "",
             [], null, 0);
         var response = await provider.GenerateOpeningAsync(settings, credential, context, cancellationToken);
         response = ValidateGenerationResponse(response, settings.ContentLimits);
@@ -529,6 +543,7 @@ public sealed class NarratorApplication(
                 appliedPlannedEvents.Events, plannedEventMaintenanceHistory,
                 initialVictoryConditions, initialLossConditions,
                 revealedVictory, metVictory, revealedLoss, metLoss,
+                response.StorySummary,
                 stateSummaries.Count == 0 ? 0 : stateSummaries.Max(x => x.SortOrder) + 1, now, null, 0);
             turn = CreateTurn(stateId, 0, null, response, applied, appliedPlannedEvents,
                 revealedVictory, metVictory, revealedLoss, metLoss, settings.ModelId!, now);
@@ -557,6 +572,7 @@ public sealed class NarratorApplication(
             state.CurrentPlannedEvents,
             new(state.CurrentVictoryConditions, state.RevealedVictoryConditionIds, state.MetVictoryConditionIds),
             new(state.CurrentLossConditions, state.RevealedLossConditionIds, state.MetLossConditionIds),
+            state.StorySummary,
             recent,
             action,
             state.LastCommittedTurnSequence + 1);
@@ -597,6 +613,7 @@ public sealed class NarratorApplication(
             MetVictoryConditionIds = state.MetVictoryConditionIds.Concat(metVictory).ToArray(),
             RevealedLossConditionIds = state.RevealedLossConditionIds.Concat(revealedLoss).ToArray(),
             MetLossConditionIds = state.MetLossConditionIds.Concat(metLoss).ToArray(),
+            StorySummary = response.StorySummary,
             LastActionAtUtc = now,
             LastCommittedTurnSequence = sequence
         };
@@ -672,6 +689,8 @@ public sealed class NarratorApplication(
             throw new NarratorException("The response contains too many Planned Event updates.");
         foreach (var update in response.PlannedEventUpdates.Where(x => x.Entry is not null))
             ValidateGeneratedPlannedEvent(update.Entry!, limits);
+        if (response.StorySummary.Length > limits.MaxStorySummaryCharacters)
+            throw new NarratorException("The returned story summary exceeds the configured limit.");
         return response;
     }
 

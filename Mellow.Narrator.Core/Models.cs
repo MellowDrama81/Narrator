@@ -194,6 +194,12 @@ public sealed record StoryState(
     IReadOnlyList<Guid> MetVictoryConditionIds,
     IReadOnlyList<Guid> RevealedLossConditionIds,
     IReadOnlyList<Guid> MetLossConditionIds,
+    // A compact, narrator-maintained prose recap of everything about the story so far that doesn't fit
+    // the Story Bible's atomic facts - the only memory of anything that has scrolled out of the raw
+    // recent-turn history sent with each request. Empty until the opening turn establishes it; the
+    // narrator is expected to rewrite (not just append to) this every turn, so it stays roughly constant
+    // in length rather than growing without bound. See StoryGenerationResponse.StorySummary.
+    string StorySummary,
     int SortOrder,
     DateTimeOffset StartedAtUtc,
     DateTimeOffset? LastActionAtUtc,

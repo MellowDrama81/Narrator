@@ -142,6 +142,24 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task State_LoadsPreExistingDocumentMissingStorySummaryField()
+    {
+        var repository = (IStoryStateRepository)_store;
+        var (state, opening) = State();
+        await repository.CreateAsync(state with { StorySummary = "Should be overwritten by the missing-field default." }, opening);
+        var file = Path.Combine(_root, "Mellow.Narrator", "story-states", state.Id.ToString("D"), "state.json");
+        var document = JsonNode.Parse(await File.ReadAllTextAsync(file))!.AsObject();
+        var data = document["data"]!.AsObject();
+        data.Remove("storySummary");
+        await File.WriteAllTextAsync(file, document.ToJsonString());
+
+        var loaded = await repository.GetAsync(state.Id);
+
+        Assert.NotNull(loaded);
+        Assert.Equal("", loaded!.StorySummary);
+    }
+
+    [Fact]
     public async Task StoryTurn_LoadsPreExistingDocumentMissingConditionFields()
     {
         var repository = (IStoryStateRepository)_store;
@@ -610,7 +628,7 @@ public sealed class PersistenceTests : IDisposable
         var bible = new StoryBible([entry]);
         var definition = new StoryDefinitionSnapshot("Story", "Prompt", "", bible, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty);
         var now = DateTimeOffset.UtcNow;
-        var state = new StoryState(id, "Story", null, new(definition), bible, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, null, 0);
+        var state = new StoryState(id, "Story", null, new(definition), bible, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], "", 0, now, null, 0);
         var turn = new StoryTurn(Guid.NewGuid(), id, 0, null, "Opening", ["Continue"], [entry.Id], [], [], [], [], [], [], [], now, new("model", null, null, null));
         return (state, turn);
     }

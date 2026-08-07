@@ -40,6 +40,7 @@ const story = (): StoryState => ({
   metVictoryConditionIds: [],
   revealedLossConditionIds: [],
   metLossConditionIds: [],
+  storySummary: 'A storm has trapped you in an observatory.',
   sortOrder: 0,
   startedAtUtc: '2026-01-01T00:00:00.000Z',
   lastActionAtUtc: '2026-01-01T00:01:00.000Z',
@@ -72,6 +73,7 @@ function turnResponse(fields: Record<string, unknown>): Response {
       suggestedActions: ['Search the desk', 'Climb the stairs', 'Check the generator'],
       relevantStoryBibleEntryIds: [],
       storyBibleUpdates: [],
+      storySummary: 'You found a lantern in the observatory.',
       ...fields,
     }) } }],
   }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -229,6 +231,91 @@ describe('LlmService', () => {
     await expect(new LlmService(fakeDb()).turn(settings(), story(), 'Search for a light'))
       .rejects.toThrow(/acknowledged a different player action/);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('sends the current story summary and requires one back within the configured limit', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)));
+      return completion();
+    }));
+    const currentStory = story();
+    currentStory.storySummary = 'A storm has trapped you in an observatory.';
+
+    const result = await new LlmService(fakeDb()).turn(settings(), currentStory, 'Search for a light');
+
+    const messages = requests[0]['messages'] as Array<{ role: string; content: string }>;
+    expect(JSON.parse(messages[1].content)).toMatchObject({ storySummary: 'A storm has trapped you in an observatory.' });
+    const format = requests[0]['response_format'] as {
+      json_schema: { schema: { properties: { storySummary: { maxLength: number } }; required: string[] } };
+    };
+    expect(format.json_schema.schema.properties.storySummary).toMatchObject({ maxLength: settings().maxStorySummaryCharacters });
+    expect(format.json_schema.schema.required).toContain('storySummary');
+    expect(result.storySummary).toBe('You found a lantern in the observatory.');
+  });
+
+  it('sends an empty story summary for the opening scene', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({
+          turnNumber: 0,
+          acknowledgedPlayerAction: null,
+          narration: 'You wake in the observatory as the storm breaks.',
+          suggestedActions: ['Stand up', 'Call out'],
+          relevantStoryBibleEntryIds: [],
+          storyBibleUpdates: [],
+          storySummary: 'You woke in the observatory during a storm.',
+        }) } }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }));
+    const emptyStory = story();
+    emptyStory.turns = [];
+
+    await new LlmService(fakeDb()).opening(settings(), {
+      id: 'def-1', ...emptyStory.definition,
+      sortOrder: 0, createdAtUtc: '2026-01-01T00:00:00.000Z', updatedAtUtc: '2026-01-01T00:00:00.000Z',
+    });
+
+    const messages = requests[0]['messages'] as Array<{ role: string; content: string }>;
+    expect(JSON.parse(messages[1].content)).toMatchObject({ storySummary: '' });
+  });
+
+  it('performs a corrective retry when the returned story summary is missing, then succeeds', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)));
+      return requests.length === 1
+        ? turnResponse({ storySummary: undefined })
+        : completion();
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new LlmService(fakeDb()).turn(settings(), story(), 'Search for a light');
+
+    expect(requests).toHaveLength(2);
+    const correctiveMessage = (requests[1]['messages'] as Array<{ content: string }>).at(-1);
+    expect(correctiveMessage?.content).toContain('story summary is missing');
+    expect(result.storySummary).toBe('You found a lantern in the observatory.');
+  });
+
+  it('performs a corrective retry when the returned story summary exceeds the configured limit', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)));
+      return requests.length === 1
+        ? turnResponse({ storySummary: 'x'.repeat(settings().maxStorySummaryCharacters + 1) })
+        : completion();
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new LlmService(fakeDb()).turn(settings(), story(), 'Search for a light');
+
+    expect(requests).toHaveLength(2);
+    const correctiveMessage = (requests[1]['messages'] as Array<{ content: string }>).at(-1);
+    expect(correctiveMessage?.content).toContain('story summary is missing or exceeds the configured limit');
+    expect(result.storySummary).toBe('You found a lantern in the observatory.');
   });
 
   it('rejects narration that substantially duplicates a recent turn, then succeeds on the corrective retry', async () => {

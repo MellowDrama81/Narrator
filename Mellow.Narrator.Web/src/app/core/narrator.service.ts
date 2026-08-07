@@ -127,6 +127,7 @@ export class NarratorService {
       currentLossConditions: structuredClone(remapped.initialLossConditions),
       revealedVictoryConditionIds: victory.revealed, metVictoryConditionIds: victory.met,
       revealedLossConditionIds: loss.revealed, metLossConditionIds: loss.met,
+      storySummary: generated.storySummary,
       sortOrder: stories.length ? Math.max(...stories.map(x => x.sortOrder)) + 1 : 0,
       startedAtUtc: now, lastActionAtUtc: null, turns: [turn],
     };
@@ -188,6 +189,7 @@ export class NarratorService {
         metVictoryConditionIds: [...story.metVictoryConditionIds, ...victory.met],
         revealedLossConditionIds: [...story.revealedLossConditionIds, ...loss.revealed],
         metLossConditionIds: [...story.metLossConditionIds, ...loss.met],
+        storySummary: generated.storySummary,
         lastActionAtUtc: now,
         turns: [...story.turns, turn],
       };
@@ -196,6 +198,22 @@ export class NarratorService {
     } finally {
       this.activeStories.delete(storyId);
     }
+  }
+
+  // Manual-edit escape hatch for a plain scalar - mirrors NarratorApplication.UpdateStorySummaryAsync:
+  // trim, length-validate against the currently configured limit, save, return the updated story. No
+  // maintenance/history tracking, unlike the Story Bible/Planned Events manual edits, since this is a
+  // single narrator-rewritten string rather than a diffable collection of entries.
+  async updateStorySummary(stateId: string, summary: string): Promise<StoryState> {
+    const story = await this.db.story(stateId);
+    if (!story) throw new Error('Story not found.');
+    const settings = await this.db.settings();
+    const trimmed = summary.trim();
+    if (trimmed.length > settings.maxStorySummaryCharacters)
+      throw new Error('The story summary exceeds the configured limit.');
+    const updated: StoryState = { ...story, storySummary: trimmed };
+    await this.db.saveStory(updated);
+    return updated;
   }
 
   async copyStory(story: StoryState): Promise<StoryState> {

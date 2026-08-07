@@ -557,7 +557,8 @@ public sealed class OpenAiCompatibleProvider(
                 warningPercent = storyGeneration.PlannedEventsWarningPercent
             },
             victoryConditions = ConditionPayload(context.VictoryConditions),
-            lossConditions = ConditionPayload(context.LossConditions)
+            lossConditions = ConditionPayload(context.LossConditions),
+            storySummary = context.StorySummary
         }, Json)));
         if (context.RecentTurns.Count < storyGeneration.RecentTurnCount && !string.IsNullOrWhiteSpace(context.Definition.InitialEventsPrompt))
             messages.Add(Message("user", JsonSerializer.Serialize(new
@@ -659,7 +660,8 @@ public sealed class OpenAiCompatibleProvider(
             "revealedVictoryConditionIds",
             "metVictoryConditionIds",
             "revealedLossConditionIds",
-            "metLossConditionIds");
+            "metLossConditionIds",
+            "storySummary");
         var turnNumber = RequiredInteger(node, "turnNumber");
         if (turnNumber != context.NextTurnNumber)
             throw new JsonException(
@@ -683,6 +685,9 @@ public sealed class OpenAiCompatibleProvider(
         if (!opening && context.RecentTurns.Any(turn => IsSubstantiallyDuplicate(narration, turn.Narration)))
             throw new JsonException(
                 "The narration duplicates a recent scene. Advance the story by resolving currentPlayerAction instead.");
+        var storySummary = RequiredString(node, "storySummary");
+        if (storySummary.Length > settings.ContentLimits.MaxStorySummaryCharacters)
+            throw new JsonException("The story summary exceeds the configured limit.");
         var suggestions = RequiredArray(node, "suggestedActions");
         foreach (var suggestion in suggestions)
         {
@@ -828,6 +833,7 @@ public sealed class OpenAiCompatibleProvider(
             metVictoryIds,
             revealedLossIds,
             metLossIds,
+            dto.StorySummary,
             meta?["responseId"]?.GetValue<string>(),
             meta?["inputTokens"]?.GetValue<int?>(),
             meta?["outputTokens"]?.GetValue<int?>());
@@ -1033,10 +1039,11 @@ public sealed class OpenAiCompatibleProvider(
         ["revealedVictoryConditionIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } },
         ["metVictoryConditionIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } },
         ["revealedLossConditionIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } },
-        ["metLossConditionIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } }
+        ["metLossConditionIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } },
+        ["storySummary"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxStorySummaryCharacters }
     }, ["turnNumber", "acknowledgedPlayerAction", "narration", "suggestedActions", "relevantStoryBibleEntryIds", "storyBibleUpdates",
         "relevantPlannedEventIds", "plannedEventUpdates",
-        "revealedVictoryConditionIds", "metVictoryConditionIds", "revealedLossConditionIds", "metLossConditionIds"]);
+        "revealedVictoryConditionIds", "metVictoryConditionIds", "revealedLossConditionIds", "metLossConditionIds", "storySummary"]);
 
     private static bool IsSubstantiallyDuplicate(string candidate, string previous)
     {
@@ -1187,7 +1194,8 @@ public sealed class OpenAiCompatibleProvider(
         IReadOnlyList<Guid> RevealedVictoryConditionIds,
         IReadOnlyList<Guid> MetVictoryConditionIds,
         IReadOnlyList<Guid> RevealedLossConditionIds,
-        IReadOnlyList<Guid> MetLossConditionIds);
+        IReadOnlyList<Guid> MetLossConditionIds,
+        string StorySummary);
 }
 
 public sealed class ProviderException(string message, HttpStatusCode? statusCode, Exception? innerException = null)

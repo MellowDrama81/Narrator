@@ -150,6 +150,7 @@ import { validateSettings } from '../core/settings-validator';
           <mat-form-field appearance="outline"><mat-label>Maximum story prompt characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryPromptCharacters"></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Maximum conditions</mat-label><input matInput type="number" [(ngModel)]="settings.maxConditions"></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Maximum condition characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxConditionDescriptionCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Story summary characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxStorySummaryCharacters"></mat-form-field>
         </div>
       </mat-expansion-panel>
       <mat-expansion-panel>

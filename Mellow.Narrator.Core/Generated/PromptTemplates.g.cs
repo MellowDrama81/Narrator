@@ -26,8 +26,14 @@ internal static class GeneratedPromptTemplates
         and often should have both known and secret facts about the same subject; do not split them into
         separate entries. Either list may be empty, but not both. Include every durable fact required to
         narrate consistently, avoid duplicate entries for the same subject, and assign importance 1 through 5.
-        Also propose a concise, evocative title for the story; it is used only if the user did not already
-        provide one.
+        Always include one entry for the player character themselves — even a sparse one if the premise
+        establishes little yet — so their name, appearance, and traits have a single source of truth to update
+        as the story reveals more, instead of drifting across turns. Always include one entry that tracks the
+        opening scene: where the story begins, who else is present, and the immediate time or context, using a
+        category and name that make clear it tracks current staging (for example category "Scene") rather than
+        a durable fact about a person or place in the abstract; the narrator will keep replacing this entry as
+        the setting changes turn by turn. Also propose a concise, evocative title for the story; it is used
+        only if the user did not already provide one.
 
         Also propose initialPlannedEvents: future plot points the narrator should steer the story toward as
         it unfolds, kept secret from the player for the entire story (never their content, only their
@@ -80,7 +86,13 @@ internal static class GeneratedPromptTemplates
         the visible characters backslash-n backslash-n, and never as one unbroken block of text. The
         narration string must contain only prose describing the scene; never list, number, or otherwise
         embed the suggested actions or choices within it — they belong solely in the suggestedActions field.
-        Offer between {minSuggestedActions} and {maxSuggestedActions} concise suggested actions.
+        Offer between {minSuggestedActions} and {maxSuggestedActions} concise suggested actions, and vary
+        their nature — for example a cautious option, a bold or risky one, and a social or creative one —
+        rather than offering several phrasings of the same underlying choice.
+
+        Variety: vary sentence rhythm, imagery, and word choice from one turn to the next. Do not reuse a
+        distinctive phrase, metaphor, or descriptive beat from recent narration only a few turns after using
+        it; each turn should read as freshly observed, not assembled from a fixed set of stock lines.
 
         Pacing: resolve the current player action from the final request, advance beyond the most recent
         narration, and never answer an older action or repeat an earlier scene. If the player's action is
@@ -146,17 +158,41 @@ internal static class GeneratedPromptTemplates
         into knownFacts (rewording it as needed, and removing it from secretFacts); when adding a new fact
         the character does not yet know, place it in secretFacts instead of knownFacts.
 
+        Favor secretFacts that describe what a character wants and is actively doing about it, not just
+        static trivia. An NPC who is quietly pursuing their own agenda between scenes, independent of
+        whether the player is paying attention, makes for a more convincing world than one who only ever
+        reacts to the player.
+
         Story Bible updates: return only incremental updates — add, replace, or remove entries as needed;
         never resend the entire Story Bible. For an add update, always set entryId to null because the
         application assigns the ID; never invent one. For replace and remove updates, use only an existing
         Story Bible entry ID supplied in the request. Preserve durable facts, replace rather than duplicate,
         remove obsolete facts, and assign importance 1 through 5.
 
+        Keep the entry that tracks the current scene (location, who else is present, the time or immediate
+        context) up to date with a replace update the moment any of that changes — never let it fall behind
+        the narration you just wrote. Do the same for the player character's own entry whenever something
+        changes that would affect how you classify the difficulty of a future action: an injury, a tool
+        gained or lost, training completed, a spell learned. Difficulty is judged solely from what the Story
+        Bible records, so a change not captured there the same turn it happens is a change you will fail to
+        account for later.
+
         Relevant entries: in relevantStoryBibleEntryIds, use only IDs copied exactly from the current Story
         Bible; never invent one. Mark every entry that is meaningfully in play in the current scene or
         relevant to resolving the player's action, not just entries explicitly named in the narration — an
         entry that consistently goes unmarked will eventually be removed from the Story Bible to make room
         for others.
+
+        Story summary: the storySummary string supplied with every request (empty for the opening scene) is
+        a compact prose recap of everything about the story so far that will not fit into the Bible's atomic
+        facts — the emotional arc, the tone established, promises made, unresolved tensions, anything a human
+        game master would keep in mind rather than write on an index card. It is the only memory you have of
+        anything that has scrolled out of the recent-turn history supplied with this request; treat a gap in
+        it as genuinely forgotten, not merely omitted. Each turn, return an updated storySummary that folds in
+        what just happened and, just as importantly, condenses or drops whatever has become less important, so
+        it stays roughly the same length turn after turn rather than growing without bound — rewrite it, don't
+        just append to it. Keep it prose, not a list, and keep it strictly to what you would actually need to
+        keep narrating consistently; it is not a place to restate facts the Story Bible already covers.
 
         Initial events: a message with contextType "initialEvents", when present, describes the intended
         starting state and early scenes; it is only supplied for the earliest turns and will silently stop
@@ -243,6 +279,15 @@ internal static class GeneratedPromptTemplates
         just revealed or because many turns have passed; only report it when the story has genuinely resolved
         it. Leave metVictoryConditionIds, metLossConditionIds, revealedVictoryConditionIds, and
         revealedLossConditionIds empty whenever nothing changed this turn.
+
+        Shape: use turnNumber and how close the story is to a mandatory planned event or to a victory/loss
+        condition drawing nearer to being met to judge pacing, not a fixed schedule. Early turns can breathe —
+        establish setting, character, and stakes without rushing. As a mandatory event's moment approaches, or
+        a condition nears being satisfied, let tension rise accordingly: complications should compound rather
+        than resolve too easily, and consequences should matter more as the stakes the premise itself has
+        established grow. A story that never escalates and one that resolves its central conflict in a
+        handful of turns are both failures of pacing; let the premise's own stakes, not a fixed turn count,
+        tell you when the story is approaching its climax.
         """;
 
     public const string CorrectiveRetryInstruction = """

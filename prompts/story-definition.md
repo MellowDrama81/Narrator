@@ -18,8 +18,14 @@ only other characters or the narrator are aware of. A single entry (for example 
 and often should have both known and secret facts about the same subject; do not split them into
 separate entries. Either list may be empty, but not both. Include every durable fact required to
 narrate consistently, avoid duplicate entries for the same subject, and assign importance 1 through 5.
-Also propose a concise, evocative title for the story; it is used only if the user did not already
-provide one.
+Always include one entry for the player character themselves — even a sparse one if the premise
+establishes little yet — so their name, appearance, and traits have a single source of truth to update
+as the story reveals more, instead of drifting across turns. Always include one entry that tracks the
+opening scene: where the story begins, who else is present, and the immediate time or context, using a
+category and name that make clear it tracks current staging (for example category "Scene") rather than
+a durable fact about a person or place in the abstract; the narrator will keep replacing this entry as
+the setting changes turn by turn. Also propose a concise, evocative title for the story; it is used
+only if the user did not already provide one.
 
 Also propose initialPlannedEvents: future plot points the narrator should steer the story toward as
 it unfolds, kept secret from the player for the entire story (never their content, only their

@@ -69,6 +69,7 @@ public sealed record ContentLimitSettings(
     int MaxPlannedEventUpdatesPerResponse,
     int MaxConditions,
     int MaxConditionDescriptionCharacters,
+    int MaxStorySummaryCharacters,
     int MaxResponseBodyBytes)
 {
     public int MinSuggestedActions { get; init; } = 2;
@@ -145,6 +146,7 @@ public static class NarratorDefaults
             MaxPlannedEventUpdatesPerResponse: 50,
             MaxConditions: 20,
             MaxConditionDescriptionCharacters: 1000,
+            MaxStorySummaryCharacters: 3000,
             MaxResponseBodyBytes: 2 * 1024 * 1024),
         Capabilities: new ConnectionCapabilities(
             SupportsModelDiscovery: false,
@@ -215,6 +217,7 @@ public static class SettingsValidator
         Range(errors, nameof(c.MaxPlannedEventUpdatesPerResponse), c.MaxPlannedEventUpdatesPerResponse, 1, 1000);
         Range(errors, nameof(c.MaxConditions), c.MaxConditions, 1, MaxConditionsUpperBound);
         Range(errors, nameof(c.MaxConditionDescriptionCharacters), c.MaxConditionDescriptionCharacters, 1, 5000);
+        Range(errors, nameof(c.MaxStorySummaryCharacters), c.MaxStorySummaryCharacters, 500, 20000);
         Range(errors, nameof(c.MaxResponseBodyBytes), c.MaxResponseBodyBytes, 64 * 1024, 16 * 1024 * 1024);
         Range(errors, nameof(c.MinParagraphsPerResponse), c.MinParagraphsPerResponse, 1, 20);
         Range(errors, nameof(c.MaxParagraphsPerResponse), c.MaxParagraphsPerResponse, 1, 20);

@@ -9,9 +9,9 @@ type StoreName = 'settings' | 'definitions' | 'stories' | 'trash' | 'meta';
 export const TRASH_MAX_ITEMS = 10;
 export const TRASH_MAX_SIZE_BYTES = 100 * 1024 * 1024;
 
-// initialPlannedEvents/currentPlannedEvents/relevantPlannedEventIds/plannedEventUpdates were added to
-// these types after they first shipped, so a record written to IndexedDB before then has no such
-// property at all - not even `undefined` as a key, since structured-clone-based storage preserves
+// initialPlannedEvents/currentPlannedEvents/relevantPlannedEventIds/plannedEventUpdates/storySummary
+// were added to these types after they first shipped, so a record written to IndexedDB before then has
+// no such property at all - not even `undefined` as a key, since structured-clone-based storage preserves
 // exactly the shape an object had when it was put. TypeScript's static types claim these fields are
 // always present, but nothing enforces that for data already sitting in a user's browser, so any code
 // (applyPlannedEvents, the Planned Events editor, ...) that dereferences them unconditionally would
@@ -42,6 +42,7 @@ function normalizeStory(value: StoryState): StoryState {
     metVictoryConditionIds: value.metVictoryConditionIds ?? [],
     revealedLossConditionIds: value.revealedLossConditionIds ?? [],
     metLossConditionIds: value.metLossConditionIds ?? [],
+    storySummary: value.storySummary ?? '',
     turns: value.turns.map(turn => ({
       ...turn,
       relevantPlannedEventIds: turn.relevantPlannedEventIds ?? [],

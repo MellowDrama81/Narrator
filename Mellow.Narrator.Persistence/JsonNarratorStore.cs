@@ -348,7 +348,9 @@ public sealed class JsonNarratorStore :
             MaxConditions = settings.ContentLimits.MaxConditions == 0
                 ? defaults.ContentLimits.MaxConditions : settings.ContentLimits.MaxConditions,
             MaxConditionDescriptionCharacters = settings.ContentLimits.MaxConditionDescriptionCharacters == 0
-                ? defaults.ContentLimits.MaxConditionDescriptionCharacters : settings.ContentLimits.MaxConditionDescriptionCharacters
+                ? defaults.ContentLimits.MaxConditionDescriptionCharacters : settings.ContentLimits.MaxConditionDescriptionCharacters,
+            MaxStorySummaryCharacters = settings.ContentLimits.MaxStorySummaryCharacters == 0
+                ? defaults.ContentLimits.MaxStorySummaryCharacters : settings.ContentLimits.MaxStorySummaryCharacters
         };
         return settings with { StoryGeneration = generation, ContentLimits = contentLimits };
     }
@@ -727,7 +729,8 @@ public sealed class JsonNarratorStore :
         RevealedVictoryConditionIds = value.RevealedVictoryConditionIds ?? [],
         MetVictoryConditionIds = value.MetVictoryConditionIds ?? [],
         RevealedLossConditionIds = value.RevealedLossConditionIds ?? [],
-        MetLossConditionIds = value.MetLossConditionIds ?? []
+        MetLossConditionIds = value.MetLossConditionIds ?? [],
+        StorySummary = value.StorySummary ?? ""
     };
 
     private static StoryTurn? Normalize(StoryTurn? value) => value is null ? null : value with

@@ -17,6 +17,7 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
     private readonly Button _copy;
     private readonly VerticalStackLayout _bible = new();
     private readonly VerticalStackLayout _plannedEvents = new();
+    private readonly VerticalStackLayout _summary = new();
     private readonly Label _limitWarning = new() { TextColor = Colors.DarkOrange };
     private readonly ScrollView _story;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
@@ -85,6 +86,7 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
             Padding = new Thickness(0, 0, 16, 0),
             Children =
             {
+                Ui.Heading("Story So Far"), _summary,
                 Ui.Heading("Story Bible"), _bible,
                 Ui.SecondaryButton("Export Bible History", ExportBibleHistory),
                 Ui.Heading("Planned Events"), _plannedEvents,
@@ -253,6 +255,8 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
                 });
                 _suggestions.Children.Add(button);
             }
+            _summary.Children.Clear();
+            _summary.Children.Add(BuildSummaryEditor(state.StorySummary, settings.ContentLimits.MaxStorySummaryCharacters));
             _bible.Children.Clear();
             _bible.Children.Add(StoryBibleView.Create(this, state.CurrentStoryBible, settings.ContentLimits, state.LastCommittedTurnSequence, SaveBibleAsync, alwaysExpanded: true));
             _plannedEvents.Children.Clear();
@@ -310,6 +314,33 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
     {
         try { await scroll; }
         catch (Exception ex) { Ui.Warning(ex, "The delayed story scroll failed."); }
+    }
+
+    // The narrator rewrites this every turn (see the StoryState.StorySummary comment in Models.cs), so
+    // this editor exists mainly as a safety valve: a human can read and, if it has drifted from the
+    // actual story, correct it directly, the same manual-override pattern already used for the Story
+    // Bible and Planned Events.
+    private View BuildSummaryEditor(string summary, int maxLength)
+    {
+        var editor = new Editor
+        {
+            Text = summary,
+            Placeholder = "(empty until the opening scene establishes it)",
+            MaxLength = maxLength,
+            AutoSize = EditorAutoSizeOption.TextChanges,
+            MinimumHeightRequest = 80
+        };
+        return new VerticalStackLayout
+        {
+            Spacing = 4,
+            Children = { editor, Ui.SecondaryButton("Save Summary", async (_, _) => await SaveStorySummaryAsync(editor.Text ?? "")) }
+        };
+    }
+
+    private async Task SaveStorySummaryAsync(string next)
+    {
+        try { await _app.UpdateStorySummaryAsync(_stateId, next); await Refresh(); }
+        catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
     private async Task SaveBibleAsync(StoryBible next)

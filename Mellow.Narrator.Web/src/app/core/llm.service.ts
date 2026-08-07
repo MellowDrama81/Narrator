@@ -217,6 +217,7 @@ export class LlmService {
       { conditions: definition.initialVictoryConditions, revealedIds: [], metIds: [] },
       { conditions: definition.initialLossConditions, revealedIds: [], metIds: [] },
       null,
+      '',
     );
   }
 
@@ -230,6 +231,7 @@ export class LlmService {
       { conditions: story.currentVictoryConditions, revealedIds: story.revealedVictoryConditionIds, metIds: story.metVictoryConditionIds },
       { conditions: story.currentLossConditions, revealedIds: story.revealedLossConditionIds, metIds: story.metLossConditionIds },
       action,
+      story.storySummary,
     );
   }
 
@@ -242,6 +244,7 @@ export class LlmService {
     victory: ConditionsContext,
     loss: ConditionsContext,
     action: string | null,
+    summary: string,
   ): Promise<TurnGeneration> {
     const next = turns.length ? turns[turns.length - 1].sequenceNumber + 1 : 0;
     const messages: Message[] = [
@@ -256,6 +259,7 @@ export class LlmService {
           plannedEventCapacity: plannedEventCapacity(plannedEvents, settings.maxPlannedEvents, settings.plannedEventsWarningPercent),
           victoryConditions: conditionPayload(victory.conditions, victory.revealedIds, victory.metIds),
           lossConditions: conditionPayload(loss.conditions, loss.revealedIds, loss.metIds),
+          storySummary: summary,
         }),
       },
     ];
@@ -324,11 +328,15 @@ export class LlmService {
         throw new Error('A suggested action is empty or exceeds the configured limit.');
     }
 
+    if (typeof result.storySummary !== 'string' || result.storySummary.length > settings.maxStorySummaryCharacters)
+      throw new Error('The story summary is missing or exceeds the configured limit.');
+
     return {
       turnNumber: next,
       acknowledgedPlayerAction: action,
       narration: result.narration,
       suggestedActions: result.suggestedActions.map(String).filter(Boolean).slice(0, settings.maxSuggestedActions),
+      storySummary: result.storySummary,
       relevantStoryBibleEntryIds: Array.isArray(result.relevantStoryBibleEntryIds) ? result.relevantStoryBibleEntryIds.map(String) : [],
       storyBibleUpdates: Array.isArray(result.storyBibleUpdates) ? result.storyBibleUpdates as StoryBibleUpdate[] : [],
       relevantPlannedEventIds: Array.isArray(result.relevantPlannedEventIds) ? result.relevantPlannedEventIds.map(String) : [],
@@ -566,6 +574,7 @@ export class LlmService {
       metVictoryConditionIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
       revealedLossConditionIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
       metLossConditionIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
+      storySummary: { type: 'string', maxLength: settings.maxStorySummaryCharacters },
     });
   }
 

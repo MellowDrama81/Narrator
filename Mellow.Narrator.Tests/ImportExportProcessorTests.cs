@@ -82,6 +82,21 @@ public sealed class ImportExportProcessorTests
     }
 
     [Fact]
+    public void StateCopy_PreservesStorySummaryVerbatim()
+    {
+        var (state, turn) = CreateState();
+        var withSummary = state with
+        {
+            StorySummary = "The hero fled the burning village and now seeks refuge in the mountains."
+        };
+
+        var copy = ImportExportProcessor.CopyState(
+            withSummary, [turn], 7, NarratorDefaults.Create().ContentLimits, NarratorDefaults.Create().StoryGeneration);
+
+        Assert.Equal(withSummary.StorySummary, copy.State.StorySummary);
+    }
+
+    [Fact]
     public void DefinitionCopy_RemapsPlannedEventIdsConsistently()
     {
         var now = DateTimeOffset.UtcNow;
@@ -607,6 +622,17 @@ public sealed class ImportExportProcessorTests
     }
 
     [Fact]
+    public void StateCopy_RejectsStorySummaryExceedingConfiguredLimit()
+    {
+        var (state, opening) = CreateState();
+        var limits = NarratorDefaults.Create().ContentLimits;
+        var withSummary = state with { StorySummary = new string('x', limits.MaxStorySummaryCharacters + 1) };
+
+        Assert.Throws<InvalidDataException>(() => ImportExportProcessor.CopyState(
+            withSummary, [opening], 1, limits, NarratorDefaults.Create().StoryGeneration));
+    }
+
+    [Fact]
     public async Task ReadLimitedAsync_RejectsStreamExceedingMaximumImportBytes()
     {
         using var stream = new MemoryStream(new byte[ImportExportProcessor.MaximumImportBytes + 1]);
@@ -669,7 +695,7 @@ public sealed class ImportExportProcessorTests
             StoryConditions.Empty,
             StoryConditions.Empty);
         var now = DateTimeOffset.UtcNow;
-        var state = new StoryState(stateId, "Story", null, new(snapshot), bible, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], 0, now, null, 0);
+        var state = new StoryState(stateId, "Story", null, new(snapshot), bible, [], PlannedEvents.Empty, [], StoryConditions.Empty, StoryConditions.Empty, [], [], [], [], "", 0, now, null, 0);
         var turn = new StoryTurn(
             Guid.NewGuid(),
             stateId,

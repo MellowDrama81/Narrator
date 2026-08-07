@@ -44,6 +44,7 @@ describe('validateSettings', () => {
       maxPlannedEventUpdatesPerResponse: 1,
       maxConditions: 1,
       maxConditionDescriptionCharacters: 1,
+      maxStorySummaryCharacters: 500,
       minParagraphs: 1,
       maxParagraphs: 1,
       minSentencesPerParagraph: 1,
@@ -86,6 +87,7 @@ describe('validateSettings', () => {
       maxPlannedEventUpdatesPerResponse: 1000,
       maxConditions: 200,
       maxConditionDescriptionCharacters: 5000,
+      maxStorySummaryCharacters: 20000,
       minParagraphs: 20,
       maxParagraphs: 20,
       minSentencesPerParagraph: 20,
@@ -150,6 +152,11 @@ describe('validateSettings', () => {
   it('rejects maxPlannedEventCharacters above maxPlannedEventsCharacters', () => {
     const errors = validateSettings(settings({ maxPlannedEventCharacters: 2000, maxPlannedEventsCharacters: 1000 }));
     expect(errors).toHaveProperty('maxPlannedEventCharacters');
+  });
+
+  it('rejects maxStorySummaryCharacters outside its 500..20000 range', () => {
+    expect(validateSettings(settings({ maxStorySummaryCharacters: 499 }))).toHaveProperty('maxStorySummaryCharacters');
+    expect(validateSettings(settings({ maxStorySummaryCharacters: 20001 }))).toHaveProperty('maxStorySummaryCharacters');
   });
 
   it('rejects retryMaxDelaySeconds below retryInitialDelaySeconds', () => {

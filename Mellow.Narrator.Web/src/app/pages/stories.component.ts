@@ -137,6 +137,7 @@ export class StoriesComponent implements OnInit {
         metVictoryConditionIds: source.metVictoryConditionIds ?? [],
         revealedLossConditionIds: source.revealedLossConditionIds ?? [],
         metLossConditionIds: source.metLossConditionIds ?? [],
+        storySummary: source.storySummary ?? '',
         sortOrder: stories.length ? Math.max(...stories.map(x => x.sortOrder)) + 1 : 0,
         startedAtUtc: source.startedAtUtc ?? nowIso(),
         lastActionAtUtc: source.lastActionAtUtc ?? null,

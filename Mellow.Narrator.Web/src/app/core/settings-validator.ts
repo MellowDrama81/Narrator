@@ -98,6 +98,7 @@ export function validateSettings(settings: AppSettings): Record<string, string> 
   range(errors, 'maxPlannedEventUpdatesPerResponse', settings.maxPlannedEventUpdatesPerResponse, 1, 1000);
   range(errors, 'maxConditions', settings.maxConditions, 1, MAX_CONDITIONS_UPPER_BOUND);
   range(errors, 'maxConditionDescriptionCharacters', settings.maxConditionDescriptionCharacters, 1, 5000);
+  range(errors, 'maxStorySummaryCharacters', settings.maxStorySummaryCharacters, 500, 20000);
 
   range(errors, 'minParagraphs', settings.minParagraphs, 1, 20);
   range(errors, 'maxParagraphs', settings.maxParagraphs, 1, 20);

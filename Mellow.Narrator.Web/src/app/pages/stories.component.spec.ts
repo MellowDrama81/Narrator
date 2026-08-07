@@ -31,6 +31,7 @@ describe('StoriesComponent', () => {
       metVictoryConditionIds: [],
       revealedLossConditionIds: [],
       metLossConditionIds: [],
+      storySummary: '',
       sortOrder: 0,
       startedAtUtc: new Date().toISOString(),
       lastActionAtUtc: null,

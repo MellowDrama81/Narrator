@@ -237,6 +237,7 @@ public static class ImportExportProcessor
         ValidateConditionIds(state.CurrentVictoryConditions, state.MetVictoryConditionIds, "met Victory Condition");
         ValidateConditionIds(state.CurrentLossConditions, state.RevealedLossConditionIds, "revealed Loss Condition");
         ValidateConditionIds(state.CurrentLossConditions, state.MetLossConditionIds, "met Loss Condition");
+        ValidateOptionalText(state.StorySummary, limits.MaxStorySummaryCharacters, "story summary");
         ValidateUtc(state.StartedAtUtc, "started timestamp");
         if (state.LastActionAtUtc is { } lastAction) ValidateUtc(lastAction, "last-action timestamp");
 

@@ -64,6 +64,7 @@ const state = (overrides: Partial<StoryState> = {}, turns: StoryTurn[] = [turn()
   metVictoryConditionIds: [],
   revealedLossConditionIds: [],
   metLossConditionIds: [],
+  storySummary: '',
   sortOrder: 0,
   startedAtUtc: '2026-01-01T00:00:00.000Z',
   lastActionAtUtc: null,

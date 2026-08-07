@@ -37,6 +37,7 @@ export const defaultSettings = (): AppSettings => ({
   maxPlannedEventUpdatesPerResponse: 50,
   maxConditions: 20,
   maxConditionDescriptionCharacters: 1000,
+  maxStorySummaryCharacters: 3000,
   minSentencesPerParagraph: 2,
   maxSentencesPerParagraph: 5,
   maxAutomaticRetries: 2,

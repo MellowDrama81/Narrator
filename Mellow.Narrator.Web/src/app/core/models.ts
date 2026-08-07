@@ -121,6 +121,12 @@ export interface StoryState {
   metVictoryConditionIds: string[];
   revealedLossConditionIds: string[];
   metLossConditionIds: string[];
+  // A compact, narrator-maintained prose recap of everything about the story so far that doesn't fit
+  // the Story Bible's atomic facts - the only memory of anything that has scrolled out of the raw
+  // recent-turn history sent with each request. Empty until the opening turn establishes it; the
+  // narrator rewrites (not appends to) this every turn, so it stays roughly constant in length rather
+  // than growing without bound. See TurnGeneration.storySummary.
+  storySummary: string;
   sortOrder: number;
   startedAtUtc: string;
   lastActionAtUtc: string | null;
@@ -174,6 +180,7 @@ export interface AppSettings {
   maxPlannedEventUpdatesPerResponse: number;
   maxConditions: number;
   maxConditionDescriptionCharacters: number;
+  maxStorySummaryCharacters: number;
   minSentencesPerParagraph: number;
   maxSentencesPerParagraph: number;
   maxAutomaticRetries: number;
@@ -222,6 +229,9 @@ export interface TurnGeneration {
   metVictoryConditionIds: string[];
   revealedLossConditionIds: string[];
   metLossConditionIds: string[];
+  // The full replacement value for StoryState.storySummary - always returned, never a delta. See the
+  // StoryState.storySummary comment above.
+  storySummary: string;
 }
 
 export const uuid = (): string => crypto.randomUUID();

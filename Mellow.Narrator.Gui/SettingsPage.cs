@@ -35,6 +35,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         ["plannedEventUpdates"] = "default 50; range 1–1000",
         ["conditionCount"] = "default 20; range 1–200",
         ["conditionDescription"] = "default 1000; range 1–5000",
+        ["storySummary"] = "default 3000; range 500–20000",
         ["paragraphsMin"] = "default 4; range 1–20; must not exceed the maximum",
         ["paragraphsMax"] = "default 6; range 1–20",
         ["sentencesMin"] = "default 2; range 1–20; must not exceed the maximum",
@@ -178,6 +179,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         Add(contentLimits, "Planned Event updates per response", "plannedEventUpdates");
         Add(contentLimits, "Victory/Loss Conditions per list", "conditionCount");
         Add(contentLimits, "Condition description characters", "conditionDescription");
+        Add(contentLimits, "Story summary characters", "storySummary");
         Add(contentLimits, "HTTP response bytes", "responseBytes");
 
         content.Children.Add(Ui.Buttons(
@@ -347,7 +349,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
                 Int("suggestedCount"), Int("suggestedLength"),
                 Int("category"), Int("name"), Int("updates"),
                 Int("plannedEventDescription"), Int("plannedEventCondition"), Int("plannedEventUpdates"),
-                Int("conditionCount"), Int("conditionDescription"), Int("responseBytes"))
+                Int("conditionCount"), Int("conditionDescription"), Int("storySummary"), Int("responseBytes"))
             {
                 MinSuggestedActions = Int("suggestedMin"),
                 MinParagraphsPerResponse = Int("paragraphsMin"),
@@ -430,6 +432,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         Set("plannedEventUpdates", c.MaxPlannedEventUpdatesPerResponse);
         Set("conditionCount", c.MaxConditions);
         Set("conditionDescription", c.MaxConditionDescriptionCharacters);
+        Set("storySummary", c.MaxStorySummaryCharacters);
         Set("responseBytes", c.MaxResponseBodyBytes);
     }
 

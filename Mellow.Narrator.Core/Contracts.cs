@@ -82,6 +82,9 @@ public sealed record StoryGenerationResponse(
     IReadOnlyList<Guid> MetVictoryConditionIds,
     IReadOnlyList<Guid> RevealedLossConditionIds,
     IReadOnlyList<Guid> MetLossConditionIds,
+    // The full replacement value for StoryState.StorySummary - always returned, never a delta. See the
+    // StoryState.StorySummary comment in Models.cs.
+    string StorySummary,
     string? ProviderResponseId,
     int? InputTokens,
     int? OutputTokens);
@@ -110,6 +113,8 @@ public sealed record GenerationContext(
     PlannedEvents PlannedEvents,
     ConditionsContext VictoryConditions,
     ConditionsContext LossConditions,
+    // The current StoryState.StorySummary value, sent as-is; empty for the opening scene.
+    string StorySummary,
     IReadOnlyList<StoryTurn> RecentTurns,
     string? PlayerAction,
     int NextTurnNumber);
@@ -140,6 +145,7 @@ public interface INarratorApplication
     Task<StoryState> UpdateCurrentPlannedEventsAsync(Guid stateId, PlannedEvents events, CancellationToken cancellationToken = default);
     Task<StoryDefinition> UpdateInitialVictoryConditionsAsync(Guid definitionId, StoryConditions conditions, CancellationToken cancellationToken = default);
     Task<StoryDefinition> UpdateInitialLossConditionsAsync(Guid definitionId, StoryConditions conditions, CancellationToken cancellationToken = default);
+    Task<StoryState> UpdateStorySummaryAsync(Guid stateId, string summary, CancellationToken cancellationToken = default);
     Task<(StoryState State, StoryTurn Opening)> StartStoryAsync(StartStoryDraft draft, Guid targetStateId, CancellationToken cancellationToken = default);
     Task<(StoryState State, StoryTurn Turn)> PlayTurnAsync(Guid stateId, string action, CancellationToken cancellationToken = default);
 }

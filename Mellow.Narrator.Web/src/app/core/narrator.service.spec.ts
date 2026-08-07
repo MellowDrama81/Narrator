@@ -63,6 +63,7 @@ const emptyOpeningResponse = {
   metVictoryConditionIds: [],
   revealedLossConditionIds: [],
   metLossConditionIds: [],
+  storySummary: 'You woke beneath a violet sky.',
 };
 
 const settingsWith = (overrides: Partial<AppSettings> = {}): AppSettings => ({
@@ -93,6 +94,7 @@ function story(overrides: Partial<StoryState> = {}): StoryState {
     metVictoryConditionIds: [],
     revealedLossConditionIds: [],
     metLossConditionIds: [],
+    storySummary: '',
     sortOrder: 0,
     startedAtUtc: new Date().toISOString(),
     lastActionAtUtc: null,
@@ -126,6 +128,20 @@ describe('NarratorService', () => {
       expect(database.saveStory).toHaveBeenCalledOnce();
       expect(saved).toHaveLength(1);
       expect(result.turns[0].narration).toContain('violet sky');
+    });
+
+    it('adopts the opening response storySummary as the new story storySummary', async () => {
+      const database = {
+        settings: vi.fn(async () => settingsWith()),
+        stories: vi.fn(async () => []),
+        saveStory: vi.fn(),
+      };
+      const llm = { opening: vi.fn(async () => ({ ...emptyOpeningResponse, storySummary: 'You woke beneath a violet sky.' })) };
+      const service = new NarratorService(database as unknown as DbService, llm as unknown as LlmService);
+
+      const result = await service.startStory(definition());
+
+      expect(result.storySummary).toBe('You woke beneath a violet sky.');
     });
 
     describe('pre-flight limit checks', () => {
@@ -242,6 +258,38 @@ describe('NarratorService', () => {
   });
 
   describe('play', () => {
+    it('replaces the story storySummary wholesale with the turn response storySummary', async () => {
+      const saved: StoryState[] = [];
+      const database = {
+        settings: vi.fn(async () => settingsWith()),
+        story: vi.fn(async () => story({ storySummary: 'The old summary.' })),
+        saveStory: vi.fn(async (value: StoryState) => { saved.push(value); }),
+      };
+      const llm = {
+        turn: vi.fn(async () => ({
+          turnNumber: 1,
+          acknowledgedPlayerAction: 'Look around',
+          narration: 'You look around the room.',
+          suggestedActions: ['Open the door'],
+          relevantStoryBibleEntryIds: [],
+          storyBibleUpdates: [],
+          relevantPlannedEventIds: [],
+          plannedEventUpdates: [],
+          revealedVictoryConditionIds: [],
+          metVictoryConditionIds: [],
+          revealedLossConditionIds: [],
+          metLossConditionIds: [],
+          storySummary: 'The new summary, fully replacing the old one.',
+        })),
+      };
+      const service = new NarratorService(database as unknown as DbService, llm as unknown as LlmService);
+
+      const result = await service.play('story-1', 'Look around');
+
+      expect(result.storySummary).toBe('The new summary, fully replacing the old one.');
+      expect(saved).toEqual([result]);
+    });
+
     describe('pre-flight limit checks', () => {
       it('throws before calling the provider when the current Story Bible exceeds current limits', async () => {
         const database = {
@@ -334,6 +382,47 @@ describe('NarratorService', () => {
       expect(result.currentStoryBible.map(x => x.id)).toEqual(['high']);
       expect(result.currentPlannedEvents.map(x => x.id)).toEqual(['high']);
       expect(saved).toEqual([result]);
+    });
+  });
+
+  describe('updateStorySummary', () => {
+    it('trims and persists a manually edited story summary', async () => {
+      const saved: StoryState[] = [];
+      const database = {
+        settings: vi.fn(async () => settingsWith()),
+        story: vi.fn(async () => story({ storySummary: 'The old summary.' })),
+        saveStory: vi.fn(async (value: StoryState) => { saved.push(value); }),
+      };
+      const service = new NarratorService(database as unknown as DbService, {} as unknown as LlmService);
+
+      const result = await service.updateStorySummary('story-1', '  A manually corrected summary.  ');
+
+      expect(result.storySummary).toBe('A manually corrected summary.');
+      expect(saved).toEqual([result]);
+    });
+
+    it('throws without saving when the summary exceeds the configured limit', async () => {
+      const database = {
+        settings: vi.fn(async () => settingsWith({ maxStorySummaryCharacters: 500 })),
+        story: vi.fn(async () => story()),
+        saveStory: vi.fn(),
+      };
+      const service = new NarratorService(database as unknown as DbService, {} as unknown as LlmService);
+
+      await expect(service.updateStorySummary('story-1', 'x'.repeat(501)))
+        .rejects.toThrow(/story summary exceeds the configured limit/i);
+      expect(database.saveStory).not.toHaveBeenCalled();
+    });
+
+    it('throws when the story does not exist', async () => {
+      const database = {
+        settings: vi.fn(async () => settingsWith()),
+        story: vi.fn(async () => undefined),
+        saveStory: vi.fn(),
+      };
+      const service = new NarratorService(database as unknown as DbService, {} as unknown as LlmService);
+
+      await expect(service.updateStorySummary('missing-id', 'Anything')).rejects.toThrow(/not found/i);
     });
   });
 });

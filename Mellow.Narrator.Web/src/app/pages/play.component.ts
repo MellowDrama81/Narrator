@@ -9,6 +9,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DbService } from '../core/db.service';
+import { defaultSettings } from '../core/defaults';
 import { downloadJson, downloadText, safeFilename } from '../core/download';
 import { nowIso, PlannedEvent, StoryBibleEntry, StoryState, StoryTurn } from '../core/models';
 import { NarratorService } from '../core/narrator.service';
@@ -28,12 +29,13 @@ import { PlannedEventsEditorComponent } from '../shared/planned-events-editor.co
         <div class="actions">
           <button mat-button (click)="bibleOpen = !bibleOpen">{{ bibleOpen ? 'Hide' : 'Open' }} Story Bible</button>
           <button mat-button (click)="plannedEventsOpen = !plannedEventsOpen">{{ plannedEventsOpen ? 'Hide' : 'Open' }} Planned Events</button>
+          <button mat-button (click)="summaryOpen = !summaryOpen">{{ summaryOpen ? 'Hide' : 'Open' }} Story So Far</button>
           <button mat-stroked-button [disabled]="culling" (click)="cullToLimits()">Cull to limits</button>
           <button mat-stroked-button (click)="copy()">Copy story</button>
           <button mat-button (click)="export()">Export</button>
         </div>
       </header>
-      <div class="play-layout" [class.bible-open]="bibleOpen || plannedEventsOpen">
+      <div class="play-layout" [class.bible-open]="bibleOpen || plannedEventsOpen || summaryOpen">
         <main class="narrative">
           @for (turn of story.turns; track turn.id) {
             <article class="turn" [class.opening]="turn.playerAction === null">
@@ -67,13 +69,25 @@ import { PlannedEventsEditorComponent } from '../shared/planned-events-editor.co
             <button mat-button class="danger" (click)="remove()">Move story to trash</button>
           </div>
         </main>
-        @if (bibleOpen || plannedEventsOpen) {
+        @if (bibleOpen || plannedEventsOpen || summaryOpen) {
           <aside class="bible-panel">
             @if (bibleOpen) {
               <app-bible-editor [(entries)]="story.currentStoryBible" (entriesChange)="saveBible($event)"></app-bible-editor>
             }
             @if (plannedEventsOpen) {
               <app-planned-events-editor [(entries)]="story.currentPlannedEvents" (entriesChange)="savePlannedEvents($event)"></app-planned-events-editor>
+            }
+            @if (summaryOpen) {
+              <div class="summary-editor">
+                <h3>Story So Far</h3>
+                <p class="summary-hint">A compact recap the narrator rewrites every turn. Edit here only to correct drift from the actual story.</p>
+                <mat-form-field appearance="outline" class="wide">
+                  <mat-label>Story So Far</mat-label>
+                  <textarea matInput rows="12" [(ngModel)]="summaryDraft" [maxlength]="maxSummaryLength" placeholder="(empty until the opening scene establishes it)"></textarea>
+                  <mat-hint>{{ summaryDraft.length }} / {{ maxSummaryLength }}</mat-hint>
+                </mat-form-field>
+                <button mat-stroked-button (click)="saveSummary()">Save Summary</button>
+              </div>
             }
           </aside>
         }
@@ -97,6 +111,9 @@ import { PlannedEventsEditorComponent } from '../shared/planned-events-editor.co
     .writing div { display:flex; flex-direction:column; gap:.2rem; }
     .writing span { color:var(--muted); font-size:.82rem; }
     .bible-panel { border-left:1px solid var(--line); padding-left:1.5rem; min-width:0; }
+    .summary-editor { display:flex; flex-direction:column; gap:.6rem; }
+    .summary-editor h3 { margin:0; }
+    .summary-hint { color:var(--muted); font-size:.82rem; margin:0; }
     .history-actions { display:flex; justify-content:space-between; }
     @media (max-width:1000px) { .play-layout.bible-open { grid-template-columns:1fr; }.bible-panel{border-left:0;padding-left:0;border-top:1px solid var(--line)} }
     @media (max-width:600px) { .action-row{grid-template-columns:1fr}.choice-box{bottom:.4rem}.play-header{align-items:flex-start} }
@@ -109,6 +126,9 @@ export class PlayComponent implements OnInit {
   culling = false;
   bibleOpen = false;
   plannedEventsOpen = false;
+  summaryOpen = false;
+  summaryDraft = '';
+  maxSummaryLength = defaultSettings().maxStorySummaryCharacters;
   private pendingKey = '';
 
   constructor(
@@ -126,6 +146,8 @@ export class PlayComponent implements OnInit {
     if (!this.story) { await this.router.navigate(['/stories']); return; }
     this.pendingKey = `pending-action-${id}`;
     this.action = await this.db.meta<string>(this.pendingKey) ?? '';
+    this.summaryDraft = this.story.storySummary;
+    this.maxSummaryLength = (await this.db.settings()).maxStorySummaryCharacters;
     this.changeDetector.markForCheck();
   }
 
@@ -141,6 +163,7 @@ export class PlayComponent implements OnInit {
     try {
       this.story = await this.narrator.play(this.story.id, value);
       this.action = '';
+      this.summaryDraft = this.story.storySummary;
       await this.db.saveMeta(this.pendingKey, '');
       this.notifyMetConditions(this.story.turns.at(-1)!);
       setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }));
@@ -185,6 +208,20 @@ export class PlayComponent implements OnInit {
     if (!this.story) return;
     this.story.currentPlannedEvents = entries;
     await this.db.saveStory(this.story);
+  }
+
+  // Manual override for the narrator-maintained Story So Far recap - mirrors PlayStoryPage's
+  // BuildSummaryEditor/SaveStorySummaryAsync in the MAUI app. The narrator rewrites this every turn, so
+  // this exists mainly as a safety valve to correct drift from the actual story.
+  async saveSummary(): Promise<void> {
+    if (!this.story) return;
+    try {
+      this.story = await this.narrator.updateStorySummary(this.story.id, this.summaryDraft);
+      this.summaryDraft = this.story.storySummary;
+      this.snack.open('Story summary saved.', 'Dismiss', { duration: 3000 });
+    } catch (error) {
+      this.snack.open(error instanceof Error ? error.message : 'The story summary could not be saved.', 'Dismiss', { duration: 7000 });
+    }
   }
 
   // Trims the current Story Bible/Planned Events down to the currently configured limits - mirrors
