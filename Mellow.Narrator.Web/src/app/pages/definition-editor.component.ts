@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, DestroyRef, OnInit } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -100,11 +101,23 @@ export class DefinitionEditorComponent implements OnInit {
     private readonly narrator: NarratorService,
     private readonly snack: MatSnackBar,
     private readonly changeDetector: ChangeDetectorRef,
+    private readonly destroyRef: DestroyRef,
   ) {}
 
-  async ngOnInit(): Promise<void> {
-    const id = this.route.snapshot.paramMap.get('id')!;
+  ngOnInit(): void {
+    // /definitions/:id resolves to this same component instance for both "new" and a real id, and the
+    // Router reuses that instance across navigations within one route config - it does not re-run
+    // ngOnInit just because the id param changed (e.g. after generate() navigates from .../new to
+    // .../<new-id>). Subscribing to paramMap, instead of reading route.snapshot.paramMap once, is what
+    // makes the view actually pick up the new id instead of silently staying on the "creating" screen.
+    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(params => {
+      void this.load(params.get('id')!);
+    });
+  }
+
+  private async load(id: string): Promise<void> {
     this.creating = id === 'new';
+    this.definition = undefined;
     if (this.creating) {
       const draft = await this.db.meta<{ title: string; prompt: string }>('definition-draft');
       this.draftTitle = draft?.title ?? '';

@@ -1,5 +1,6 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, DestroyRef, OnInit } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -138,12 +139,26 @@ export class PlayComponent implements OnInit {
     private readonly narrator: NarratorService,
     private readonly snack: MatSnackBar,
     private readonly changeDetector: ChangeDetectorRef,
+    private readonly destroyRef: DestroyRef,
   ) {}
 
-  async ngOnInit(): Promise<void> {
-    const id = this.route.snapshot.paramMap.get('id')!;
+  ngOnInit(): void {
+    // /stories/:id resolves to this same component instance across navigations within this route
+    // config (e.g. copy() navigating from the source story's id to the new copy's id) - the Router
+    // reuses the instance and does not re-run ngOnInit just because the id param changed. Subscribing
+    // to paramMap, instead of reading route.snapshot.paramMap once, is what makes the view actually
+    // switch to the new story instead of silently continuing to show the old one.
+    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(params => {
+      void this.load(params.get('id')!);
+    });
+  }
+
+  private async load(id: string): Promise<void> {
     this.story = await this.db.story(id);
     if (!this.story) { await this.router.navigate(['/stories']); return; }
+    this.bibleOpen = false;
+    this.plannedEventsOpen = false;
+    this.summaryOpen = false;
     this.pendingKey = `pending-action-${id}`;
     this.action = await this.db.meta<string>(this.pendingKey) ?? '';
     this.summaryDraft = this.story.storySummary;
