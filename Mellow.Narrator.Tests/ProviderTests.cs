@@ -628,6 +628,55 @@ public sealed class ProviderTests
     }
 
     [Fact]
+    public async Task GenerateTurn_RejectsAResponseThatAcknowledgesADifferentPlayerAction()
+    {
+        var handler = new StubHandler(_ => Task.FromResult(Response("""
+            {"turnNumber":1,"acknowledgedPlayerAction":"Something else entirely","narration":"Scene","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[],"storySummary":""}
+            """)));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty),
+            new([]),
+            PlannedEvents.Empty,
+            new(StoryConditions.Empty, [], []),
+            new(StoryConditions.Empty, [], []),
+            "",
+            [],
+            "Search for a light",
+            1);
+
+        var exception = await Assert.ThrowsAsync<JsonException>(() => provider.GenerateTurnAsync(Settings(), null, context));
+        Assert.Contains("must set acknowledgedPlayerAction", exception.Message);
+    }
+
+    // Some models, when not constrained by a strict JSON schema (json_object mode or the PromptedJson
+    // fallback tier), mistakenly echo the request's field name (currentPlayerAction) instead of the
+    // response's actual field name (acknowledgedPlayerAction) - observed in practice against a real
+    // provider even when the copied text itself was exactly correct.
+    [Fact]
+    public async Task GenerateTurn_AcceptsCurrentPlayerActionAsFallbackWhenAcknowledgedPlayerActionIsMissing()
+    {
+        var handler = new StubHandler(_ => Task.FromResult(Response("""
+            {"turnNumber":1,"currentPlayerAction":"Search for a light","narration":"Scene","suggestedActions":["Continue","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[],"storySummary":""}
+            """)));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", "", new([]), PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty),
+            new([]),
+            PlannedEvents.Empty,
+            new(StoryConditions.Empty, [], []),
+            new(StoryConditions.Empty, [], []),
+            "",
+            [],
+            "Search for a light",
+            1);
+
+        var response = await provider.GenerateTurnAsync(Settings(), null, context);
+
+        Assert.Equal("Scene", response.Narration);
+    }
+
+    [Fact]
     public async Task GenerateOpening_SendsAnEmptyStorySummaryInTheStoryContextMessage()
     {
         string? body = null;

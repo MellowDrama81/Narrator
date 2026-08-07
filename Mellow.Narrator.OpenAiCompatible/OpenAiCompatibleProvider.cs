@@ -580,11 +580,7 @@ public sealed class OpenAiCompatibleProvider(
             turnNumber = context.NextTurnNumber,
             currentPlayerAction = opening ? null : context.PlayerAction,
             resolutionRoll = opening ? (int?)null : RandomNumberGenerator.GetInt32(1, 101),
-            instruction = opening
-                ? $"{Templates.OpeningSceneInstruction} Copy turnNumber exactly into the response and set acknowledgedPlayerAction to null."
-                : $"{Templates.ContinueStoryInstruction} Resolve currentPlayerAction now. " +
-                  "Do not answer an action from the preceding history and do not repeat an earlier scene. " +
-                  "Advance beyond the last assistant narration. Copy turnNumber and currentPlayerAction exactly into the response fields."
+            instruction = opening ? Templates.OpeningSceneInstruction : Templates.ContinueStoryInstruction
         }, Json)));
         return messages;
     }
@@ -646,6 +642,7 @@ public sealed class OpenAiCompatibleProvider(
     {
         var meta = node["_transport"] as JsonObject;
         node.Remove("_transport");
+        NormalizeAcknowledgedPlayerActionField(node);
         RequireProperties(
             node,
             settings,
@@ -677,7 +674,8 @@ public sealed class OpenAiCompatibleProvider(
         else if (acknowledgedAction is null || !NormalizedWords(acknowledgedAction).SequenceEqual(NormalizedWords(context.PlayerAction!)))
         {
             throw new JsonException(
-                "The response acknowledged a different player action. Respond to currentPlayerAction and copy it exactly.");
+                "The response must set acknowledgedPlayerAction - not currentPlayerAction, which is only ever an input field, " +
+                "never part of the response - to an exact copy of currentPlayerAction's text.");
         }
         var narration = RequiredString(node, "narration");
         if (string.IsNullOrWhiteSpace(narration) || narration.Length > settings.ContentLimits.MaxNarrationCharacters)
@@ -1060,6 +1058,22 @@ public sealed class OpenAiCompatibleProvider(
         return smaller > 0 &&
                intersection / (double)smaller >= 0.90 &&
                intersection / (double)union >= 0.80;
+    }
+
+    // Some models, when not constrained by a strict JSON schema (json_object mode or the PromptedJson
+    // fallback tier), mistakenly echo the request's field name (currentPlayerAction) as if it were the
+    // response's field, instead of using the response's actual field name (acknowledgedPlayerAction) -
+    // observed in practice even when the copied text itself is exactly correct. Folding that fallback in
+    // here, before RequireProperties runs (which would otherwise reject the response outright for
+    // missing acknowledgedPlayerAction and/or carrying an unexpected extra property), is far cheaper
+    // than spending the one corrective retry on a mistake the model is likely to just repeat verbatim.
+    private static void NormalizeAcknowledgedPlayerActionField(JsonObject node)
+    {
+        if (!node.ContainsKey("acknowledgedPlayerAction") &&
+            node["currentPlayerAction"] is JsonValue value &&
+            value.TryGetValue<string>(out var text))
+            node["acknowledgedPlayerAction"] = text;
+        node.Remove("currentPlayerAction");
     }
 
     private static string[] NormalizedWords(string value) =>

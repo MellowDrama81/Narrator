@@ -69,13 +69,15 @@ function contractCandidates(settings: AppSettings): RequestContract[] {
   return index >= 0 ? REQUEST_CONTRACTS.slice(index) : REQUEST_CONTRACTS;
 }
 
-// Mirrors NormalizedWords: splits on whitespace, strips everything but letters/digits from each word,
-// lowercases, and drops anything that goes empty as a result.
+// Mirrors NormalizedWords: splits on whitespace, strips everything but letters/digits from each word
+// (Unicode-aware, matching C#'s char.IsLetterOrDigit - not an ASCII-only [a-z0-9] strip, which would
+// wrongly drop accented letters and non-Latin scripts entirely instead of preserving them), lowercases,
+// and drops anything that goes empty as a result.
 function normalizedWords(value: string): string[] {
   return value
     .split(/\s+/)
     .slice(0, 4096)
-    .map(word => word.toLowerCase().replace(/[^a-z0-9]/g, ''))
+    .map(word => [...word].filter(char => /\p{L}|\p{N}/u.test(char)).join('').toLowerCase())
     .filter(word => word.length > 0);
 }
 
@@ -284,9 +286,7 @@ export class LlmService {
         turnNumber: next,
         currentPlayerAction: action,
         resolutionRoll: action === null ? null : this.resolutionRoll(),
-        instruction: turns.length === 0
-          ? `${promptTemplates.openingSceneInstruction} Copy turnNumber exactly into the response and set acknowledgedPlayerAction to null.`
-          : `${promptTemplates.continueStoryInstruction} Resolve currentPlayerAction now. Do not answer an action from the preceding history and do not repeat an earlier scene. Advance beyond the last assistant narration. Copy turnNumber and currentPlayerAction exactly into the response fields.`,
+        instruction: turns.length === 0 ? promptTemplates.openingSceneInstruction : promptTemplates.continueStoryInstruction,
       }),
     });
 
@@ -308,12 +308,21 @@ export class LlmService {
     if (typeof result.turnNumber !== 'number' || result.turnNumber !== next)
       throw new Error(`The response acknowledged turn ${String(result.turnNumber)}, but the current turn is ${next}.`);
 
-    const acknowledged = result.acknowledgedPlayerAction;
+    // Some models, when not constrained by a strict JSON schema (json_object mode or the PromptedJson
+    // fallback tier), mistakenly echo the request's field name (currentPlayerAction) as if it were the
+    // response's field, instead of using the response's actual field name (acknowledgedPlayerAction) -
+    // observed in practice even when the copied text itself is exactly correct. Falling back to the
+    // request field, rather than failing the whole turn over a field-naming slip, is far cheaper than
+    // spending the one corrective retry on a mistake the model is likely to just repeat verbatim.
+    const acknowledged = result.acknowledgedPlayerAction ?? result['currentPlayerAction'];
     if (action === null) {
       if (acknowledged !== null && acknowledged !== undefined)
         throw new Error('An opening-scene response must acknowledge a null player action.');
     } else if (typeof acknowledged !== 'string' || !wordsEqual(acknowledged, action)) {
-      throw new Error('The response acknowledged a different player action. Respond to currentPlayerAction and copy it exactly.');
+      throw new Error(
+        "The response must set acknowledgedPlayerAction - not currentPlayerAction, which is only ever an input field, " +
+        "never part of the response - to an exact copy of currentPlayerAction's text.",
+      );
     }
 
     if (typeof result.narration !== 'string' || !result.narration.trim() || result.narration.length > settings.maxNarrationCharacters)

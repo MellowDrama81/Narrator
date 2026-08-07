@@ -229,8 +229,24 @@ describe('LlmService', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(new LlmService(fakeDb()).turn(settings(), story(), 'Search for a light'))
-      .rejects.toThrow(/acknowledged a different player action/);
+      .rejects.toThrow(/must set acknowledgedPlayerAction/);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // Some models, when not constrained by a strict JSON schema, mistakenly echo the request's field
+  // name (currentPlayerAction) instead of the response's actual field name (acknowledgedPlayerAction) -
+  // observed in practice against a real provider even when the copied text itself was exactly correct.
+  it('accepts currentPlayerAction as a fallback when acknowledgedPlayerAction is missing entirely', async () => {
+    const fetchMock = vi.fn(async () => turnResponse({
+      acknowledgedPlayerAction: undefined,
+      currentPlayerAction: 'Search for a light',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new LlmService(fakeDb()).turn(settings(), story(), 'Search for a light');
+
+    expect(result.acknowledgedPlayerAction).toBe('Search for a light');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('sends the current story summary and requires one back within the configured limit', async () => {
