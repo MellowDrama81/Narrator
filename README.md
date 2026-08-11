@@ -280,6 +280,13 @@ dotnet build Mellow.Narrator.Gui/Mellow.Narrator.Gui.csproj -f net10.0-windows10
 dotnet build Mellow.Narrator.Gui/Mellow.Narrator.Gui.csproj -f net10.0-android
 ```
 
+Every successful push to `master` also publishes the Android app in the Release configuration and
+uploads its signed APK to the **Build and test** workflow run as an artifact named
+`Mellow-Narrator-Android-<commit SHA>`. Artifacts are retained for 30 days. The automated build uses
+the Android development signing identity supplied by the CI runner, so it is suitable for testing and
+sideloading, but it is not a production release identity. Configure a securely backed-up release
+keystore in GitHub Actions before treating these APKs as upgradeable production distributions.
+
 ## Windows distribution
 
 The Windows project pins Windows App SDK `1.8.260508005` and sets
