@@ -161,7 +161,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         var contentLimits = Section(content, "Content Limits", expanded: false);
         Add(contentLimits, "Title characters", "title");
         Add(contentLimits, "Label characters", "label");
-        Add(contentLimits, "Story Prompt characters", "prompt");
+        Add(contentLimits, "Story Definition Prompt / Story Prompt characters", "prompt");
         Add(contentLimits, "Player action characters", "action");
         Add(contentLimits, "Narration characters", "narration");
         Add(contentLimits, "Minimum suggested actions", "suggestedMin");

@@ -670,7 +670,7 @@ public sealed class NarratorApplication(
         if (draft.Title.Length > limits.MaxStoryTitleCharacters)
             throw new NarratorException("The title exceeds the configured limit.");
         if (string.IsNullOrWhiteSpace(draft.StoryPrompt) || draft.StoryPrompt.Length > limits.MaxStoryPromptCharacters)
-            throw new NarratorException("Enter a valid Story Prompt.");
+            throw new NarratorException("Enter a valid Story Definition Prompt.");
     }
 
     private static StoryGenerationResponse ValidateGenerationResponse(StoryGenerationResponse response, ContentLimitSettings limits)

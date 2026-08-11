@@ -6,15 +6,22 @@ namespace Mellow.Narrator.Core;
 internal static class GeneratedPromptTemplates
 {
     public const string StoryDefinitionInstruction = """
-        Refine the Story Prompt and create the initial Story Bible for an interactive story.
-        The Story Prompt is sent verbatim with every request for the entire story, so it must contain only
-        immutable facts and instructions that will never change: setting, premise, tone, and narration rules.
-        Anything that can change over the course of the story — character states, locations, relationships,
-        inventory, objectives, or any other mutable detail — must not remain in the Story Prompt; move it into
-        Story Bible entries instead. Rewrite the Story Prompt to keep only what is truly immutable, moving
-        everything else into Story Bible entries. Every fact present in the original Story Prompt must end
-        up somewhere in your response — in the refined Story Prompt or in a Story Bible entry — never drop
-        one. Also write an Initial Events prompt describing the starting
+        The user's message is a Story Definition Prompt: source material for generating the entire Story
+        Definition. It is not the Story Prompt that will be stored in that definition. Use everything in the
+        Story Definition Prompt to generate the most appropriate parts of the response: the refined Story
+        Prompt, suggested title, Initial Events prompt, initial Story Bible entries, initial Planned Events,
+        and initial victory and loss conditions. Preserve every fact and instruction, but place each one only
+        where it belongs; do not assume it must go into the refined Story Prompt or Story Bible.
+
+        The refined Story Prompt is sent verbatim with every request for the entire story, so it must contain
+        only immutable facts and instructions that will never change: setting, premise, tone, and narration
+        rules. Anything that can change over the course of the story — character states, locations,
+        relationships, inventory, objectives, intended future developments, or any other mutable detail — must
+        not remain in the refined Story Prompt. Put current or durable mutable state in Story Bible entries,
+        early-scene setup in the Initial Events prompt, intended future developments in Planned Events, and
+        ways the story can be won or lost in the corresponding conditions.
+
+        Also write an Initial Events prompt describing the starting
         state of the story and anything that should happen in the first few scenes. Unlike the Story Prompt,
         the Initial Events prompt is supplied only for the earliest turns and is dropped once enough real
         history has accumulated, so anything that must be remembered later belongs in the Story Bible instead,

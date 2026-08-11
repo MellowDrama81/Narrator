@@ -4,7 +4,7 @@ import { join } from 'node:path';
 const root = process.cwd();
 const angularOutput = join(root, 'dist', 'Mellow.Narrator.Web', 'browser');
 const pagesOutput = join(root, 'dist', 'github-pages');
-const siteOrigin = 'https://mellowdrama81.github.io';
+const siteOrigin = 'https://mellowdrama81.github.io/Narrator';
 
 if (!existsSync(angularOutput)) throw new Error(`Angular output not found at ${angularOutput}`);
 

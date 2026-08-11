@@ -169,10 +169,10 @@ export class LlmService {
     return `Connected to ${settings.modelId}.`;
   }
 
-  async generateDefinition(settings: AppSettings, storyPrompt: string): Promise<DefinitionGeneration> {
+  async generateDefinition(settings: AppSettings, storyDefinitionPrompt: string): Promise<DefinitionGeneration> {
     return this.completeWithCorrection(settings, [
       { role: 'system', content: promptTemplates.storyDefinitionInstruction },
-      { role: 'user', content: storyPrompt },
+      { role: 'user', content: storyDefinitionPrompt },
     ], this.definitionSchema(settings), value => this.parseDefinition(value));
   }
 

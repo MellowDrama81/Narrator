@@ -96,12 +96,12 @@ public sealed class OpenAiCompatibleProvider(
     }
 
     public async Task<StoryDefinitionGenerationResponse> GenerateStoryDefinitionAsync(
-        ApiConnectionSettings settings, string? credential, string storyPrompt, CancellationToken cancellationToken = default)
+        ApiConnectionSettings settings, string? credential, string storyDefinitionPrompt, CancellationToken cancellationToken = default)
     {
         var messages = new[]
         {
             Message("system", Templates.StoryDefinitionInstruction),
-            Message("user", storyPrompt)
+            Message("user", storyDefinitionPrompt)
         };
         return await CompleteWithCorrectionAsync(
             settings,

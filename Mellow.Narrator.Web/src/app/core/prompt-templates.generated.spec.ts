@@ -18,4 +18,10 @@ describe('generated prompt templates', () => {
     expect(promptTemplates.correctiveRetryInstruction).toContain('{validationError}');
     expect(promptTemplates.promptedJsonInstruction).toContain('{schema}');
   });
+
+  it('distinguishes the definition-generation input from the stored Story Prompt', () => {
+    expect(promptTemplates.storyDefinitionInstruction).toContain('Story Definition Prompt');
+    expect(promptTemplates.storyDefinitionInstruction).toContain('the entire Story');
+    expect(promptTemplates.storyDefinitionInstruction).toContain('It is not the Story Prompt');
+  });
 });

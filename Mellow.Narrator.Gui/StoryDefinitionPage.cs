@@ -119,6 +119,12 @@ public sealed class StoryDefinitionPage : ContentPage, IPendingOperationPage, IC
             _content.Children.Clear();
             var titleEntry = new Entry { Text = value.Title, MaxLength = settings.ContentLimits.MaxStoryTitleCharacters, FontSize = 24, FontAttributes = FontAttributes.Bold };
             _content.Children.Add(titleEntry);
+            _content.Children.Add(Ui.Heading("Story Prompt"));
+            _content.Children.Add(new Label
+            {
+                Text = "The immutable setting, premise, tone, and narration rules sent with every request. This is one generated part of the Story Definition, not the Story Definition Prompt used to generate the whole definition.",
+                FontSize = 12
+            });
             var promptEditor = new Editor
             {
                 Text = value.StoryPrompt,

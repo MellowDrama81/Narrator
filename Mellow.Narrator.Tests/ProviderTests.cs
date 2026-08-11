@@ -185,7 +185,8 @@ public sealed class ProviderTests
         Assert.Equal("secret", captured.Headers.Authorization.Parameter);
         Assert.Contains("story-model", body);
         Assert.Contains("A red moon story", body);
-        Assert.Contains("Refine the Story Prompt", body);
+        Assert.Contains("Story Definition Prompt", body);
+        Assert.Contains("source material for generating the entire Story", body);
         Assert.Contains("\"max_completion_tokens\"", body);
         Assert.DoesNotContain("\"max_tokens\"", body);
         Assert.Contains("\"role\":\"developer\"", body);
@@ -249,7 +250,7 @@ public sealed class ProviderTests
 
         await provider.GenerateStoryDefinitionAsync(settings, null, "Story prompt");
 
-        Assert.Contains("Refine the Story Prompt", body);
+        Assert.Contains("Story Definition Prompt", body);
         Assert.Contains("Return an object matching this JSON Schema exactly", body);
         Assert.Contains("refinedStoryPrompt", body);
     }

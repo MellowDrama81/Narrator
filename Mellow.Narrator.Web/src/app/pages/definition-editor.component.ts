@@ -28,8 +28,8 @@ import { PlannedEventsEditorComponent } from '../shared/planned-events-editor.co
     <header class="page-header">
       <div>
         <a class="back-link" routerLink="/definitions">← Definitions</a>
-        <p class="eyebrow">{{ creating ? 'New world' : 'Definition editor' }}</p>
-        <h1>{{ creating ? 'Begin with a premise' : definition?.title }}</h1>
+        <p class="eyebrow">{{ creating ? 'New Story Definition' : 'Definition editor' }}</p>
+        <h1>{{ creating ? 'Describe the definition to generate' : definition?.title }}</h1>
       </div>
       @if (definition) {
         <div class="actions">
@@ -43,15 +43,15 @@ import { PlannedEventsEditorComponent } from '../shared/planned-events-editor.co
     @if (creating) {
       <mat-card class="prompt-card">
         <mat-card-content>
-          <p class="lead">Describe the immutable idea. Characters, secrets, relationships, and changing facts will be organized into the Story Bible.</p>
+          <p class="lead">The Story Definition Prompt is source material for the whole definition. Include the premise, characters, starting state, tone, desired developments, possible outcomes, and any other requirements. The generator will organize them into the appropriate fields.</p>
           <mat-form-field appearance="outline">
             <mat-label>Optional title</mat-label>
             <input matInput [(ngModel)]="draftTitle" (ngModelChange)="saveDraft()">
           </mat-form-field>
           <mat-form-field appearance="outline">
-            <mat-label>Story premise</mat-label>
+            <mat-label>Story Definition Prompt</mat-label>
             <textarea matInput rows="12" [(ngModel)]="draftPrompt" (ngModelChange)="saveDraft()" placeholder="You awaken aboard a silent orbital station where every clock has stopped..."></textarea>
-            <mat-hint>Include tone, setting, the player character, and the central tension.</mat-hint>
+            <mat-hint>Generates the Story Prompt, Initial Events, Story Bible, Planned Events, and victory/loss conditions.</mat-hint>
           </mat-form-field>
         </mat-card-content>
         <mat-card-actions align="end"><button mat-flat-button [disabled]="busy || !draftPrompt.trim()" (click)="generate()">Generate Story Definition</button></mat-card-actions>

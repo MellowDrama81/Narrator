@@ -123,7 +123,7 @@ public interface ILanguageModelProvider
 {
     Task<IReadOnlyList<string>> DiscoverModelsAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default);
     Task<ConnectionTestResult> TestConnectionAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default);
-    Task<StoryDefinitionGenerationResponse> GenerateStoryDefinitionAsync(ApiConnectionSettings settings, string? credential, string storyPrompt, CancellationToken cancellationToken = default);
+    Task<StoryDefinitionGenerationResponse> GenerateStoryDefinitionAsync(ApiConnectionSettings settings, string? credential, string storyDefinitionPrompt, CancellationToken cancellationToken = default);
     Task<StoryGenerationResponse> GenerateOpeningAsync(ApiConnectionSettings settings, string? credential, GenerationContext context, CancellationToken cancellationToken = default);
     Task<StoryGenerationResponse> GenerateTurnAsync(ApiConnectionSettings settings, string? credential, GenerationContext context, CancellationToken cancellationToken = default);
 }

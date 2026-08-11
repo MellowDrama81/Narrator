@@ -9,7 +9,12 @@ public sealed class StoryPromptPage : ContentPage, IStoryPromptDraftPage, IPendi
     private readonly INarratorApplication _app;
     private readonly MainTabbedPage _tabs;
     private readonly Entry _title = new() { Placeholder = "Title (leave blank to generate one)" };
-    private readonly Editor _prompt = new() { Placeholder = "Story Prompt", AutoSize = EditorAutoSizeOption.TextChanges, MinimumHeightRequest = 160 };
+    private readonly Editor _prompt = new()
+    {
+        Placeholder = "Describe the whole story definition to generate",
+        AutoSize = EditorAutoSizeOption.TextChanges,
+        MinimumHeightRequest = 160
+    };
     private readonly ActivityIndicator _busy = new();
     private CancellationTokenSource? _request;
     private PendingOperationState? _pendingOperation;
@@ -35,7 +40,19 @@ public sealed class StoryPromptPage : ContentPage, IStoryPromptDraftPage, IPendi
             {
                 Padding = 16,
                 Spacing = 8,
-                Children = { Ui.Heading(Title), new Label { Text = "Title" }, _title, new Label { Text = "Story Prompt" }, _prompt,
+                Children =
+                {
+                    Ui.Heading(Title),
+                    new Label { Text = "Title (optional)" },
+                    _title,
+                    new Label { Text = "Story Definition Prompt" },
+                    new Label
+                    {
+                        Text = "Describe everything the generated definition should contain, including the premise, characters, starting state, tone, desired developments, and possible outcomes. The generator will organize it into the Story Prompt, Initial Events, Story Bible, Planned Events, and victory/loss conditions.",
+                        FontSize = 13,
+                        TextColor = Colors.Gray
+                    },
+                    _prompt,
                     Ui.Button("Generate Story Definition", Generate), Ui.Busy(_busy, "Generating…") }
             }
         };
@@ -69,7 +86,7 @@ public sealed class StoryPromptPage : ContentPage, IStoryPromptDraftPage, IPendi
             await ((IInFlightRequestPage)this).CancelInFlightRequestAsync();
         }
         if (string.IsNullOrWhiteSpace(_title.Text) && string.IsNullOrWhiteSpace(_prompt.Text)) return true;
-        return await DisplayAlertAsync("Discard draft?", "This temporary Story Prompt draft will be discarded.", "Discard", "Keep Open");
+        return await DisplayAlertAsync("Discard draft?", "This temporary Story Definition Prompt will be discarded.", "Discard", "Keep Open");
     }
 
     protected override async void OnAppearing()

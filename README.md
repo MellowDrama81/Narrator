@@ -15,11 +15,15 @@ Application-wide LLM prompt templates and rolling structured logging are configu
 
 ## Core concepts
 
+- **Story Definition Prompt** — the source material you enter when generating a Story Definition. It
+  can describe every aspect of the desired definition: premise, characters, starting state, tone,
+  mutable facts, intended developments, and possible outcomes. The generator organizes that material
+  into the appropriate Story Definition fields. It is not the Story Prompt stored in the result.
 - **Story Definition** — the reusable template for a story: a title, a refined Story Prompt (the
   immutable setting, premise, tone, and narration rules that are sent with every request for the entire
   story), an optional Initial Events prompt (guidance used only for the earliest scenes, then dropped),
-  and an initial Story Bible. You can start any number of independent Story States from the same
-  definition.
+  an initial Story Bible, secret Planned Events, and victory/loss conditions. You can start any number
+  of independent Story States from the same definition.
 - **Story Bible** — the durable, structured memory for a story: a set of named entries, each with a
   category, an importance level from 1 (least) to 5 (most), and two lists of short facts —
   **known facts** (things the player character already knows or could plainly observe) and
@@ -41,9 +45,10 @@ Application-wide LLM prompt templates and rolling structured logging are configu
 1. Open **Settings** (one of the three fixed tabs) and configure the API connection — see
    [Configuring the LLM connection](#configuring-the-llm-connection) below — then **Save**.
 2. Open the **Definitions** tab and either:
-   - click **New**, enter a short premise as the Story Prompt, and click **Generate Story Definition**
-     to have the LLM refine it into a title, a polished Story Prompt, an Initial Events prompt, and a
-     starting Story Bible; or
+   - click **New**, enter a Story Definition Prompt describing everything the generated definition
+     should contain, and click **Generate Story Definition**. The LLM organizes it into a title, a
+     polished immutable Story Prompt, an Initial Events prompt, a starting Story Bible, Planned Events,
+     and victory/loss conditions; or
    - click **Import** and choose an exported `*-definition.json` file — for example,
      [The Awakening AI-definition.json](examples/The%20Awakening%20AI-definition.json), an example
      Story Definition included in this repository.
@@ -133,18 +138,19 @@ The production output is written under `Mellow.Narrator.Web/dist/`.
 
 ### GitHub Pages deployment
 
-The Angular application is published at [https://mellowdrama81.github.io](https://mellowdrama81.github.io)
-from the separate `MellowDrama81/mellowdrama81.github.io` repository. Create the static Pages artifact
-from `Mellow.Narrator.Web` with:
+The Angular application is published from this repository at
+[https://mellowdrama81.github.io/Narrator](https://mellowdrama81.github.io/Narrator). Pushes to `master`
+automatically build and deploy it through `.github/workflows/pages.yml`. To create the same static Pages
+artifact locally from `Mellow.Narrator.Web`, run:
 
 ```powershell
 pnpm run build:github-pages
 ```
 
-The deployable files are written to `Mellow.Narrator.Web/dist/github-pages/`. This build uses the root
-base path, replaces social-card placeholders with the production origin, adds `.nojekyll`, and creates
-`404.html` as an Angular routing fallback. Publish the contents of that directory to the `main` branch
-of `MellowDrama81/mellowdrama81.github.io`.
+The deployable files are written to `Mellow.Narrator.Web/dist/github-pages/`. This build uses the
+`/Narrator/` base path, replaces social-card placeholders with the full production site URL, adds
+`.nojekyll`, and creates `404.html` as an Angular routing fallback. The `Narrator` repository's Pages
+publishing source must be set to **GitHub Actions**.
 
 ### Configure an LLM in the browser
 
@@ -205,7 +211,8 @@ whatever was interrupted.
 
 ### Definitions tab
 
-Lists every Story Definition you've created or imported. **New** opens a blank prompt-drafting tab;
+Lists every Story Definition you've created or imported. **New** opens a blank Story Definition Prompt
+drafting tab;
 **Open** opens the selected definition for editing; **Start** begins a new Story State from the selected
 definition without leaving the list. **Earlier**/**Later** reorder the list. **Import**/**Export**
 read and write a Story Definition as a single JSON file. **Delete** moves a definition to Trash — any

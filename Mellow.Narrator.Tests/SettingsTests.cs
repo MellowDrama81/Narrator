@@ -21,6 +21,8 @@ public sealed class SettingsTests
     {
         var templates = PromptTemplateDefaults.Create();
         Assert.Contains("Story Bible", templates.StoryDefinitionInstruction);
+        Assert.Contains("Story Definition Prompt", templates.StoryDefinitionInstruction);
+        Assert.Contains("the entire Story", templates.StoryDefinitionInstruction);
         Assert.Contains(
             PromptTemplateDefaults.ValidationErrorPlaceholder,
             templates.CorrectiveRetryInstruction);
