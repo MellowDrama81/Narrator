@@ -125,6 +125,9 @@ internal static class ConditionsView
                 if (saved is not null)
                 {
                     currentConditions = saved;
+                    newDescription.Text = "";
+                    newSecret.IsChecked = true;
+                    addForm.IsVisible = false;
                     RenderAfterSave();
                 }
             }),

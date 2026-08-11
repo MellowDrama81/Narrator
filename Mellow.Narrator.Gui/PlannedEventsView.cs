@@ -194,6 +194,11 @@ internal static class PlannedEventsView
                 if (saved is not null)
                 {
                     currentEvents = saved;
+                    newDescription.Text = "";
+                    newImportance.SelectedIndex = 2;
+                    newUrgency.SelectedIndex = 2;
+                    newCondition.Text = "";
+                    addForm.IsVisible = false;
                     RenderAfterSave();
                 }
             }),

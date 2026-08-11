@@ -184,6 +184,12 @@ internal static class StoryBibleView
                 if (saved is not null)
                 {
                     currentBible = saved;
+                    newCategory.Text = "";
+                    newName.Text = "";
+                    newKnownFacts.Text = "";
+                    newSecretFacts.Text = "";
+                    newImportance.SelectedIndex = 2;
+                    addForm.IsVisible = false;
                     RenderAfterSave();
                 }
             }),
