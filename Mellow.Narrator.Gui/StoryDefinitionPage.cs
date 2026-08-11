@@ -216,26 +216,35 @@ public sealed class StoryDefinitionPage : ContentPage, IPendingOperationPage, IC
 
     private async Task SaveBibleAsync(StoryBible next)
     {
-        try { await _application.UpdateInitialStoryBibleAsync(_id, next); await RefreshAsync(); }
+        try { await _application.UpdateInitialStoryBibleAsync(_id, next); RefreshAfterEditorClick(); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
     private async Task SavePlannedEventsAsync(PlannedEvents next)
     {
-        try { await _application.UpdateInitialPlannedEventsAsync(_id, next); await RefreshAsync(); }
+        try { await _application.UpdateInitialPlannedEventsAsync(_id, next); RefreshAfterEditorClick(); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
     private async Task SaveVictoryConditionsAsync(StoryConditions next)
     {
-        try { await _application.UpdateInitialVictoryConditionsAsync(_id, next); await RefreshAsync(); }
+        try { await _application.UpdateInitialVictoryConditionsAsync(_id, next); RefreshAfterEditorClick(); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
     private async Task SaveLossConditionsAsync(StoryConditions next)
     {
-        try { await _application.UpdateInitialLossConditionsAsync(_id, next); await RefreshAsync(); }
+        try { await _application.UpdateInitialLossConditionsAsync(_id, next); RefreshAfterEditorClick(); }
         catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private void RefreshAfterEditorClick()
+    {
+        // Rebuilding _content synchronously from a button inside that same visual tree can make WinUI
+        // remove the focused control while its Click event is still being dispatched, which surfaces as
+        // a COMException even though the repository save succeeded. Queue the rebuild for the next UI
+        // turn so the click can finish before its controls are replaced.
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(1), async () => await RefreshAsync());
     }
 
     private async Task ExportAsync(StoryDefinition definition)

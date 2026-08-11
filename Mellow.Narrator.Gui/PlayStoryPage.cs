@@ -339,20 +339,28 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
 
     private async Task SaveStorySummaryAsync(string next)
     {
-        try { await _app.UpdateStorySummaryAsync(_stateId, next); await Refresh(); }
+        try { await _app.UpdateStorySummaryAsync(_stateId, next); RefreshAfterEditorClick(); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
     private async Task SaveBibleAsync(StoryBible next)
     {
-        try { await _app.UpdateCurrentStoryBibleAsync(_stateId, next); await Refresh(); }
+        try { await _app.UpdateCurrentStoryBibleAsync(_stateId, next); RefreshAfterEditorClick(); }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
     private async Task SavePlannedEventsAsync(PlannedEvents next)
     {
-        try { await _app.UpdateCurrentPlannedEventsAsync(_stateId, next); await Refresh(); }
+        try { await _app.UpdateCurrentPlannedEventsAsync(_stateId, next); RefreshAfterEditorClick(); }
         catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private void RefreshAfterEditorClick()
+    {
+        // The editor being saved is part of the collections Refresh replaces. Let WinUI finish the
+        // current Click event before clearing those controls; removing the focused button during event
+        // dispatch can otherwise throw a COMException after the data has already been persisted.
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(1), async () => await Refresh());
     }
 
     private async void Play(object? sender, EventArgs e)
