@@ -214,10 +214,10 @@ public sealed class StoryDefinitionPage : ContentPage, IPendingOperationPage, IC
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
-    private async Task SaveBibleAsync(StoryBible next)
+    private async Task<StoryBible?> SaveBibleAsync(StoryBible next)
     {
-        try { await _application.UpdateInitialStoryBibleAsync(_id, next); RefreshAfterEditorClick(); }
-        catch (Exception ex) { await Ui.Error(this, ex); }
+        try { return (await _application.UpdateInitialStoryBibleAsync(_id, next)).InitialStoryBible; }
+        catch (Exception ex) { await Ui.Error(this, ex); return null; }
     }
 
     private async Task SavePlannedEventsAsync(PlannedEvents next)

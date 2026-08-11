@@ -343,10 +343,10 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
-    private async Task SaveBibleAsync(StoryBible next)
+    private async Task<StoryBible?> SaveBibleAsync(StoryBible next)
     {
-        try { await _app.UpdateCurrentStoryBibleAsync(_stateId, next); RefreshAfterEditorClick(); }
-        catch (Exception ex) { await Ui.Error(this, ex); }
+        try { return (await _app.UpdateCurrentStoryBibleAsync(_stateId, next)).CurrentStoryBible; }
+        catch (Exception ex) { await Ui.Error(this, ex); return null; }
     }
 
     private async Task SavePlannedEventsAsync(PlannedEvents next)

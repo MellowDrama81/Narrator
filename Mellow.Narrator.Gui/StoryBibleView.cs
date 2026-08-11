@@ -5,18 +5,22 @@ namespace Mellow.Narrator.Gui;
 
 internal static class StoryBibleView
 {
-    public static View Create(Page page, StoryBible bible, ContentLimitSettings limits, int newEntryRelevantTurn, Func<StoryBible, Task> onSaveAsync, bool alwaysExpanded = false)
+    public static View Create(Page page, StoryBible bible, ContentLimitSettings limits, int newEntryRelevantTurn, Func<StoryBible, Task<StoryBible?>> onSaveAsync, bool alwaysExpanded = false)
     {
+        // Keep the latest persisted model locally. Rebuilding the parent page immediately after a
+        // Save removes the focused native Button while WinUI is still raising its Click event,
+        // which can surface as a COMException despite the save having succeeded.
+        var currentBible = bible;
         var body = new VerticalStackLayout { IsVisible = alwaysExpanded, Spacing = 8 };
         var entries = new VerticalStackLayout { Spacing = 8 };
         var search = new SearchBar { Placeholder = "Search name or content" };
         var categories = new Picker { Title = "All categories" };
         var importance = new Picker { Title = "All importance levels" };
         categories.ItemsSource = new[] { "All categories" }
-            .Concat(bible.Entries.Select(x => x.Category).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x))
+            .Concat(currentBible.Entries.Select(x => x.Category).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x))
             .ToArray();
         importance.ItemsSource = new[] { "All importance levels" }
-            .Concat(bible.Entries.Select(x => x.Importance).Distinct().OrderDescending().Select(x => x.ToString()))
+            .Concat(currentBible.Entries.Select(x => x.Importance).Distinct().OrderDescending().Select(x => x.ToString()))
             .ToArray();
         categories.SelectedIndex = 0;
         importance.SelectedIndex = 0;
@@ -29,7 +33,7 @@ internal static class StoryBibleView
             var selectedImportance = importance.SelectedIndex > 0 && int.TryParse(importance.SelectedItem?.ToString(), out var parsedFilter)
                 ? parsedFilter
                 : (int?)null;
-            var filtered = bible.Entries.Where(x =>
+            var filtered = currentBible.Entries.Where(x =>
                 (string.IsNullOrEmpty(query) ||
                     x.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                     x.KnownFacts.Any(f => f.Contains(query, StringComparison.OrdinalIgnoreCase)) ||
@@ -88,12 +92,14 @@ internal static class StoryBibleView
                                         SecretFacts = SplitFacts(secretInput.Text),
                                         Importance = int.TryParse(importanceInput.SelectedItem?.ToString(), out var parsedImportance) ? parsedImportance : entry.Importance
                                     };
-                                    await onSaveAsync(new StoryBible(bible.Entries.Select(x => x.Id == entry.Id ? updated : x).ToArray()));
+                                    var saved = await onSaveAsync(new StoryBible(currentBible.Entries.Select(x => x.Id == entry.Id ? updated : x).ToArray()));
+                                    if (saved is not null) currentBible = saved;
                                 }),
                                 Ui.DestructiveButton("Remove", async (_, _) =>
                                 {
                                     if (!await page.DisplayAlertAsync("Remove entry?", $"Remove \"{entry.Name}\" from the Story Bible?", "Remove", "Cancel")) return;
-                                    await onSaveAsync(new StoryBible(bible.Entries.Where(x => x.Id != entry.Id).ToArray()));
+                                    var saved = await onSaveAsync(new StoryBible(currentBible.Entries.Where(x => x.Id != entry.Id).ToArray()));
+                                    if (saved is not null) currentBible = saved;
                                 })),
                             new Label { Text = $"Stable ID: {entry.Id:D}", FontSize = 11 }
                         }
@@ -153,7 +159,8 @@ internal static class StoryBibleView
                     SplitFacts(newSecretFacts.Text),
                     int.TryParse(newImportance.SelectedItem?.ToString(), out var parsedNewImportance) ? parsedNewImportance : 3,
                     newEntryRelevantTurn);
-                await onSaveAsync(new StoryBible(bible.Entries.Append(added).ToArray()));
+                var saved = await onSaveAsync(new StoryBible(currentBible.Entries.Append(added).ToArray()));
+                if (saved is not null) currentBible = saved;
             }),
             Ui.SecondaryButton("Cancel", (_, _) =>
             {
@@ -165,8 +172,8 @@ internal static class StoryBibleView
                 addForm.IsVisible = false;
             })));
 
-        var serializedBytes = JsonSerializer.SerializeToUtf8Bytes(bible).Length;
-        body.Children.Add(new Label { Text = $"{bible.Entries.Count} active entries; {serializedBytes:N0} serialized bytes" });
+        var serializedBytes = JsonSerializer.SerializeToUtf8Bytes(currentBible).Length;
+        body.Children.Add(new Label { Text = $"{currentBible.Entries.Count} active entries; {serializedBytes:N0} serialized bytes" });
         body.Children.Add(Ui.SecondaryButton("Add Entry", (_, _) => addForm.IsVisible = !addForm.IsVisible));
         body.Children.Add(addForm);
         body.Children.Add(search);
