@@ -29,12 +29,7 @@ jobs:
         run: dotnet restore Mellow.Narrator.slnx --locked-mode
 
       - name: Build Android target
-        if: github.event_name != 'push' || github.ref != 'refs/heads/master'
         run: dotnet build Mellow.Narrator.Gui/Mellow.Narrator.Gui.csproj --framework net10.0-android --configuration Release --no-restore
-
-      - name: Publish Android APK
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        run: dotnet publish Mellow.Narrator.Gui/Mellow.Narrator.Gui.csproj --framework net10.0-android --configuration Release --no-restore -p:AndroidPackageFormats=apk
 
       - name: Restore Windows runtime pack
         run: dotnet restore Mellow.Narrator.Gui/Mellow.Narrator.Gui.csproj --runtime win-x64 --no-dependencies --force-evaluate --lock-file-path obj/ci-runtime-packages.lock.json -p:TargetFrameworks=net10.0-windows10.0.19041.0
@@ -55,12 +50,3 @@ jobs:
           name: coverage
           path: "**/TestResults/**/coverage.cobertura.xml"
           if-no-files-found: warn
-
-      - name: Upload Android APK
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-        uses: actions/upload-artifact@v7
-        with:
-          name: Mellow-Narrator-Android-${{ github.sha }}
-          path: Mellow.Narrator.Gui/bin/Release/net10.0-android/publish/*-Signed.apk
-          if-no-files-found: error
-          retention-days: 30
