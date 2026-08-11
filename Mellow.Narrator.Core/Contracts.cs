@@ -136,6 +136,7 @@ public interface INarratorApplication
     Task<IReadOnlyList<string>> DiscoverModelsAsync(CancellationToken cancellationToken = default);
     Task<ConnectionTestResult> TestConnectionAsync(CancellationToken cancellationToken = default);
     Task<BibleLimitImpact> GetBibleLimitImpactAsync(StoryGenerationSettings proposed, CancellationToken cancellationToken = default);
+    Task<StoryDefinition> CreateBlankDefinitionAsync(string? title = null, CancellationToken cancellationToken = default);
     Task<StoryDefinition> GenerateDefinitionAsync(StoryPromptDraft draft, bool overwrite, Guid targetId, CancellationToken cancellationToken = default);
     Task<StoryDefinition> CullDefinitionAsync(Guid definitionId, CancellationToken cancellationToken = default);
     Task<StoryState> CullStoryStateAsync(Guid stateId, CancellationToken cancellationToken = default);

@@ -17,6 +17,30 @@ export class NarratorService {
 
   constructor(private readonly db: DbService, private readonly llm: LlmService) {}
 
+  async createBlankDefinition(title: string): Promise<StoryDefinition> {
+    const settings = await this.db.settings();
+    const normalizedTitle = title.trim() || 'Untitled Story Definition';
+    if (normalizedTitle.length > settings.maxStoryTitleCharacters)
+      throw new Error('The title exceeds the configured limit.');
+    const definitions = await this.db.definitions();
+    const now = nowIso();
+    const value: StoryDefinition = {
+      id: uuid(),
+      title: normalizedTitle,
+      storyPrompt: '',
+      initialEventsPrompt: '',
+      initialStoryBible: [],
+      initialPlannedEvents: [],
+      initialVictoryConditions: [],
+      initialLossConditions: [],
+      sortOrder: definitions.length ? Math.max(...definitions.map(x => x.sortOrder)) + 1 : 0,
+      createdAtUtc: now,
+      updatedAtUtc: now,
+    };
+    await this.db.saveDefinition(value);
+    return value;
+  }
+
   async generateDefinition(title: string, prompt: string): Promise<StoryDefinition> {
     const settings = await this.db.settings();
     const generated = await this.llm.generateDefinition(settings, prompt);
@@ -42,6 +66,7 @@ export class NarratorService {
   }
 
   async startStory(definition: StoryDefinition): Promise<StoryState> {
+    if (!definition.storyPrompt.trim()) throw new Error('Enter a Story Prompt before starting the story.');
     const settings = await this.db.settings();
     const bibleLimits = this.bibleLimits(settings);
     const plannedEventLimits = this.plannedEventLimits(settings);

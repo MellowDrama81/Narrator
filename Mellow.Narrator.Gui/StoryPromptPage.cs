@@ -53,7 +53,12 @@ public sealed class StoryPromptPage : ContentPage, IStoryPromptDraftPage, IPendi
                         TextColor = Colors.Gray
                     },
                     _prompt,
-                    Ui.Button("Generate Story Definition", Generate), Ui.Busy(_busy, "Generating…") }
+                    sourceId is null
+                        ? Ui.Buttons(
+                            Ui.SecondaryButton("Create Blank Definition", CreateBlank),
+                            Ui.Button("Generate Story Definition", Generate))
+                        : Ui.Button("Generate Story Definition", Generate),
+                    Ui.Busy(_busy, "Working…") }
             }
         };
         if (restoredDraft is not null)
@@ -153,5 +158,26 @@ public sealed class StoryPromptPage : ContentPage, IStoryPromptDraftPage, IPendi
             await _tabs.SaveWorkspaceNowAsync();
         }
         if (retry) Generate(null, EventArgs.Empty);
+    }
+
+    private async void CreateBlank(object? sender, EventArgs e)
+    {
+        if (_request is not null || _sourceId is not null) return;
+        try
+        {
+            _request = new();
+            _busy.IsRunning = true;
+            var result = await _app.CreateBlankDefinitionAsync(_title.Text, _request.Token);
+            await _tabs.ReplaceCurrentWithDefinitionAsync(result.Id);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+        finally
+        {
+            _busy.IsRunning = false;
+            _request?.Dispose();
+            _request = null;
+            await _tabs.SaveWorkspaceNowAsync();
+        }
     }
 }

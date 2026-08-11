@@ -254,6 +254,43 @@ public sealed class NarratorApplication(
         return definition;
     }
 
+    public async Task<StoryDefinition> CreateBlankDefinitionAsync(
+        string? title = null,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = await settingsStore.LoadAsync(cancellationToken);
+        var normalizedTitle = string.IsNullOrWhiteSpace(title) ? "Untitled Story Definition" : title.Trim();
+        if (normalizedTitle.Length > settings.ContentLimits.MaxStoryTitleCharacters)
+            throw new NarratorException("The title exceeds the configured limit.");
+
+        StoryDefinition definition;
+        await _definitionCreateGate.WaitAsync(cancellationToken);
+        try
+        {
+            var summaries = await definitions.ListAsync(cancellationToken);
+            var now = timeProvider.GetUtcNow();
+            definition = new StoryDefinition(
+                idGenerator.NewId(),
+                normalizedTitle,
+                "",
+                "",
+                StoryBible.Empty,
+                [],
+                PlannedEvents.Empty,
+                [],
+                StoryConditions.Empty,
+                StoryConditions.Empty,
+                summaries.Count == 0 ? 0 : summaries.Max(x => x.SortOrder) + 1,
+                now,
+                now);
+            await definitions.SaveAsync(definition, cancellationToken);
+        }
+        finally { _definitionCreateGate.Release(); }
+
+        _logger.LogInformation("Blank Story Definition {StoryDefinitionId} created.", definition.Id);
+        return definition;
+    }
+
     public async Task<StoryDefinition> CullDefinitionAsync(Guid definitionId, CancellationToken cancellationToken = default)
     {
         var definition = await definitions.GetAsync(definitionId, cancellationToken) ?? throw new NarratorException("Story Definition not found.");
@@ -452,6 +489,8 @@ public sealed class NarratorApplication(
     {
         if (targetStateId == Guid.Empty) throw new ArgumentException("Target ID cannot be empty.", nameof(targetStateId));
         using var requestLease = storyRequests.Enter(targetStateId);
+        if (string.IsNullOrWhiteSpace(draft.Definition.StoryPrompt))
+            throw new NarratorException("Enter a Story Prompt before starting the story.");
         var (settings, credential) = await ConnectionAsync(cancellationToken);
         _logger.LogInformation(
             "Generating opening scene for Story State {StoryStateId} with model {ModelId}.",

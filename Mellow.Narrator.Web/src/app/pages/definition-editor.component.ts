@@ -54,7 +54,10 @@ import { PlannedEventsEditorComponent } from '../shared/planned-events-editor.co
             <mat-hint>Generates the Story Prompt, Initial Events, Story Bible, Planned Events, and victory/loss conditions.</mat-hint>
           </mat-form-field>
         </mat-card-content>
-        <mat-card-actions align="end"><button mat-flat-button [disabled]="busy || !draftPrompt.trim()" (click)="generate()">Generate Story Definition</button></mat-card-actions>
+        <mat-card-actions align="end">
+          <button mat-stroked-button [disabled]="busy" (click)="createBlank()">Create Blank Definition</button>
+          <button mat-flat-button [disabled]="busy || !draftPrompt.trim()" (click)="generate()">Generate Story Definition</button>
+        </mat-card-actions>
       </mat-card>
     } @else if (definition) {
       <mat-card class="editor-card">
@@ -135,6 +138,19 @@ export class DefinitionEditorComponent implements OnInit {
     this.busy = true;
     try {
       const value = await this.narrator.generateDefinition(this.draftTitle, this.draftPrompt);
+      await this.db.saveMeta('definition-draft', { title: '', prompt: '' });
+      await this.router.navigate(['/definitions', value.id]);
+    } catch (error) { this.error(error); }
+    finally {
+      this.busy = false;
+      this.changeDetector.markForCheck();
+    }
+  }
+
+  async createBlank(): Promise<void> {
+    this.busy = true;
+    try {
+      const value = await this.narrator.createBlankDefinition(this.draftTitle);
       await this.db.saveMeta('definition-draft', { title: '', prompt: '' });
       await this.router.navigate(['/definitions', value.id]);
     } catch (error) { this.error(error); }

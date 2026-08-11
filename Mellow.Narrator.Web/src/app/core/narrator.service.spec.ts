@@ -112,7 +112,57 @@ function story(overrides: Partial<StoryState> = {}): StoryState {
 }
 
 describe('NarratorService', () => {
+  describe('createBlankDefinition', () => {
+    it('persists an empty definition without calling the provider', async () => {
+      const saved: StoryDefinition[] = [];
+      const database = {
+        settings: vi.fn(async () => settingsWith()),
+        definitions: vi.fn(async () => [definition({ sortOrder: 4 })]),
+        saveDefinition: vi.fn(async (value: StoryDefinition) => { saved.push(value); }),
+      };
+      const llm = { generateDefinition: vi.fn() };
+      const service = new NarratorService(database as unknown as DbService, llm as unknown as LlmService);
+
+      const result = await service.createBlankDefinition('   ');
+
+      expect(result.title).toBe('Untitled Story Definition');
+      expect(result.storyPrompt).toBe('');
+      expect(result.initialEventsPrompt).toBe('');
+      expect(result.initialStoryBible).toEqual([]);
+      expect(result.initialPlannedEvents).toEqual([]);
+      expect(result.initialVictoryConditions).toEqual([]);
+      expect(result.initialLossConditions).toEqual([]);
+      expect(result.sortOrder).toBe(5);
+      expect(saved).toEqual([result]);
+      expect(llm.generateDefinition).not.toHaveBeenCalled();
+    });
+
+    it('trims a provided title', async () => {
+      const database = {
+        settings: vi.fn(async () => settingsWith()),
+        definitions: vi.fn(async () => []),
+        saveDefinition: vi.fn(),
+      };
+      const service = new NarratorService(database as unknown as DbService, {} as unknown as LlmService);
+
+      const result = await service.createBlankDefinition('  Hand-authored world  ');
+
+      expect(result.title).toBe('Hand-authored world');
+    });
+  });
+
   describe('startStory', () => {
+    it('rejects a blank Story Prompt before calling the provider', async () => {
+      const database = { settings: vi.fn() };
+      const llm = { opening: vi.fn() };
+      const service = new NarratorService(database as unknown as DbService, llm as unknown as LlmService);
+
+      await expect(service.startStory(definition({ storyPrompt: '   ' }))).rejects.toThrow(/Story Prompt/i);
+
+      expect(database.settings).not.toHaveBeenCalled();
+      expect(llm.opening).not.toHaveBeenCalled();
+    });
+
     it('persists a newly started story with its opening turn', async () => {
       const saved: StoryState[] = [];
       const database = {

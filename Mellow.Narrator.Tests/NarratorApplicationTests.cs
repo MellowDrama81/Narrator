@@ -5,6 +5,42 @@ namespace Mellow.Narrator.Tests;
 public sealed class NarratorApplicationTests
 {
     [Fact]
+    public async Task CreateBlankDefinition_PersistsAnEmptyDefinitionWithoutCallingProvider()
+    {
+        var definitions = new MemoryDefinitions();
+        var provider = new FakeProvider();
+        var app = CreateApplication(definitions, new MemoryStates(), provider);
+
+        var definition = await app.CreateBlankDefinitionAsync("   ");
+
+        Assert.Equal("Untitled Story Definition", definition.Title);
+        Assert.Empty(definition.StoryPrompt);
+        Assert.Empty(definition.InitialEventsPrompt);
+        Assert.Empty(definition.InitialStoryBible.Entries);
+        Assert.Empty(definition.InitialPlannedEvents.Entries);
+        Assert.Empty(definition.InitialVictoryConditions.Entries);
+        Assert.Empty(definition.InitialLossConditions.Entries);
+        Assert.Equal(definition, await definitions.GetAsync(definition.Id));
+        Assert.Equal(0, provider.DefinitionCalls);
+    }
+
+    [Fact]
+    public async Task CreateBlankDefinition_TrimsProvidedTitleAndAppendsSortOrder()
+    {
+        var definitions = new MemoryDefinitions();
+        var now = DateTimeOffset.UtcNow;
+        await definitions.SaveAsync(new StoryDefinition(
+            Guid.NewGuid(), "Existing", "Prompt", "", StoryBible.Empty, [], PlannedEvents.Empty, [],
+            StoryConditions.Empty, StoryConditions.Empty, 7, now, now));
+        var app = CreateApplication(definitions, new MemoryStates(), new FakeProvider());
+
+        var definition = await app.CreateBlankDefinitionAsync("  Hand-authored world  ");
+
+        Assert.Equal("Hand-authored world", definition.Title);
+        Assert.Equal(8, definition.SortOrder);
+    }
+
+    [Fact]
     public async Task GenerateDefinition_UsesRefinedStoryPromptInsteadOfDraftPrompt()
     {
         var draft = new StoryPromptDraft(null, "Title", "Raw prompt mentioning today's mutable state");
@@ -226,6 +262,22 @@ public sealed class NarratorApplicationTests
         // Event ids in StartStory_UsesTemporarySnapshotAndCarriesMaintenance above.
         Assert.Equal(newVictory.Id, Assert.Single(result.State.Setup.Definition.InitialVictoryConditions.Entries).Id);
         Assert.Equal(newLoss.Id, Assert.Single(result.State.Setup.Definition.InitialLossConditions.Entries).Id);
+    }
+
+    [Fact]
+    public async Task StartStory_RejectsBlankStoryPromptBeforeCallingProvider()
+    {
+        var provider = new FakeProvider();
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
+        var snapshot = new StoryDefinitionSnapshot(
+            "Untitled Story Definition", "   ", "", StoryBible.Empty, PlannedEvents.Empty,
+            StoryConditions.Empty, StoryConditions.Empty);
+
+        var error = await Assert.ThrowsAsync<NarratorException>(() =>
+            app.StartStoryAsync(new StartStoryDraft(Guid.NewGuid(), snapshot), Guid.NewGuid()));
+
+        Assert.Contains("Story Prompt", error.Message);
+        Assert.Equal(0, provider.OpeningCalls);
     }
 
     [Fact]
@@ -1312,6 +1364,7 @@ public sealed class NarratorApplicationTests
         // NarratorApplication has remapped them (e.g. Story Condition ids freshly assigned during
         // StartStoryAsync) - the context passed to Generate*Async carries those new ids.
         public Func<GenerationContext, StoryGenerationResponse>? StoryResponseFactory { get; set; }
+        public int DefinitionCalls { get; private set; }
         public int OpeningCalls { get; private set; }
         public GenerationContext? LastContext { get; private set; }
         public ApiConnectionSettings? DiscoverySettings { get; private set; }
@@ -1323,8 +1376,11 @@ public sealed class NarratorApplicationTests
         public ConnectionTestResult? TestConnectionResult { get; set; }
         public Task<ConnectionTestResult> TestConnectionAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default) =>
             Task.FromResult(TestConnectionResult ?? throw new NotSupportedException());
-        public Task<StoryDefinitionGenerationResponse> GenerateStoryDefinitionAsync(ApiConnectionSettings settings, string? credential, string storyPrompt, CancellationToken cancellationToken = default) =>
-            Task.FromResult(DefinitionResponse);
+        public Task<StoryDefinitionGenerationResponse> GenerateStoryDefinitionAsync(ApiConnectionSettings settings, string? credential, string storyPrompt, CancellationToken cancellationToken = default)
+        {
+            DefinitionCalls++;
+            return Task.FromResult(DefinitionResponse);
+        }
         public Task<StoryGenerationResponse> GenerateOpeningAsync(ApiConnectionSettings settings, string? credential, GenerationContext context, CancellationToken cancellationToken = default)
         {
             OpeningCalls++;
