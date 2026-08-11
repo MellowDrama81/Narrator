@@ -15,6 +15,7 @@ internal static class ConditionsView
         var currentConditions = conditions;
         var body = new VerticalStackLayout { IsVisible = alwaysExpanded, Spacing = 8 };
         var entries = new VerticalStackLayout { Spacing = 8 };
+        var summary = new Label();
 
         void Render()
         {
@@ -52,18 +53,38 @@ internal static class ConditionsView
                                 }
                                 var updated = entry with { Description = description, Secret = secretInput.IsChecked };
                                 var saved = await onSaveAsync(new StoryConditions(currentConditions.Entries.Select(x => x.Id == entry.Id ? updated : x).ToArray()));
-                                if (saved is not null) currentConditions = saved;
+                                if (saved is not null)
+                                {
+                                    currentConditions = saved;
+                                    RenderAfterSave();
+                                }
                             }),
                             Ui.DestructiveButton("Remove", async (_, _) =>
                             {
                                 if (!await page.DisplayAlertAsync("Remove condition?", $"Remove \"{entry.Description}\"?", "Remove", "Cancel")) return;
                                 var saved = await onSaveAsync(new StoryConditions(currentConditions.Entries.Where(x => x.Id != entry.Id).ToArray()));
-                                if (saved is not null) currentConditions = saved;
+                                if (saved is not null)
+                                {
+                                    currentConditions = saved;
+                                    RenderAfterSave();
+                                }
                             })),
                         new Label { Text = $"Stable ID: {entry.Id:D}", FontSize = 11 }
                     }
                 });
             }
+        }
+
+        void RenderAfterSave()
+        {
+            // Refresh only these rows after the native Click dispatch completes. Rebuilding the
+            // enclosing Story Definition page here can trigger a WinUI COMException.
+            page.Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(50), () =>
+            {
+                Render();
+                var bytes = JsonSerializer.SerializeToUtf8Bytes(currentConditions).Length;
+                summary.Text = $"{currentConditions.Entries.Count} conditions; {bytes:N0} serialized bytes";
+            });
         }
 
         Render();
@@ -101,7 +122,11 @@ internal static class ConditionsView
                 }
                 var added = new StoryCondition(Guid.Empty, description, newSecret.IsChecked);
                 var saved = await onSaveAsync(new StoryConditions(currentConditions.Entries.Append(added).ToArray()));
-                if (saved is not null) currentConditions = saved;
+                if (saved is not null)
+                {
+                    currentConditions = saved;
+                    RenderAfterSave();
+                }
             }),
             Ui.SecondaryButton("Cancel", (_, _) =>
             {
@@ -111,7 +136,8 @@ internal static class ConditionsView
             })));
 
         var serializedBytes = JsonSerializer.SerializeToUtf8Bytes(currentConditions).Length;
-        body.Children.Add(new Label { Text = $"{currentConditions.Entries.Count} conditions; {serializedBytes:N0} serialized bytes" });
+        summary.Text = $"{currentConditions.Entries.Count} conditions; {serializedBytes:N0} serialized bytes";
+        body.Children.Add(summary);
         body.Children.Add(Ui.SecondaryButton("Add Condition", (_, _) => addForm.IsVisible = !addForm.IsVisible));
         body.Children.Add(addForm);
         body.Children.Add(entries);

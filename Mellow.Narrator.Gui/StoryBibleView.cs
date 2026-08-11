@@ -13,6 +13,7 @@ internal static class StoryBibleView
         var currentBible = bible;
         var body = new VerticalStackLayout { IsVisible = alwaysExpanded, Spacing = 8 };
         var entries = new VerticalStackLayout { Spacing = 8 };
+        var summary = new Label();
         var search = new SearchBar { Placeholder = "Search name or content" };
         var categories = new Picker { Title = "All categories" };
         var importance = new Picker { Title = "All importance levels" };
@@ -93,13 +94,21 @@ internal static class StoryBibleView
                                         Importance = int.TryParse(importanceInput.SelectedItem?.ToString(), out var parsedImportance) ? parsedImportance : entry.Importance
                                     };
                                     var saved = await onSaveAsync(new StoryBible(currentBible.Entries.Select(x => x.Id == entry.Id ? updated : x).ToArray()));
-                                    if (saved is not null) currentBible = saved;
+                                    if (saved is not null)
+                                    {
+                                        currentBible = saved;
+                                        RenderAfterSave();
+                                    }
                                 }),
                                 Ui.DestructiveButton("Remove", async (_, _) =>
                                 {
                                     if (!await page.DisplayAlertAsync("Remove entry?", $"Remove \"{entry.Name}\" from the Story Bible?", "Remove", "Cancel")) return;
                                     var saved = await onSaveAsync(new StoryBible(currentBible.Entries.Where(x => x.Id != entry.Id).ToArray()));
-                                    if (saved is not null) currentBible = saved;
+                                    if (saved is not null)
+                                    {
+                                        currentBible = saved;
+                                        RenderAfterSave();
+                                    }
                                 })),
                             new Label { Text = $"Stable ID: {entry.Id:D}", FontSize = 11 }
                         }
@@ -117,6 +126,18 @@ internal static class StoryBibleView
                     });
                 }
             }
+        }
+
+        void RenderAfterSave()
+        {
+            // Refresh only the Bible rows after the native Click dispatch completes; the parent
+            // page remains intact, avoiding the WinUI COMException caused by a full page rebuild.
+            page.Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(50), () =>
+            {
+                Render();
+                var bytes = JsonSerializer.SerializeToUtf8Bytes(currentBible).Length;
+                summary.Text = $"{currentBible.Entries.Count} active entries; {bytes:N0} serialized bytes";
+            });
         }
 
         search.TextChanged += (_, _) => Render();
@@ -160,7 +181,11 @@ internal static class StoryBibleView
                     int.TryParse(newImportance.SelectedItem?.ToString(), out var parsedNewImportance) ? parsedNewImportance : 3,
                     newEntryRelevantTurn);
                 var saved = await onSaveAsync(new StoryBible(currentBible.Entries.Append(added).ToArray()));
-                if (saved is not null) currentBible = saved;
+                if (saved is not null)
+                {
+                    currentBible = saved;
+                    RenderAfterSave();
+                }
             }),
             Ui.SecondaryButton("Cancel", (_, _) =>
             {
@@ -173,7 +198,8 @@ internal static class StoryBibleView
             })));
 
         var serializedBytes = JsonSerializer.SerializeToUtf8Bytes(currentBible).Length;
-        body.Children.Add(new Label { Text = $"{currentBible.Entries.Count} active entries; {serializedBytes:N0} serialized bytes" });
+        summary.Text = $"{currentBible.Entries.Count} active entries; {serializedBytes:N0} serialized bytes";
+        body.Children.Add(summary);
         body.Children.Add(Ui.SecondaryButton("Add Entry", (_, _) => addForm.IsVisible = !addForm.IsVisible));
         body.Children.Add(addForm);
         body.Children.Add(search);
