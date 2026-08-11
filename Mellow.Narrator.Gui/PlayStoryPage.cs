@@ -349,10 +349,10 @@ public sealed class PlayStoryPage : ContentPage, IPlayStoryTabStatePage, IPendin
         catch (Exception ex) { await Ui.Error(this, ex); return null; }
     }
 
-    private async Task SavePlannedEventsAsync(PlannedEvents next)
+    private async Task<PlannedEvents?> SavePlannedEventsAsync(PlannedEvents next)
     {
-        try { await _app.UpdateCurrentPlannedEventsAsync(_stateId, next); RefreshAfterEditorClick(); }
-        catch (Exception ex) { await Ui.Error(this, ex); }
+        try { return (await _app.UpdateCurrentPlannedEventsAsync(_stateId, next)).CurrentPlannedEvents; }
+        catch (Exception ex) { await Ui.Error(this, ex); return null; }
     }
 
     private void RefreshAfterEditorClick()

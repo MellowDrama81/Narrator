@@ -220,10 +220,10 @@ public sealed class StoryDefinitionPage : ContentPage, IPendingOperationPage, IC
         catch (Exception ex) { await Ui.Error(this, ex); return null; }
     }
 
-    private async Task SavePlannedEventsAsync(PlannedEvents next)
+    private async Task<PlannedEvents?> SavePlannedEventsAsync(PlannedEvents next)
     {
-        try { await _application.UpdateInitialPlannedEventsAsync(_id, next); RefreshAfterEditorClick(); }
-        catch (Exception ex) { await Ui.Error(this, ex); }
+        try { return (await _application.UpdateInitialPlannedEventsAsync(_id, next)).InitialPlannedEvents; }
+        catch (Exception ex) { await Ui.Error(this, ex); return null; }
     }
 
     private async Task SaveVictoryConditionsAsync(StoryConditions next)

@@ -5,19 +5,22 @@ namespace Mellow.Narrator.Gui;
 
 internal static class PlannedEventsView
 {
-    public static View Create(Page page, PlannedEvents events, ContentLimitSettings limits, int newEntryRelevantTurn, Func<PlannedEvents, Task> onSaveAsync, bool alwaysExpanded = false)
+    public static View Create(Page page, PlannedEvents events, ContentLimitSettings limits, int newEntryRelevantTurn, Func<PlannedEvents, Task<PlannedEvents?>> onSaveAsync, bool alwaysExpanded = false)
     {
+        // Keep the latest persisted model locally. Rebuilding the parent page while its native Save
+        // Button is raising Click can surface as a WinUI COMException even after persistence succeeds.
+        var currentEvents = events;
         var body = new VerticalStackLayout { IsVisible = alwaysExpanded, Spacing = 8 };
         var entries = new VerticalStackLayout { Spacing = 8 };
         var search = new SearchBar { Placeholder = "Search description" };
         var importance = new Picker { Title = "All importance levels" };
         importance.ItemsSource = new[] { "All importance levels" }
-            .Concat(events.Entries.Select(x => x.Importance).Distinct().OrderDescending().Select(x => x.ToString()))
+            .Concat(currentEvents.Entries.Select(x => x.Importance).Distinct().OrderDescending().Select(x => x.ToString()))
             .ToArray();
         importance.SelectedIndex = 0;
         var urgency = new Picker { Title = "All urgency levels" };
         urgency.ItemsSource = new[] { "All urgency levels" }
-            .Concat(events.Entries.Select(x => x.Urgency).Distinct().OrderDescending().Select(x => x.ToString()))
+            .Concat(currentEvents.Entries.Select(x => x.Urgency).Distinct().OrderDescending().Select(x => x.ToString()))
             .ToArray();
         urgency.SelectedIndex = 0;
 
@@ -31,7 +34,7 @@ internal static class PlannedEventsView
             var selectedUrgency = urgency.SelectedIndex > 0 && int.TryParse(urgency.SelectedItem?.ToString(), out var parsedUrgencyFilter)
                 ? parsedUrgencyFilter
                 : (int?)null;
-            var filtered = events.Entries.Where(x =>
+            var filtered = currentEvents.Entries.Where(x =>
                 (string.IsNullOrEmpty(query) || x.Description.Contains(query, StringComparison.OrdinalIgnoreCase)) &&
                 (selectedImportance is null || x.Importance == selectedImportance) &&
                 (selectedUrgency is null || x.Urgency == selectedUrgency));
@@ -86,7 +89,8 @@ internal static class PlannedEventsView
                                     Urgency = int.TryParse(urgencyInput.SelectedItem?.ToString(), out var parsedUrgency) ? parsedUrgency : entry.Urgency,
                                     Condition = string.IsNullOrWhiteSpace(condition) ? null : condition
                                 };
-                                await onSaveAsync(new PlannedEvents(events.Entries.Select(x => x.Id == entry.Id ? updated : x).ToArray()));
+                                var saved = await onSaveAsync(new PlannedEvents(currentEvents.Entries.Select(x => x.Id == entry.Id ? updated : x).ToArray()));
+                                if (saved is not null) currentEvents = saved;
                             }),
                             Ui.DestructiveButton("Remove", async (_, _) =>
                             {
@@ -94,7 +98,8 @@ internal static class PlannedEventsView
                                     ? $"\"{entry.Description}\" is a mandatory Planned Event. Remove it anyway?"
                                     : $"Remove \"{entry.Description}\" from Planned Events?";
                                 if (!await page.DisplayAlertAsync("Remove Planned Event?", prompt, "Remove", "Cancel")) return;
-                                await onSaveAsync(new PlannedEvents(events.Entries.Where(x => x.Id != entry.Id).ToArray()));
+                                var saved = await onSaveAsync(new PlannedEvents(currentEvents.Entries.Where(x => x.Id != entry.Id).ToArray()));
+                                if (saved is not null) currentEvents = saved;
                             })),
                         new Label { Text = $"Stable ID: {entry.Id:D}", FontSize = 11 }
                     }
@@ -164,7 +169,8 @@ internal static class PlannedEventsView
                     int.TryParse(newUrgency.SelectedItem?.ToString(), out var parsedNewUrgency) ? parsedNewUrgency : 3,
                     string.IsNullOrWhiteSpace(condition) ? null : condition,
                     newEntryRelevantTurn);
-                await onSaveAsync(new PlannedEvents(events.Entries.Append(added).ToArray()));
+                var saved = await onSaveAsync(new PlannedEvents(currentEvents.Entries.Append(added).ToArray()));
+                if (saved is not null) currentEvents = saved;
             }),
             Ui.SecondaryButton("Cancel", (_, _) =>
             {
@@ -175,8 +181,8 @@ internal static class PlannedEventsView
                 addForm.IsVisible = false;
             })));
 
-        var serializedBytes = JsonSerializer.SerializeToUtf8Bytes(events).Length;
-        body.Children.Add(new Label { Text = $"{events.Entries.Count} active Planned Events; {serializedBytes:N0} serialized bytes" });
+        var serializedBytes = JsonSerializer.SerializeToUtf8Bytes(currentEvents).Length;
+        body.Children.Add(new Label { Text = $"{currentEvents.Entries.Count} active Planned Events; {serializedBytes:N0} serialized bytes" });
         body.Children.Add(Ui.SecondaryButton("Add Planned Event", (_, _) => addForm.IsVisible = !addForm.IsVisible));
         body.Children.Add(addForm);
         body.Children.Add(search);
