@@ -12,6 +12,7 @@ internal static class PlannedEventsView
         var currentEvents = events;
         var body = new VerticalStackLayout { IsVisible = alwaysExpanded, Spacing = 8 };
         var entries = new VerticalStackLayout { Spacing = 8 };
+        var summary = new Label();
         var search = new SearchBar { Placeholder = "Search description" };
         var importance = new Picker { Title = "All importance levels" };
         importance.ItemsSource = new[] { "All importance levels" }
@@ -90,7 +91,11 @@ internal static class PlannedEventsView
                                     Condition = string.IsNullOrWhiteSpace(condition) ? null : condition
                                 };
                                 var saved = await onSaveAsync(new PlannedEvents(currentEvents.Entries.Select(x => x.Id == entry.Id ? updated : x).ToArray()));
-                                if (saved is not null) currentEvents = saved;
+                                if (saved is not null)
+                                {
+                                    currentEvents = saved;
+                                    RenderAfterSave();
+                                }
                             }),
                             Ui.DestructiveButton("Remove", async (_, _) =>
                             {
@@ -99,7 +104,11 @@ internal static class PlannedEventsView
                                     : $"Remove \"{entry.Description}\" from Planned Events?";
                                 if (!await page.DisplayAlertAsync("Remove Planned Event?", prompt, "Remove", "Cancel")) return;
                                 var saved = await onSaveAsync(new PlannedEvents(currentEvents.Entries.Where(x => x.Id != entry.Id).ToArray()));
-                                if (saved is not null) currentEvents = saved;
+                                if (saved is not null)
+                                {
+                                    currentEvents = saved;
+                                    RenderAfterSave();
+                                }
                             })),
                         new Label { Text = $"Stable ID: {entry.Id:D}", FontSize = 11 }
                     }
@@ -117,6 +126,18 @@ internal static class PlannedEventsView
                     }
                 });
             }
+        }
+
+        void RenderAfterSave()
+        {
+            // Replace only the event rows after the native Click dispatch has completed. This makes
+            // successful Add/Remove actions visible without rebuilding the Story Definition page.
+            page.Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(50), () =>
+            {
+                Render();
+                var bytes = JsonSerializer.SerializeToUtf8Bytes(currentEvents).Length;
+                summary.Text = $"{currentEvents.Entries.Count} active Planned Events; {bytes:N0} serialized bytes";
+            });
         }
 
         search.TextChanged += (_, _) => Render();
@@ -170,7 +191,11 @@ internal static class PlannedEventsView
                     string.IsNullOrWhiteSpace(condition) ? null : condition,
                     newEntryRelevantTurn);
                 var saved = await onSaveAsync(new PlannedEvents(currentEvents.Entries.Append(added).ToArray()));
-                if (saved is not null) currentEvents = saved;
+                if (saved is not null)
+                {
+                    currentEvents = saved;
+                    RenderAfterSave();
+                }
             }),
             Ui.SecondaryButton("Cancel", (_, _) =>
             {
@@ -182,7 +207,8 @@ internal static class PlannedEventsView
             })));
 
         var serializedBytes = JsonSerializer.SerializeToUtf8Bytes(currentEvents).Length;
-        body.Children.Add(new Label { Text = $"{currentEvents.Entries.Count} active Planned Events; {serializedBytes:N0} serialized bytes" });
+        summary.Text = $"{currentEvents.Entries.Count} active Planned Events; {serializedBytes:N0} serialized bytes";
+        body.Children.Add(summary);
         body.Children.Add(Ui.SecondaryButton("Add Planned Event", (_, _) => addForm.IsVisible = !addForm.IsVisible));
         body.Children.Add(addForm);
         body.Children.Add(search);
