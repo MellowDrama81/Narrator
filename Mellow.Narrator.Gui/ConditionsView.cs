@@ -8,15 +8,18 @@ namespace Mellow.Narrator.Gui;
 // and no per-entry expand/collapse - just a flat list of description + secret checkbox rows.
 internal static class ConditionsView
 {
-    public static View Create(Page page, StoryConditions conditions, ContentLimitSettings limits, Func<StoryConditions, Task> onSaveAsync, bool alwaysExpanded = false)
+    public static View Create(Page page, StoryConditions conditions, ContentLimitSettings limits, Func<StoryConditions, Task<StoryConditions?>> onSaveAsync, bool alwaysExpanded = false)
     {
+        // Retain the persisted state without replacing this view during the native button's Click
+        // event; replacing the parent page at that point can cause a WinUI COMException.
+        var currentConditions = conditions;
         var body = new VerticalStackLayout { IsVisible = alwaysExpanded, Spacing = 8 };
         var entries = new VerticalStackLayout { Spacing = 8 };
 
         void Render()
         {
             entries.Children.Clear();
-            foreach (var entry in conditions.Entries)
+            foreach (var entry in currentConditions.Entries)
             {
                 var descriptionInput = new Editor
                 {
@@ -48,12 +51,14 @@ internal static class ConditionsView
                                     return;
                                 }
                                 var updated = entry with { Description = description, Secret = secretInput.IsChecked };
-                                await onSaveAsync(new StoryConditions(conditions.Entries.Select(x => x.Id == entry.Id ? updated : x).ToArray()));
+                                var saved = await onSaveAsync(new StoryConditions(currentConditions.Entries.Select(x => x.Id == entry.Id ? updated : x).ToArray()));
+                                if (saved is not null) currentConditions = saved;
                             }),
                             Ui.DestructiveButton("Remove", async (_, _) =>
                             {
                                 if (!await page.DisplayAlertAsync("Remove condition?", $"Remove \"{entry.Description}\"?", "Remove", "Cancel")) return;
-                                await onSaveAsync(new StoryConditions(conditions.Entries.Where(x => x.Id != entry.Id).ToArray()));
+                                var saved = await onSaveAsync(new StoryConditions(currentConditions.Entries.Where(x => x.Id != entry.Id).ToArray()));
+                                if (saved is not null) currentConditions = saved;
                             })),
                         new Label { Text = $"Stable ID: {entry.Id:D}", FontSize = 11 }
                     }
@@ -95,7 +100,8 @@ internal static class ConditionsView
                     return;
                 }
                 var added = new StoryCondition(Guid.Empty, description, newSecret.IsChecked);
-                await onSaveAsync(new StoryConditions(conditions.Entries.Append(added).ToArray()));
+                var saved = await onSaveAsync(new StoryConditions(currentConditions.Entries.Append(added).ToArray()));
+                if (saved is not null) currentConditions = saved;
             }),
             Ui.SecondaryButton("Cancel", (_, _) =>
             {
@@ -104,8 +110,8 @@ internal static class ConditionsView
                 addForm.IsVisible = false;
             })));
 
-        var serializedBytes = JsonSerializer.SerializeToUtf8Bytes(conditions).Length;
-        body.Children.Add(new Label { Text = $"{conditions.Entries.Count} conditions; {serializedBytes:N0} serialized bytes" });
+        var serializedBytes = JsonSerializer.SerializeToUtf8Bytes(currentConditions).Length;
+        body.Children.Add(new Label { Text = $"{currentConditions.Entries.Count} conditions; {serializedBytes:N0} serialized bytes" });
         body.Children.Add(Ui.SecondaryButton("Add Condition", (_, _) => addForm.IsVisible = !addForm.IsVisible));
         body.Children.Add(addForm);
         body.Children.Add(entries);

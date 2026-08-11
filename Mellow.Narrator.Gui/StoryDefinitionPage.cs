@@ -226,16 +226,16 @@ public sealed class StoryDefinitionPage : ContentPage, IPendingOperationPage, IC
         catch (Exception ex) { await Ui.Error(this, ex); return null; }
     }
 
-    private async Task SaveVictoryConditionsAsync(StoryConditions next)
+    private async Task<StoryConditions?> SaveVictoryConditionsAsync(StoryConditions next)
     {
-        try { await _application.UpdateInitialVictoryConditionsAsync(_id, next); RefreshAfterEditorClick(); }
-        catch (Exception ex) { await Ui.Error(this, ex); }
+        try { return (await _application.UpdateInitialVictoryConditionsAsync(_id, next)).InitialVictoryConditions; }
+        catch (Exception ex) { await Ui.Error(this, ex); return null; }
     }
 
-    private async Task SaveLossConditionsAsync(StoryConditions next)
+    private async Task<StoryConditions?> SaveLossConditionsAsync(StoryConditions next)
     {
-        try { await _application.UpdateInitialLossConditionsAsync(_id, next); RefreshAfterEditorClick(); }
-        catch (Exception ex) { await Ui.Error(this, ex); }
+        try { return (await _application.UpdateInitialLossConditionsAsync(_id, next)).InitialLossConditions; }
+        catch (Exception ex) { await Ui.Error(this, ex); return null; }
     }
 
     private void RefreshAfterEditorClick()
