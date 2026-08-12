@@ -37,6 +37,8 @@ public sealed class SettingsTests
             templates.StoryNarrationInstruction);
         Assert.Contains("Condition gate: treat a planned event's non-null condition as a hard lock", templates.StoryNarrationInstruction);
         Assert.Contains("locked event until a later turn", templates.StoryNarrationInstruction);
+        Assert.Contains("Pacing and progression: every response must do both", templates.StoryNarrationInstruction);
+        Assert.Contains("leave the player in a materially new situation", templates.StoryNarrationInstruction);
     }
 
     [Fact]
