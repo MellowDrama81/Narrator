@@ -24,7 +24,7 @@ describe('SettingsComponent', () => {
     const element = fixture.nativeElement as HTMLElement;
 
     expect(element.textContent).toContain('OpenAI-compatible API');
-    expect(element.querySelectorAll('input')).toHaveLength(42);
+    expect(element.querySelectorAll('input')).toHaveLength(53);
     expect(element.textContent).toContain('Save settings');
   });
 

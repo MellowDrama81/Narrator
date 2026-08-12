@@ -14,10 +14,12 @@ namespace Mellow.Narrator.OpenAiCompatible;
 public sealed class OpenAiCompatibleProvider(
     HttpClient httpClient,
     TimeProvider timeProvider,
-    ILogger<OpenAiCompatibleProvider>? logger = null) : ILanguageModelProvider
+    ILogger<OpenAiCompatibleProvider>? logger = null,
+    ISecureStorageService? secureStorage = null) : ILanguageModelProvider
 {
     private readonly ILogger<OpenAiCompatibleProvider> _logger =
         logger ?? NullLogger<OpenAiCompatibleProvider>.Instance;
+    private readonly ISecureStorageService? _secureStorage = secureStorage;
 
     private static readonly PromptTemplateSettings Templates = PromptTemplateDefaults.Create();
 
@@ -109,7 +111,8 @@ public sealed class OpenAiCompatibleProvider(
             messages,
             DefinitionSchema(settings),
             node => ParseDefinitionResponse(node, settings),
-            cancellationToken);
+            cancellationToken,
+            GenerationCall.StoryDefinition);
     }
 
     public Task<StoryGenerationResponse> GenerateOpeningAsync(
@@ -279,21 +282,35 @@ public sealed class OpenAiCompatibleProvider(
     }
 
     private async Task<string> GenerateStageAsync(
-        ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> baseMessages, string instruction, CancellationToken cancellationToken)
+        ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> baseMessages, string instruction,
+        CancellationToken cancellationToken, GenerationCall generationCall = GenerationCall.Turn)
     {
+        generationCall = generationCall == GenerationCall.Turn ? StageCall(instruction) : generationCall;
         var messages = baseMessages.Concat([Message("system", instruction)]).ToArray();
         return await CompleteWithCorrectionAsync(
             settings, credential, messages, StageSchema(),
-            node => RequiredString(node, "result"), cancellationToken);
+            node => RequiredString(node, "result"), cancellationToken, generationCall);
     }
 
     private async Task<NarrationDraft> GenerateNarrationDraftAsync(
-        ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> baseMessages, string instruction, CancellationToken cancellationToken)
+        ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> baseMessages, string instruction,
+        CancellationToken cancellationToken, GenerationCall generationCall = GenerationCall.Narration)
     {
         var messages = baseMessages.Concat([Message("system", instruction)]).ToArray();
         return await CompleteWithCorrectionAsync(
             settings, credential, messages, NarrationDraftSchema(settings),
-            node => ParseNarrationDraft(node, settings), cancellationToken);
+            node => ParseNarrationDraft(node, settings), cancellationToken, generationCall);
+    }
+
+    private static GenerationCall StageCall(string instruction)
+    {
+        if (instruction.Contains("turn adjudicator", StringComparison.Ordinal)) return GenerationCall.Adjudication;
+        if (instruction.Contains("scene planner", StringComparison.Ordinal)) return GenerationCall.ScenePlan;
+        if (instruction.Contains("continuity and rule critic", StringComparison.Ordinal)) return GenerationCall.PlanCritic;
+        if (instruction.Contains("Story Bible analyst", StringComparison.Ordinal)) return GenerationCall.StoryBibleAnalysis;
+        if (instruction.Contains("planned-event analyst", StringComparison.Ordinal)) return GenerationCall.PlannedEventAnalysis;
+        if (instruction.Contains("condition and summary analyst", StringComparison.Ordinal)) return GenerationCall.ConditionSummaryAnalysis;
+        return GenerationCall.Turn;
     }
 
     private async Task<T> CompleteWithCorrectionAsync<T>(
@@ -302,8 +319,12 @@ public sealed class OpenAiCompatibleProvider(
         IReadOnlyList<JsonObject> messages,
         JsonObject schema,
         Func<JsonObject, T> parseAndValidate,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        GenerationCall generationCall = GenerationCall.Turn)
     {
+        var resolved = await ResolveConnectionAsync(settings, credential, generationCall, cancellationToken);
+        settings = resolved.Settings;
+        credential = resolved.Credential;
         var tier = settings.Capabilities.StructuredOutputTier;
         if (tier is StructuredOutputTier.Untested or StructuredOutputTier.Unsupported) tier = StructuredOutputTier.PromptedJson;
         try
@@ -320,6 +341,25 @@ public sealed class OpenAiCompatibleProvider(
             ]).ToArray();
             return parseAndValidate(await CompleteAsync(settings, credential, corrected, schema, tier, cancellationToken));
         }
+    }
+
+    private async Task<(ApiConnectionSettings Settings, string? Credential)> ResolveConnectionAsync(
+        ApiConnectionSettings settings, string? fallbackCredential, GenerationCall generationCall, CancellationToken cancellationToken)
+    {
+        if (!settings.GenerationCallRoutes.TryGetValue(generationCall, out var route) || route.ConnectionId is not { } connectionId)
+            return (settings, fallbackCredential);
+        var connection = settings.Connections.FirstOrDefault(candidate => candidate.Id == connectionId);
+        if (connection is null)
+            throw new NarratorException($"The connection selected for {generationCall} no longer exists.");
+        var credential = _secureStorage is null
+            ? fallbackCredential
+            : await _secureStorage.GetAsync(SecureStorageKeys.ApiCredentialForConnection(connection.Id), cancellationToken);
+        return (settings with
+        {
+            BaseUrl = connection.BaseUrl,
+            ModelId = string.IsNullOrWhiteSpace(route.ModelId) ? settings.ModelId : route.ModelId,
+            Capabilities = connection.Capabilities
+        }, credential);
     }
 
     private async Task<JsonObject> CompleteAsync(

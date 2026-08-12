@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { DbService } from './db.service';
 import {
-  AppSettings, DefinitionGeneration, InstructionMessageRole, OutputTokenParameter, PlannedEventUpdate,
+  AppSettings, DefinitionGeneration, GenerationCall, InstructionMessageRole, OutputTokenParameter, PlannedEventUpdate,
   StoryBibleUpdate, StoryCondition, StoryDefinition, StoryState, StructuredOutputTier, TurnGeneration,
 } from './models';
 import { plannedEventCapacity } from './planned-events';
@@ -170,7 +170,7 @@ export class LlmService {
   }
 
   async generateDefinition(settings: AppSettings, storyDefinitionPrompt: string): Promise<DefinitionGeneration> {
-    return this.completeWithCorrection(settings, [
+    return this.completeWithCorrection(this.connectionSettings(settings, 'storyDefinition'), [
       { role: 'system', content: promptTemplates.storyDefinitionInstruction },
       { role: 'user', content: storyDefinitionPrompt },
     ], this.definitionSchema(settings), value => this.parseDefinition(value));
@@ -291,7 +291,7 @@ export class LlmService {
     });
 
     if (settings.turnPipeline === 'oneCall')
-      return this.completeWithCorrection(settings, messages, this.turnSchema(settings), value =>
+      return this.completeWithCorrection(this.connectionSettings(settings, 'turn'), messages, this.turnSchema(settings), value =>
         this.parseTurn(value, settings, next, action, turns, victory, loss));
 
     if (settings.turnPipeline === 'twoCalls')
@@ -353,7 +353,7 @@ export class LlmService {
       'You are the scene planner. Using this adjudication, plan concrete scene beats that materially change the situation and end at the next player decision. Do not write final prose.\nADJUDICATION:\n' + adjudication);
     const draft = await this.generateNarrationDraft(settings, baseMessages,
       'You are the narrator. Write only the player-facing narration and suggested actions from this approved scene plan. Do not make new rule, condition, or state decisions.\nSCENE PLAN:\n' + scenePlan);
-    const extracted = await this.completeWithCorrection(settings, [
+    const extracted = await this.completeWithCorrection(this.connectionSettings(settings, 'stateExtraction'), [
       ...baseMessages,
       {
         role: 'system',
@@ -396,7 +396,7 @@ export class LlmService {
           await this.generateStage(settings, baseMessages, eventInstruction),
           await this.generateStage(settings, baseMessages, outcomeInstruction),
         ];
-    const extracted = await this.completeWithCorrection(settings, [
+    const extracted = await this.completeWithCorrection(this.connectionSettings(settings, 'stateExtraction'), [
       ...baseMessages,
       {
         role: 'system',
@@ -412,12 +412,12 @@ export class LlmService {
     const extracted = await this.generateTurnWithSevenCallPipeline(settings, baseMessages, next, action, turns, victory, loss);
     const revised = await this.generateNarrationDraft(settings, baseMessages,
       'You are a player-facing prose editor. Rewrite the supplied narration and suggested actions for clarity and vivid pacing while preserving every fact, outcome, condition status, and decision exactly. Do not add events or state changes.\nAPPROVED TURN:\n' +
-      JSON.stringify({ narration: extracted.narration, suggestedActions: extracted.suggestedActions, storySummary: extracted.storySummary }));
+      JSON.stringify({ narration: extracted.narration, suggestedActions: extracted.suggestedActions, storySummary: extracted.storySummary }), 'proseRevision');
     return { ...extracted, narration: revised.narration, suggestedActions: revised.suggestedActions };
   }
 
   private async extractTurn(settings: AppSettings, baseMessages: Message[], artifacts: object, next: number, action: string | null, turns: StoryState['turns'], victory: ConditionsContext, loss: ConditionsContext, draft: { narration: string; suggestedActions: string[] }): Promise<TurnGeneration> {
-    const extracted = await this.completeWithCorrection(settings, [
+    const extracted = await this.completeWithCorrection(this.connectionSettings(settings, 'stateExtraction'), [
       ...baseMessages,
       { role: 'system', content: 'You are the state extractor. Preserve the supplied narration and suggested actions exactly. Return the complete turn JSON, deriving only Story Bible updates, Planned Event updates, condition reports, and the replacement summary from the approved artifacts.' },
       { role: 'user', content: JSON.stringify(artifacts) },
@@ -425,8 +425,16 @@ export class LlmService {
     return { ...extracted, narration: draft.narration, suggestedActions: draft.suggestedActions };
   }
 
-  private async generateStage(settings: AppSettings, baseMessages: Message[], instruction: string): Promise<string> {
-    return this.completeWithCorrection(settings, [...baseMessages, { role: 'system', content: instruction }],
+  private connectionSettings(settings: AppSettings, call: GenerationCall): AppSettings {
+    const route = settings.generationCallRoutes?.[call];
+    const connection = settings.connections?.find(candidate => candidate.id === route?.connectionId) ?? settings.connections?.[0];
+    if (!connection) return settings;
+    return { ...settings, baseUrl: connection.baseUrl, apiKey: connection.apiKey, modelId: route?.modelId || settings.modelId };
+  }
+
+  private async generateStage(settings: AppSettings, baseMessages: Message[], instruction: string, call: GenerationCall = 'turn'): Promise<string> {
+    const routedCall = call === 'turn' ? this.stageCall(instruction) : call;
+    return this.completeWithCorrection(this.connectionSettings(settings, routedCall), [...baseMessages, { role: 'system', content: instruction }],
       this.stageSchema(), value => {
         const result = value['result'];
         if (typeof result !== 'string' || !result.trim()) throw new Error('The pipeline stage returned no result.');
@@ -434,10 +442,20 @@ export class LlmService {
       });
   }
 
+  private stageCall(instruction: string): GenerationCall {
+    if (instruction.includes('turn adjudicator')) return 'adjudication';
+    if (instruction.includes('scene planner')) return 'scenePlan';
+    if (instruction.includes('continuity and rule critic')) return 'planCritic';
+    if (instruction.includes('Story Bible analyst')) return 'storyBibleAnalysis';
+    if (instruction.includes('planned-event analyst')) return 'plannedEventAnalysis';
+    if (instruction.includes('condition and summary analyst')) return 'conditionSummaryAnalysis';
+    return 'turn';
+  }
+
   private async generateNarrationDraft(
-    settings: AppSettings, baseMessages: Message[], instruction: string,
+    settings: AppSettings, baseMessages: Message[], instruction: string, call: GenerationCall = 'narration',
   ): Promise<{ narration: string; suggestedActions: string[] }> {
-    return this.completeWithCorrection(settings, [...baseMessages, { role: 'system', content: instruction }],
+    return this.completeWithCorrection(this.connectionSettings(settings, call), [...baseMessages, { role: 'system', content: instruction }],
       this.narrationDraftSchema(settings), value => {
         const narration = value['narration'];
         const suggestedActions = value['suggestedActions'];

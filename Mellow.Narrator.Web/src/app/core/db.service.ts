@@ -115,7 +115,17 @@ export class DbService {
   }
 
   async settings(): Promise<AppSettings> {
-    return { ...defaultSettings(), ...(await this.get<AppSettings>('settings', 'app')) };
+    const settings = { ...defaultSettings(), ...(await this.get<AppSettings>('settings', 'app')) };
+    // Migrate the original single browser connection into a named profile on first read.
+    if (!settings.connections?.length) {
+      const connection = { id: 'default', name: 'Default connection', baseUrl: settings.baseUrl, apiKey: settings.apiKey };
+      settings.connections = [connection];
+      settings.generationCallRoutes = Object.fromEntries([
+        'storyDefinition', 'turn', 'adjudication', 'scenePlan', 'planCritic', 'narration',
+        'storyBibleAnalysis', 'plannedEventAnalysis', 'conditionSummaryAnalysis', 'stateExtraction', 'proseRevision',
+      ].map(call => [call, { connectionId: connection.id, modelId: settings.modelId }]));
+    }
+    return settings;
   }
 
   saveSettings(settings: AppSettings): Promise<void> { return this.put('settings', settings); }

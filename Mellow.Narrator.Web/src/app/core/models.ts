@@ -143,6 +143,9 @@ export type OutputTokenParameter = 'maxCompletionTokens' | 'maxTokens';
 // system-level instructions.
 export type InstructionMessageRole = 'system' | 'developer';
 export type TurnPipelineMode = 'oneCall' | 'twoCalls' | 'threeCalls' | 'fourCalls' | 'fiveCalls' | 'sevenCalls' | 'sevenCallsParallel' | 'eightCalls';
+export type GenerationCall = 'storyDefinition' | 'turn' | 'adjudication' | 'scenePlan' | 'planCritic' | 'narration' | 'storyBibleAnalysis' | 'plannedEventAnalysis' | 'conditionSummaryAnalysis' | 'stateExtraction' | 'proseRevision';
+export interface ApiConnectionProfile { id: string; name: string; baseUrl: string; apiKey: string; }
+export interface GenerationCallRoute { connectionId: string; modelId: string; }
 
 export interface AppSettings {
   key: 'app';
@@ -190,6 +193,8 @@ export interface AppSettings {
   retryMaxRetryAfterSeconds: number;
   // Experimental: split each story turn into focused calls that can be compared with one another.
   turnPipeline: TurnPipelineMode;
+  connections: ApiConnectionProfile[];
+  generationCallRoutes: Partial<Record<GenerationCall, GenerationCallRoute>>;
   // Connection-capability state, learned by probing the provider (see ConnectionCapabilities in
   // Settings.cs). Not user-editable - a later agent negotiates/probes and persists these
   // automatically. Whenever baseUrl or modelId changes, these get reset back toward their untested

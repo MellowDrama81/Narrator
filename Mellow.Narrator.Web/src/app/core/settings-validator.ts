@@ -42,6 +42,16 @@ export function validateSettings(settings: AppSettings): Record<string, string> 
   if (settings.baseUrl && !isAbsoluteHttpUrl(settings.baseUrl)) {
     errors['baseUrl'] = 'Must be an absolute http or https URL.';
   }
+  const names = new Set<string>();
+  for (const connection of settings.connections ?? []) {
+    const name = connection.name.trim().toLocaleLowerCase();
+    if (!name || connection.name.length > 100 || names.has(name)) errors['connections'] = 'Connection names must be unique and at most 100 characters.';
+    names.add(name);
+    if (connection.baseUrl && !isAbsoluteHttpUrl(connection.baseUrl)) errors['connections'] = 'Each connection needs an absolute http or https URL.';
+  }
+  const ids = new Set((settings.connections ?? []).map(connection => connection.id));
+  if (Object.values(settings.generationCallRoutes ?? {}).some(route => route?.connectionId && !ids.has(route.connectionId)))
+    errors['generationCallRoutes'] = 'A generation call references a removed connection.';
 
   range(errors, 'requestTimeoutSeconds', settings.requestTimeoutSeconds, 10, 900);
   range(errors, 'maxOutputTokens', settings.maxOutputTokens, 256, 131072);

@@ -83,6 +83,18 @@ public enum StructuredOutputTier { Untested, StrictJsonSchema, JsonMode, Prompte
 public enum OutputTokenParameter { MaxCompletionTokens, MaxTokens }
 public enum InstructionMessageRole { Developer, System }
 public enum TurnPipelineMode { OneCall, TwoCalls, ThreeCalls, FourCalls, FiveCalls, SevenCalls, SevenCallsParallel, EightCalls }
+public enum GenerationCall { StoryDefinition, Turn, Adjudication, ScenePlan, PlanCritic, Narration, StoryBibleAnalysis, PlannedEventAnalysis, ConditionSummaryAnalysis, StateExtraction, ProseRevision }
+
+// A connection is intentionally credentials-free. MAUI stores each profile's API key in platform
+// secure storage; the web app stores it in its local IndexedDB profile record.
+public sealed record ApiConnectionProfile(Guid Id, string Name, Uri? BaseUrl)
+{
+    public ConnectionCapabilities Capabilities { get; init; } = new(false, StructuredOutputTier.Untested, null, null);
+}
+
+// A call can choose both a connection and a model independently. A null connection/model inherits
+// the legacy/default connection/model, which makes old settings documents safe to migrate.
+public sealed record GenerationCallRoute(Guid? ConnectionId, string? ModelId);
 
 public sealed record ConnectionCapabilities(
     bool SupportsModelDiscovery,
@@ -108,6 +120,9 @@ public sealed record ApiConnectionSettings(
     public LoggingSettings Logging { get; init; } = LoggingDefaults.Create();
     // Experimental turn generation pipelines, retained side-by-side so providers/models can be compared.
     public TurnPipelineMode TurnPipeline { get; init; } = TurnPipelineMode.FourCalls;
+    public IReadOnlyList<ApiConnectionProfile> Connections { get; init; } = [];
+    public IReadOnlyDictionary<GenerationCall, GenerationCallRoute> GenerationCallRoutes { get; init; } =
+        new Dictionary<GenerationCall, GenerationCallRoute>();
 }
 
 public static class NarratorDefaults
@@ -173,6 +188,21 @@ public static class SettingsValidator
         var errors = new Dictionary<string, string>();
         if (value.BaseUrl is { } baseUrl && (!baseUrl.IsAbsoluteUri || baseUrl.Scheme is not ("http" or "https")))
             errors[nameof(value.BaseUrl)] = "Must be an absolute http or https URL.";
+        var duplicateConnectionNames = value.Connections
+            .Where(connection => !string.IsNullOrWhiteSpace(connection.Name))
+            .GroupBy(connection => connection.Name.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Any(group => group.Count() > 1);
+        if (duplicateConnectionNames) errors[nameof(value.Connections)] = "Connection names must be unique.";
+        foreach (var connection in value.Connections)
+        {
+            if (connection.Id == Guid.Empty || string.IsNullOrWhiteSpace(connection.Name) || connection.Name.Length > 100)
+                errors[nameof(value.Connections)] = "Each connection needs a unique name of at most 100 characters.";
+            if (connection.BaseUrl is not null && (!connection.BaseUrl.IsAbsoluteUri || connection.BaseUrl.Scheme is not ("http" or "https")))
+                errors[nameof(value.Connections)] = "Each connection URL must be an absolute http or https URL.";
+        }
+        var connectionIds = value.Connections.Select(connection => connection.Id).ToHashSet();
+        if (value.GenerationCallRoutes.Values.Any(route => route.ConnectionId is { } id && !connectionIds.Contains(id)))
+            errors[nameof(value.GenerationCallRoutes)] = "A call is assigned to a connection that no longer exists.";
         Range(errors, nameof(value.RequestTimeout), value.RequestTimeout.TotalSeconds, 10, 900);
         Range(errors, nameof(value.MaxOutputTokens), value.MaxOutputTokens, 256, 131072);
         OptionalRange(errors, "Temperature", value.Parameters.Temperature, 0, 2);
@@ -247,4 +277,5 @@ public static class SettingsValidator
 public static class SecureStorageKeys
 {
     public const string ApiCredential = "mellow-narrator.api-credential";
+    public static string ApiCredentialForConnection(Guid connectionId) => $"mellow-narrator.api-credential.{connectionId:N}";
 }

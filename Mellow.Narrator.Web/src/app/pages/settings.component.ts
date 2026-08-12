@@ -13,7 +13,7 @@ import { RouterLink } from '@angular/router';
 import { DbService } from '../core/db.service';
 import { defaultSettings } from '../core/defaults';
 import { LlmService } from '../core/llm.service';
-import { AppSettings } from '../core/models';
+import { ApiConnectionProfile, AppSettings, GenerationCall } from '../core/models';
 import { validateSettings } from '../core/settings-validator';
 
 @Component({
@@ -78,6 +78,38 @@ import { validateSettings } from '../core/settings-validator';
     </mat-card>
 
     <mat-accordion multi>
+      <mat-expansion-panel expanded>
+        <mat-expansion-panel-header>
+          <mat-panel-title>Saved API connections</mat-panel-title>
+          <mat-panel-description>Named endpoints and keys stored in this browser</mat-panel-description>
+        </mat-expansion-panel-header>
+        @for (connection of settings.connections; track connection.id; let index = $index) {
+          <mat-card class="row-card connection-card">
+            <mat-card-content>
+              <div class="form-grid compact">
+                <mat-form-field appearance="outline"><mat-label>Name</mat-label><input matInput [(ngModel)]="connection.name"></mat-form-field>
+                <mat-form-field appearance="outline"><mat-label>Base URL</mat-label><input matInput [(ngModel)]="connection.baseUrl"></mat-form-field>
+                <mat-form-field appearance="outline"><mat-label>API key</mat-label><input matInput type="password" [(ngModel)]="connection.apiKey" autocomplete="off"></mat-form-field>
+              </div>
+              <button mat-button color="warn" (click)="removeConnection(index)" [disabled]="settings.connections.length === 1">Remove</button>
+            </mat-card-content>
+          </mat-card>
+        }
+        <div class="actions"><button mat-stroked-button (click)="addConnection()">Add connection</button></div>
+      </mat-expansion-panel>
+      <mat-expansion-panel>
+        <mat-expansion-panel-header>
+          <mat-panel-title>Generation call routing</mat-panel-title>
+          <mat-panel-description>Choose connection and model independently for every LLM call</mat-panel-description>
+        </mat-expansion-panel-header>
+        @for (call of generationCalls; track call) {
+          <div class="form-grid compact call-route">
+            <label>{{ callLabel(call) }}</label>
+            <mat-form-field appearance="outline"><mat-label>Connection</mat-label><mat-select [(ngModel)]="route(call).connectionId">@for (connection of settings.connections; track connection.id) { <mat-option [value]="connection.id">{{ connection.name }}</mat-option> }</mat-select></mat-form-field>
+            <mat-form-field appearance="outline"><mat-label>Model</mat-label><input matInput [(ngModel)]="route(call).modelId" placeholder="Model ID"></mat-form-field>
+          </div>
+        }
+      </mat-expansion-panel>
       <mat-expansion-panel expanded>
         <mat-expansion-panel-header>
           <mat-panel-title>Generation</mat-panel-title>
@@ -188,6 +220,7 @@ export class SettingsComponent implements OnInit {
   models: string[] = [];
   busy = false;
   storageError = '';
+  readonly generationCalls: GenerationCall[] = ['storyDefinition', 'turn', 'adjudication', 'scenePlan', 'planCritic', 'narration', 'storyBibleAnalysis', 'plannedEventAnalysis', 'conditionSummaryAnalysis', 'stateExtraction', 'proseRevision'];
 
   // The baseUrl/modelId last known to be persisted, so a save can tell whether the connection is
   // changing and reset the negotiated capability state accordingly (mirrors
@@ -241,6 +274,32 @@ export class SettingsComponent implements OnInit {
 
   reset(): void {
     this.settings = defaultSettings();
+  }
+
+  addConnection(): void {
+    const id = crypto.randomUUID();
+    this.settings.connections.push({ id, name: `Connection ${this.settings.connections.length + 1}`, baseUrl: '', apiKey: '' });
+  }
+
+  removeConnection(index: number): void {
+    const [removed] = this.settings.connections.splice(index, 1);
+    const fallback = this.settings.connections[0];
+    for (const call of this.generationCalls) {
+      const route = this.route(call);
+      if (route.connectionId === removed.id) route.connectionId = fallback.id;
+    }
+  }
+
+  route(call: GenerationCall): { connectionId: string; modelId: string } {
+    const existing = this.settings.generationCallRoutes[call];
+    if (existing) return existing;
+    const route = { connectionId: this.settings.connections[0]?.id ?? '', modelId: this.settings.modelId };
+    this.settings.generationCallRoutes[call] = route;
+    return route;
+  }
+
+  callLabel(call: GenerationCall): string {
+    return call.replace(/([A-Z])/g, ' $1').replace(/^./, value => value.toUpperCase());
   }
 
   // Validates, resets negotiated connection capabilities if the endpoint or model changed, and saves.

@@ -34,6 +34,17 @@ public sealed class NarratorApplication(
                 await secureStorage.GetAsync(SecureStorageKeys.ApiCredential, cancellationToken));
         }, cancellationToken);
 
+    public Task SaveConnectionCredentialAsync(Guid connectionId, string? credential, CancellationToken cancellationToken = default) =>
+        connectionCoordinator.RunExclusiveAsync(async () =>
+        {
+            var key = SecureStorageKeys.ApiCredentialForConnection(connectionId);
+            if (string.IsNullOrEmpty(credential)) await secureStorage.RemoveAsync(key, cancellationToken);
+            else await secureStorage.SetAsync(key, credential, cancellationToken);
+        }, cancellationToken);
+
+    public Task<string?> GetConnectionCredentialAsync(Guid connectionId, CancellationToken cancellationToken = default) =>
+        connectionCoordinator.RunExclusiveAsync(() => secureStorage.GetAsync(SecureStorageKeys.ApiCredentialForConnection(connectionId), cancellationToken), cancellationToken);
+
     public async Task SaveSettingsAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default)
     {
         var errors = SettingsValidator.Validate(settings);
