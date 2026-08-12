@@ -1363,11 +1363,75 @@ public sealed class ProviderTests
             provider.GenerateStoryDefinitionAsync(Settings(), null, "Story"));
     }
 
+    [Fact]
+    public async Task GenerateTurn_RetriesNarrationOutsideConfiguredParagraphAndSentenceRanges()
+    {
+        var requests = 0;
+        var handler = new StubHandler(_ =>
+        {
+            requests++;
+            var narration = requests == 1
+                ? "Only one short sentence."
+                : "The lock clicks open. Cold air spills over your hands.\n\nA narrow stair descends. A bell begins to ring below.";
+            return Task.FromResult(Response(JsonSerializer.Serialize(new
+            {
+                turnNumber = 1,
+                acknowledgedPlayerAction = "Open the door",
+                narration,
+                suggestedActions = new[] { "Descend", "Listen" },
+                relevantStoryBibleEntryIds = Array.Empty<string>(),
+                storyBibleUpdates = Array.Empty<object>(),
+                relevantPlannedEventIds = Array.Empty<string>(),
+                plannedEventUpdates = Array.Empty<object>(),
+                revealedVictoryConditionIds = Array.Empty<string>(),
+                metVictoryConditionIds = Array.Empty<string>(),
+                revealedLossConditionIds = Array.Empty<string>(),
+                metLossConditionIds = Array.Empty<string>(),
+                storySummary = ""
+            })));
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var settings = Settings() with
+        {
+            ContentLimits = Settings().ContentLimits with
+            {
+                MinParagraphsPerResponse = 2,
+                MaxParagraphsPerResponse = 2,
+                MinSentencesPerParagraph = 2,
+                MaxSentencesPerParagraph = 2
+            }
+        };
+        var context = new GenerationContext(
+            new("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty),
+            StoryBible.Empty,
+            PlannedEvents.Empty,
+            new(StoryConditions.Empty, [], []),
+            new(StoryConditions.Empty, [], []),
+            "",
+            [],
+            "Open the door",
+            1);
+
+        var result = await provider.GenerateTurnAsync(settings, null, context);
+
+        Assert.Equal(2, requests);
+        Assert.Contains("narrow stair", result.Narration);
+    }
+
     private static ApiConnectionSettings Settings() => NarratorDefaults.Create() with
     {
         BaseUrl = new("https://example.test/v1/"),
         ModelId = "story-model",
-        Capabilities = new(false, StructuredOutputTier.PromptedJson, "story-model", DateTimeOffset.UtcNow)
+        Capabilities = new(false, StructuredOutputTier.PromptedJson, "story-model", DateTimeOffset.UtcNow),
+        // Most provider tests exercise parsing concerns unrelated to prose length. Keep those
+        // fixtures compact; format enforcement has dedicated tests below.
+        ContentLimits = NarratorDefaults.Create().ContentLimits with
+        {
+            MinParagraphsPerResponse = 1,
+            MaxParagraphsPerResponse = 20,
+            MinSentencesPerParagraph = 1,
+            MaxSentencesPerParagraph = 20
+        }
     };
 
     private static HttpResponseMessage Response(string content)

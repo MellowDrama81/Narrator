@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Mellow.Narrator.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -680,6 +681,7 @@ public sealed class OpenAiCompatibleProvider(
         var narration = RequiredString(node, "narration");
         if (string.IsNullOrWhiteSpace(narration) || narration.Length > settings.ContentLimits.MaxNarrationCharacters)
             throw new JsonException("Narration is empty or exceeds the configured limit.");
+        ValidateNarrationStructure(narration, settings.ContentLimits);
         if (!opening && context.RecentTurns.Any(turn => IsSubstantiallyDuplicate(narration, turn.Narration)))
             throw new JsonException(
                 "The narration duplicates a recent scene. Advance the story by resolving currentPlayerAction instead.");
@@ -1058,6 +1060,27 @@ public sealed class OpenAiCompatibleProvider(
         return smaller > 0 &&
                intersection / (double)smaller >= 0.90 &&
                intersection / (double)union >= 0.80;
+    }
+
+    private static void ValidateNarrationStructure(string narration, ContentLimitSettings limits)
+    {
+        var paragraphs = Regex.Split(narration.Trim(), @"\r?\n\s*\r?\n")
+            .Where(paragraph => !string.IsNullOrWhiteSpace(paragraph))
+            .ToArray();
+        if (paragraphs.Length < limits.MinParagraphsPerResponse || paragraphs.Length > limits.MaxParagraphsPerResponse)
+            throw new JsonException(
+                $"Narration must contain {limits.MinParagraphsPerResponse} to {limits.MaxParagraphsPerResponse} paragraphs separated by blank lines; it contains {paragraphs.Length}.");
+
+        for (var index = 0; index < paragraphs.Length; index++)
+        {
+            // This is a format guard rather than linguistic analysis: ordinary sentence-ending
+            // punctuation gives models a clear, actionable correction when their prose is too short.
+            var sentences = Regex.Matches(paragraphs[index], "[.!?]+(?=\\s|$|[\\\"'\\u201d\\u2019)\\]])").Count;
+            if (sentences == 0 && !string.IsNullOrWhiteSpace(paragraphs[index])) sentences = 1;
+            if (sentences < limits.MinSentencesPerParagraph || sentences > limits.MaxSentencesPerParagraph)
+                throw new JsonException(
+                    $"Narration paragraph {index + 1} must contain {limits.MinSentencesPerParagraph} to {limits.MaxSentencesPerParagraph} sentences; it contains {sentences}.");
+        }
     }
 
     // Some models, when not constrained by a strict JSON schema (json_object mode or the PromptedJson
