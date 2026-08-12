@@ -105,6 +105,9 @@ public sealed record ApiConnectionSettings(
     ConnectionCapabilities Capabilities)
 {
     public LoggingSettings Logging { get; init; } = LoggingDefaults.Create();
+    // Experimental pipeline: separates turn decisions, scene planning, player-facing prose, and
+    // state extraction into distinct LLM calls. Kept configurable so providers/models can be compared.
+    public bool UseMultiCallTurnPipeline { get; init; } = true;
 }
 
 public static class NarratorDefaults

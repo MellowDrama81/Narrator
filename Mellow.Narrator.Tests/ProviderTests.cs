@@ -1365,11 +1365,49 @@ public sealed class ProviderTests
             provider.GenerateStoryDefinitionAsync(Settings(), null, "Story"));
     }
 
+    [Fact]
+    public async Task GenerateTurn_UsesFourCallPipelineAndReturnsNarrationDraft()
+    {
+        var requests = 0;
+        var handler = new StubHandler(_ =>
+        {
+            requests++;
+            var content = requests switch
+            {
+                1 => """{"result":"The action succeeds; conditional events remain blocked."}""",
+                2 => """{"result":"The door opens, revealing a choice at the stairs."}""",
+                3 => """{"narration":"The door gives beneath your hand. Cold air rises from the stairwell beyond.","suggestedActions":["Descend the stairs","Listen at the threshold"]}""",
+                4 => """{"turnNumber":1,"acknowledgedPlayerAction":"Open the door","narration":"This must be replaced by the narration draft.","suggestedActions":["This must be replaced","This must also be replaced"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[],"storySummary":"The door has opened."}""",
+                _ => throw new InvalidOperationException("The pipeline made an unexpected extra request.")
+            };
+            return Task.FromResult(Response(content));
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty),
+            StoryBible.Empty,
+            PlannedEvents.Empty,
+            new(StoryConditions.Empty, [], []),
+            new(StoryConditions.Empty, [], []),
+            "",
+            [],
+            "Open the door",
+            1);
+
+        var result = await provider.GenerateTurnAsync(Settings() with { UseMultiCallTurnPipeline = true }, null, context);
+
+        Assert.Equal(4, requests);
+        Assert.Equal("The door gives beneath your hand. Cold air rises from the stairwell beyond.", result.Narration);
+        Assert.Equal(["Descend the stairs", "Listen at the threshold"], result.SuggestedActions);
+        Assert.Equal("The door has opened.", result.StorySummary);
+    }
+
     private static ApiConnectionSettings Settings() => NarratorDefaults.Create() with
     {
         BaseUrl = new("https://example.test/v1/"),
         ModelId = "story-model",
-        Capabilities = new(false, StructuredOutputTier.PromptedJson, "story-model", DateTimeOffset.UtcNow)
+        Capabilities = new(false, StructuredOutputTier.PromptedJson, "story-model", DateTimeOffset.UtcNow),
+        UseMultiCallTurnPipeline = false
     };
 
     private static HttpResponseMessage Response(string content)

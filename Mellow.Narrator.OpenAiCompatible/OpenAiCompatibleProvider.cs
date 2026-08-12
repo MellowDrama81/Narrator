@@ -123,6 +123,8 @@ public sealed class OpenAiCompatibleProvider(
     private async Task<StoryGenerationResponse> GenerateStoryAsync(
         ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
     {
+        if (settings.UseMultiCallTurnPipeline)
+            return await GenerateStoryWithPipelineAsync(settings, credential, context, opening, cancellationToken);
         var messages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration, context, opening);
         return await CompleteWithCorrectionAsync(
             settings,
@@ -131,6 +133,53 @@ public sealed class OpenAiCompatibleProvider(
             TurnSchema(settings),
             node => ParseStoryResponse(node, settings, context, opening),
             cancellationToken);
+    }
+
+    // The player-facing answer is deliberately not asked to decide hidden state. Each intermediate
+    // artifact is supplied to the next call, making eligibility and pacing decisions inspectable and
+    // keeping the final extraction call focused on persistence rather than prose invention.
+    private async Task<StoryGenerationResponse> GenerateStoryWithPipelineAsync(
+        ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
+    {
+        var baseMessages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration, context, opening);
+        var adjudication = await GenerateStageAsync(
+            settings, credential, baseMessages,
+            "You are the turn adjudicator. Decide the outcome of the player action and whether each conditional planned event was already eligible before this turn. Return a compact internal decision; do not write player-facing prose.",
+            cancellationToken);
+        var scenePlan = await GenerateStageAsync(
+            settings, credential, baseMessages,
+            "You are the scene planner. Using this adjudication, plan concrete scene beats that materially change the situation and end at the next player decision. Do not write final prose.\nADJUDICATION:\n" + adjudication,
+            cancellationToken);
+        var draft = await GenerateNarrationDraftAsync(
+            settings, credential, baseMessages,
+            "You are the narrator. Write only the player-facing narration and suggested actions from this approved scene plan. Do not make new rule, condition, or state decisions.\nSCENE PLAN:\n" + scenePlan,
+            cancellationToken);
+        var extractionMessages = baseMessages.Concat([
+            Message("system", "You are the state extractor. Preserve the supplied narration and suggested actions exactly. Return the complete turn JSON, deriving only Story Bible updates, Planned Event updates, condition reports, and the replacement summary from the approved artifacts."),
+            Message("user", JsonSerializer.Serialize(new { adjudication, scenePlan, narration = draft.Narration, suggestedActions = draft.SuggestedActions }, Json))
+        ]).ToArray();
+        var extracted = await CompleteWithCorrectionAsync(
+            settings, credential, extractionMessages, TurnSchema(settings),
+            node => ParseStoryResponse(node, settings, context, opening), cancellationToken);
+        return extracted with { Narration = draft.Narration, SuggestedActions = draft.SuggestedActions };
+    }
+
+    private async Task<string> GenerateStageAsync(
+        ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> baseMessages, string instruction, CancellationToken cancellationToken)
+    {
+        var messages = baseMessages.Concat([Message("system", instruction)]).ToArray();
+        return await CompleteWithCorrectionAsync(
+            settings, credential, messages, StageSchema(),
+            node => RequiredString(node, "result"), cancellationToken);
+    }
+
+    private async Task<NarrationDraft> GenerateNarrationDraftAsync(
+        ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> baseMessages, string instruction, CancellationToken cancellationToken)
+    {
+        var messages = baseMessages.Concat([Message("system", instruction)]).ToArray();
+        return await CompleteWithCorrectionAsync(
+            settings, credential, messages, NarrationDraftSchema(settings),
+            node => ParseNarrationDraft(node, settings), cancellationToken);
     }
 
     private async Task<T> CompleteWithCorrectionAsync<T>(
@@ -849,6 +898,23 @@ public sealed class OpenAiCompatibleProvider(
             meta?["outputTokens"]?.GetValue<int?>());
     }
 
+    private static NarrationDraft ParseNarrationDraft(JsonObject node, ApiConnectionSettings settings)
+    {
+        RequireProperties(node, settings, "narration", "suggestedActions");
+        var narration = RequiredString(node, "narration");
+        if (string.IsNullOrWhiteSpace(narration) || narration.Length > settings.ContentLimits.MaxNarrationCharacters)
+            throw new JsonException("Narration is empty or exceeds the configured limit.");
+        var actions = RequiredArray(node, "suggestedActions")
+            .Select(item => StringValue(item, "A suggested action"))
+            .ToArray();
+        if (actions.Length < settings.ContentLimits.MinSuggestedActions || actions.Length > settings.ContentLimits.MaxSuggestedActions ||
+            actions.Any(action => string.IsNullOrWhiteSpace(action) || action.Length > settings.ContentLimits.MaxSuggestedActionCharacters))
+            throw new JsonException("Suggested actions do not meet the configured limits.");
+        return new(narration, actions);
+    }
+
+    private sealed record NarrationDraft(string Narration, IReadOnlyList<string> SuggestedActions);
+
     private static void ValidateProposedEntry(JsonObject entry, ApiConnectionSettings settings)
     {
         RequireProperties(entry, settings, "category", "name", "knownFacts", "secretFacts", "importance");
@@ -1054,6 +1120,23 @@ public sealed class OpenAiCompatibleProvider(
     }, ["turnNumber", "acknowledgedPlayerAction", "narration", "suggestedActions", "relevantStoryBibleEntryIds", "storyBibleUpdates",
         "relevantPlannedEventIds", "plannedEventUpdates",
         "revealedVictoryConditionIds", "metVictoryConditionIds", "revealedLossConditionIds", "metLossConditionIds", "storySummary"]);
+
+    private static JsonObject StageSchema() => ObjectSchema(new Dictionary<string, JsonNode?>
+    {
+        ["result"] = new JsonObject { ["type"] = "string", ["maxLength"] = 12000 }
+    }, ["result"]);
+
+    private static JsonObject NarrationDraftSchema(ApiConnectionSettings settings) => ObjectSchema(new Dictionary<string, JsonNode?>
+    {
+        ["narration"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxNarrationCharacters },
+        ["suggestedActions"] = new JsonObject
+        {
+            ["type"] = "array",
+            ["minItems"] = settings.ContentLimits.MinSuggestedActions,
+            ["maxItems"] = settings.ContentLimits.MaxSuggestedActions,
+            ["items"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxSuggestedActionCharacters }
+        }
+    }, ["narration", "suggestedActions"]);
 
     private static bool IsSubstantiallyDuplicate(string candidate, string previous)
     {
