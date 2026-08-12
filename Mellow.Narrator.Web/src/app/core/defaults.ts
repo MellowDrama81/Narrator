@@ -44,7 +44,7 @@ export const defaultSettings = (): AppSettings => ({
   retryInitialDelaySeconds: 1,
   retryMaxDelaySeconds: 10,
   retryMaxRetryAfterSeconds: 60,
-  useMultiCallTurnPipeline: true,
+  turnPipeline: 'fourCalls',
   structuredOutputTier: 'untested',
   outputTokenParameter: 'maxCompletionTokens',
   instructionMessageRole: 'developer',

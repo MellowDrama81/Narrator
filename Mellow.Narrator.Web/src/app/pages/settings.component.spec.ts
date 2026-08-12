@@ -24,7 +24,7 @@ describe('SettingsComponent', () => {
     const element = fixture.nativeElement as HTMLElement;
 
     expect(element.textContent).toContain('OpenAI-compatible API');
-    expect(element.querySelectorAll('input')).toHaveLength(43);
+    expect(element.querySelectorAll('input')).toHaveLength(42);
     expect(element.textContent).toContain('Save settings');
   });
 
@@ -141,7 +141,7 @@ describe('SettingsComponent', () => {
     expect(open).toHaveBeenCalledWith('Settings saved to this browser.', 'Dismiss', expect.anything());
   });
 
-  it('persists the multi-call pipeline choice', async () => {
+  it('persists the turn pipeline choice', async () => {
     const saveSettings = vi.fn().mockResolvedValue(undefined);
     await TestBed.configureTestingModule({
       imports: [SettingsComponent],
@@ -156,10 +156,10 @@ describe('SettingsComponent', () => {
     const fixture = TestBed.createComponent(SettingsComponent);
     fixture.detectChanges();
     await fixture.whenStable();
-    fixture.componentInstance.settings.useMultiCallTurnPipeline = false;
+    fixture.componentInstance.settings.turnPipeline = 'sevenCalls';
     await fixture.componentInstance.save();
 
-    expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ useMultiCallTurnPipeline: false }));
+    expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ turnPipeline: 'sevenCalls' }));
   });
 
   it('resets negotiated connection capabilities when the base URL changes', async () => {

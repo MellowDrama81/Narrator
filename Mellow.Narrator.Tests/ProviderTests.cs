@@ -1394,7 +1394,7 @@ public sealed class ProviderTests
             "Open the door",
             1);
 
-        var result = await provider.GenerateTurnAsync(Settings() with { UseMultiCallTurnPipeline = true }, null, context);
+        var result = await provider.GenerateTurnAsync(Settings() with { TurnPipeline = TurnPipelineMode.FourCalls }, null, context);
 
         Assert.Equal(4, requests);
         Assert.Equal("The door gives beneath your hand. Cold air rises from the stairwell beyond.", result.Narration);
@@ -1407,7 +1407,7 @@ public sealed class ProviderTests
         BaseUrl = new("https://example.test/v1/"),
         ModelId = "story-model",
         Capabilities = new(false, StructuredOutputTier.PromptedJson, "story-model", DateTimeOffset.UtcNow),
-        UseMultiCallTurnPipeline = false
+        TurnPipeline = TurnPipelineMode.OneCall
     };
 
     private static HttpResponseMessage Response(string content)

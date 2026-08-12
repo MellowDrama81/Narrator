@@ -142,6 +142,7 @@ export type OutputTokenParameter = 'maxCompletionTokens' | 'maxTokens';
 // Mirrors ConnectionCapabilities.InstructionMessageRole - which message role this provider accepts for
 // system-level instructions.
 export type InstructionMessageRole = 'system' | 'developer';
+export type TurnPipelineMode = 'oneCall' | 'fourCalls' | 'sevenCalls';
 
 export interface AppSettings {
   key: 'app';
@@ -187,8 +188,8 @@ export interface AppSettings {
   retryInitialDelaySeconds: number;
   retryMaxDelaySeconds: number;
   retryMaxRetryAfterSeconds: number;
-  // Experimental: split each story turn into adjudication, planning, narration, and state extraction.
-  useMultiCallTurnPipeline: boolean;
+  // Experimental: split each story turn into focused calls that can be compared with one another.
+  turnPipeline: TurnPipelineMode;
   // Connection-capability state, learned by probing the provider (see ConnectionCapabilities in
   // Settings.cs). Not user-editable - a later agent negotiates/probes and persists these
   // automatically. Whenever baseUrl or modelId changes, these get reset back toward their untested

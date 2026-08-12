@@ -56,7 +56,11 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
     private readonly Entry _temperature = Numeric();
     private readonly Entry _topP = Numeric();
     private readonly Entry _reasoning = new();
-    private readonly CheckBox _multiCallTurnPipeline = new();
+    private readonly Picker _turnPipeline = new()
+    {
+        Title = "Turn generation pipeline",
+        ItemsSource = new[] { "1 call (standard)", "4 calls (experimental)", "7 calls (experimental)" }
+    };
     private readonly Picker _logLevel = new()
     {
         Title = "Logging level",
@@ -134,18 +138,10 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         content.Children.Add(Field("Recent turns (default 8; range 0–100)", _recentTurns));
         content.Children.Add(Field("Maximum Story Bible entries (default 200; range 1–2000)", _maxEntries));
         content.Children.Add(Field("Maximum Planned Events (default 50; range 1–500)", _maxPlannedEvents));
-        content.Children.Add(new HorizontalStackLayout
-        {
-            Spacing = 8,
-            Children =
-            {
-                _multiCallTurnPipeline,
-                new Label { Text = "Use experimental multi-call turn pipeline", VerticalOptions = LayoutOptions.Center }
-            }
-        });
+        content.Children.Add(_turnPipeline);
         content.Children.Add(new Label
         {
-            Text = "Uses four LLM calls per scene: adjudication, scene planning, narration/actions, then state extraction. This improves rule adherence but costs more and takes longer.",
+            Text = "1 call is the standard response. 4 calls add adjudication and planning. 7 calls also analyse Story Bible updates, planned events, and conditions/summary. More calls cost more and take longer.",
             FontSize = 12
         });
 
@@ -349,7 +345,12 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
                 Optional(_temperature, "temperature"),
                 Optional(_topP, "top-p"),
                 string.IsNullOrWhiteSpace(_reasoning.Text) ? null : _reasoning.Text),
-            UseMultiCallTurnPipeline = _multiCallTurnPipeline.IsChecked,
+            TurnPipeline = _turnPipeline.SelectedIndex switch
+            {
+                0 => TurnPipelineMode.OneCall,
+                2 => TurnPipelineMode.SevenCalls,
+                _ => TurnPipelineMode.FourCalls
+            },
             StoryGeneration = new(
                 (int)Parse(_recentTurns, "recent turns"),
                 (int)Parse(_maxEntries, "maximum Story Bible entries"),
@@ -413,7 +414,12 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         _temperature.Text = settings.Parameters.Temperature?.ToString(CultureInfo.InvariantCulture) ?? "";
         _topP.Text = settings.Parameters.TopP?.ToString(CultureInfo.InvariantCulture) ?? "";
         _reasoning.Text = settings.Parameters.ReasoningEffort ?? "";
-        _multiCallTurnPipeline.IsChecked = settings.UseMultiCallTurnPipeline;
+        _turnPipeline.SelectedIndex = settings.TurnPipeline switch
+        {
+            TurnPipelineMode.OneCall => 0,
+            TurnPipelineMode.SevenCalls => 2,
+            _ => 1
+        };
         _recentTurns.Text = settings.StoryGeneration.RecentTurnCount.ToString(CultureInfo.InvariantCulture);
         _maxEntries.Text = settings.StoryGeneration.MaxStoryBibleEntries.ToString(CultureInfo.InvariantCulture);
         _maxPlannedEvents.Text = settings.StoryGeneration.MaxPlannedEvents.ToString(CultureInfo.InvariantCulture);

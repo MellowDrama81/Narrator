@@ -82,6 +82,7 @@ public sealed record ContentLimitSettings(
 public enum StructuredOutputTier { Untested, StrictJsonSchema, JsonMode, PromptedJson, Unsupported }
 public enum OutputTokenParameter { MaxCompletionTokens, MaxTokens }
 public enum InstructionMessageRole { Developer, System }
+public enum TurnPipelineMode { OneCall, FourCalls, SevenCalls }
 
 public sealed record ConnectionCapabilities(
     bool SupportsModelDiscovery,
@@ -105,9 +106,8 @@ public sealed record ApiConnectionSettings(
     ConnectionCapabilities Capabilities)
 {
     public LoggingSettings Logging { get; init; } = LoggingDefaults.Create();
-    // Experimental pipeline: separates turn decisions, scene planning, player-facing prose, and
-    // state extraction into distinct LLM calls. Kept configurable so providers/models can be compared.
-    public bool UseMultiCallTurnPipeline { get; init; } = true;
+    // Experimental turn generation pipelines, retained side-by-side so providers/models can be compared.
+    public TurnPipelineMode TurnPipeline { get; init; } = TurnPipelineMode.FourCalls;
 }
 
 public static class NarratorDefaults

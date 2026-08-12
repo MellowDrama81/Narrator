@@ -91,11 +91,15 @@ import { validateSettings } from '../core/settings-validator';
           <mat-form-field appearance="outline"><mat-label>Reasoning effort</mat-label><input matInput [(ngModel)]="settings.reasoningEffort" placeholder="low, medium, high"></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Recent turns in context</mat-label><input matInput type="number" [(ngModel)]="settings.recentTurnCount"></mat-form-field>
         </div>
-        <label class="toggle-option">
-          <input type="checkbox" [(ngModel)]="settings.useMultiCallTurnPipeline">
-          <span>Use experimental multi-call turn pipeline</span>
-        </label>
-        <p class="notice">Uses four LLM calls per scene: adjudication, scene planning, narration/actions, then state extraction. This improves rule adherence but costs more and takes longer.</p>
+        <mat-form-field appearance="outline">
+          <mat-label>Turn generation pipeline</mat-label>
+          <mat-select [(ngModel)]="settings.turnPipeline">
+            <mat-option value="oneCall">1 call (standard)</mat-option>
+            <mat-option value="fourCalls">4 calls (experimental)</mat-option>
+            <mat-option value="sevenCalls">7 calls (experimental)</mat-option>
+          </mat-select>
+        </mat-form-field>
+        <p class="notice">1 call is the standard response. 4 calls add adjudication and planning. 7 calls also analyse Story Bible updates, planned events, and conditions/summary. More calls cost more and take longer.</p>
       </mat-expansion-panel>
       <mat-expansion-panel>
         <mat-expansion-panel-header>
