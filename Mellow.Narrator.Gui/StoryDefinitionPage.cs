@@ -148,10 +148,12 @@ public sealed class StoryDefinitionPage : ContentPage, IPendingOperationPage, IC
                 MinimumHeightRequest = 120
             };
             _content.Children.Add(initialEventsEditor);
+            var saveStatus = new Label { FontSize = 12, TextColor = Colors.DarkGreen };
             _content.Children.Add(Ui.Buttons(
-                Ui.Button("Save Definition", async (_, _) => await SaveDefinitionAsync(value, titleEntry.Text, promptEditor.Text, initialEventsEditor.Text)),
+                Ui.Button("Save Definition", async (_, _) => await SaveDefinitionAsync(titleEntry.Text, promptEditor.Text, initialEventsEditor.Text, saveStatus)),
                 Ui.Button("Start Story", async (_, _) => await StartStoryAsync()),
                 Ui.SecondaryButton("Export", async (_, _) => await ExportAsync(value))));
+            _content.Children.Add(saveStatus);
             _content.Children.Add(Ui.Busy(_startBusy, "Starting…"));
             _content.Children.Add(Ui.Heading($"Initial Story Bible ({value.InitialStoryBible.Entries.Count})"));
             if (StoryBibleProcessor.IsApproachingLimits(value.InitialStoryBible, settings.StoryGeneration))
@@ -190,26 +192,26 @@ public sealed class StoryDefinitionPage : ContentPage, IPendingOperationPage, IC
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
-    private async Task SaveDefinitionAsync(StoryDefinition value, string? title, string? prompt, string? initialEventsPrompt)
+    private async Task SaveDefinitionAsync(string? title, string? prompt, string? initialEventsPrompt, Label saveStatus)
     {
         try
         {
             if (string.IsNullOrWhiteSpace(title)) throw new NarratorException("Enter a title.");
             if (string.IsNullOrWhiteSpace(prompt)) throw new NarratorException("Enter a Story Prompt.");
-            var saved = value with
+            // The page also permits independent Bible, event, and condition saves. Re-read before
+            // saving the form so this button never writes an old page snapshot over those edits.
+            var current = await _repository.GetAsync(_id) ?? throw new NarratorException("Story Definition not found.");
+            var saved = current with
             {
-                Title = title,
-                StoryPrompt = prompt,
+                Title = title.Trim(),
+                StoryPrompt = prompt.Trim(),
                 InitialEventsPrompt = initialEventsPrompt ?? "",
                 UpdatedAtUtc = DateTimeOffset.UtcNow
             };
             await _repository.SaveAsync(saved);
-            // Deliberately not a full RefreshAsync(): that would tear down and rebuild the whole form,
-            // losing focus/cursor position and collapsing any expanded Story Bible entries immediately
-            // after every save. Only Title/StoryPrompt/InitialEventsPrompt/UpdatedAtUtc changed, and the
-            // live editors already hold the saved text, so just reflect the new title.
             Title = saved.Title;
             if (Parent is NavigationPage navigation) navigation.Title = Title;
+            saveStatus.Text = $"Saved {saved.UpdatedAtUtc.ToLocalTime():t}";
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
