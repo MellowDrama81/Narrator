@@ -354,6 +354,7 @@ public sealed class OpenAiCompatibleProvider(
         var credential = _secureStorage is null
             ? fallbackCredential
             : await _secureStorage.GetAsync(SecureStorageKeys.ApiCredentialForConnection(connection.Id), cancellationToken);
+        credential ??= fallbackCredential;
         return (settings with
         {
             BaseUrl = connection.BaseUrl,
