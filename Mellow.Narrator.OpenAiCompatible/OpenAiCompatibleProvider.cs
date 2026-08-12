@@ -541,7 +541,7 @@ public sealed class OpenAiCompatibleProvider(
             contextType = "storyContext",
             storyPrompt = context.Definition.StoryPrompt,
             storyBible = context.StoryBible.Entries,
-            plannedEvents = context.PlannedEvents.Entries,
+            plannedEvents = PlannedEventPayload(context.PlannedEvents),
             // Reported so the model can scale its own eagerness to propose new Planned Events against
             // remaining room, using the same warning threshold the app itself uses to flag the list as
             // approaching capacity (see PlannedEventProcessor.IsApproachingLimits) - if that threshold is
@@ -580,10 +580,22 @@ public sealed class OpenAiCompatibleProvider(
             turnNumber = context.NextTurnNumber,
             currentPlayerAction = opening ? null : context.PlayerAction,
             resolutionRoll = opening ? (int?)null : RandomNumberGenerator.GetInt32(1, 101),
-            instruction = opening ? Templates.OpeningSceneInstruction : Templates.ContinueStoryInstruction
+            instruction = opening ? Templates.OpeningSceneInstruction : Templates.ContinueStoryInstruction,
+            conditionGate = "For every planned event marked requires condition verification, first decide whether its condition was already established before this turn. Unless it was, treat the event as unavailable: do not narrate, imply, foreshadow as already underway, advance, fulfill, or mark it relevant."
         }, Json)));
         return messages;
     }
+
+    private static IReadOnlyList<object> PlannedEventPayload(PlannedEvents events) =>
+        events.Entries.Select(entry => new
+        {
+            id = entry.Id,
+            description = entry.Description,
+            importance = entry.Importance,
+            urgency = entry.Urgency,
+            condition = entry.Condition,
+            availability = string.IsNullOrWhiteSpace(entry.Condition) ? "eligible" : "requires condition verification before eligible"
+        }).Cast<object>().ToArray();
 
     // Already-met conditions are dropped entirely - nothing left to evaluate for them - while the rest
     // are sent with a revealed flag so the model never re-reveals a non-secret condition already

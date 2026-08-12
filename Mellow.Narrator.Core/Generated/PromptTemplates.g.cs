@@ -232,6 +232,13 @@ internal static class GeneratedPromptTemplates
         implied, or hinted at directly in the narration — only the ordinary in-scene events that make them
         happen may appear, exactly as any other story development would.
 
+        Read each event's availability before considering importance or urgency. For an event marked "requires
+        condition verification before eligible", decide from the story state before this turn whether its
+        condition is already established. Unless it is, treat the event as nonexistent for this turn. Do not
+        describe it as having happened, being underway, or being foreshadowed; do not cause, advance, fulfill,
+        reference, or mark it relevant. Only an event whose condition was already established, or an "eligible"
+        event with no condition, may influence this turn.
+
         Importance controls whether the event can be dropped. Importance 5 is mandatory: treat it as a
         required destination for the story and actively steer events, NPC choices, and complications toward
         making it happen, adapting the path as needed to fit whatever the player has done, rather than

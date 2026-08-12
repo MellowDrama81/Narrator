@@ -575,7 +575,7 @@ public sealed class ProviderTests
                 """);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
-        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The bridge must collapse.", 5, 3, null, 0);
+        var plannedEvent = new PlannedEvent(Guid.NewGuid(), "The bridge must collapse.", 5, 3, "The scout has arrived.", 0);
         var context = new GenerationContext(
             new("Story", "Prompt", "", new([]), PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty),
             new([]),
@@ -591,6 +591,8 @@ public sealed class ProviderTests
 
         Assert.Contains("The bridge must collapse.", body);
         Assert.Contains("plannedEvents", body);
+        var eventPayload = Assert.Single(StoryContextMessage(body!)["plannedEvents"]!.AsArray())!;
+        Assert.Equal("requires condition verification before eligible", eventPayload["availability"]!.GetValue<string>());
         var capacity = StoryContextMessage(body!)["plannedEventCapacity"]!;
         Assert.Equal(1, capacity["count"]!.GetValue<int>());
         Assert.Equal(50, capacity["max"]!.GetValue<int>());

@@ -39,6 +39,7 @@ public sealed class SettingsTests
         Assert.Contains("locked event until a later turn", templates.StoryNarrationInstruction);
         Assert.Contains("Pacing and progression: every response must do both", templates.StoryNarrationInstruction);
         Assert.Contains("leave the player in a materially new situation", templates.StoryNarrationInstruction);
+        Assert.Contains("Read each event's availability before considering importance or urgency", templates.StoryNarrationInstruction);
     }
 
     [Fact]
