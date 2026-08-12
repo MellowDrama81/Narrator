@@ -138,6 +138,38 @@ describe('LlmService', () => {
     expect(result.suggestedActions).toEqual(['Search the desk', 'Climb the stairs']);
   });
 
+  it.each([
+    ['twoCalls', 2, [1]],
+    ['threeCalls', 3, [2]],
+    ['fiveCalls', 5, [4]],
+    ['sevenCallsParallel', 7, [3]],
+    ['eightCalls', 8, [3, 8]],
+  ] as const)('uses %s with %i calls', async (mode, expectedCalls, draftCalls) => {
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      call++;
+      const isRevision = call === 8;
+      const finalCall = mode === 'eightCalls' ? 7 : expectedCalls;
+      const content = call === finalCall ? {
+            turnNumber: 1, acknowledgedPlayerAction: 'Search for a light', narration: 'Placeholder.', suggestedActions: ['Placeholder'],
+            relevantStoryBibleEntryIds: [], storyBibleUpdates: [], relevantPlannedEventIds: [], plannedEventUpdates: [],
+            revealedVictoryConditionIds: [], metVictoryConditionIds: [], revealedLossConditionIds: [], metLossConditionIds: [],
+            storySummary: 'You found a lantern in the observatory.',
+          }
+        : (draftCalls as readonly number[]).includes(call)
+          ? { narration: isRevision ? 'The lantern flares brightly beneath the desk.' : 'You find a lantern beneath the desk.', suggestedActions: ['Search the desk', 'Climb the stairs'] }
+        : { result: `Internal analysis ${call}.` };
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }), { status: 200 });
+    }));
+
+    const result = await new LlmService(fakeDb()).turn({ ...settings(), turnPipeline: mode }, story(), 'Search for a light');
+
+    expect(call).toBe(expectedCalls);
+    expect(result.narration).toBe(mode === 'eightCalls'
+      ? 'The lantern flares brightly beneath the desk.'
+      : 'You find a lantern beneath the desk.');
+  });
+
   it('uses the configured suggestion range in a strict turn schema', async () => {
     const requests: Array<Record<string, unknown>> = [];
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

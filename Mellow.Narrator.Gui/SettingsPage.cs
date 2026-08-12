@@ -59,7 +59,12 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
     private readonly Picker _turnPipeline = new()
     {
         Title = "Turn generation pipeline",
-        ItemsSource = new[] { "1 call (standard)", "4 calls (experimental)", "7 calls (experimental)" }
+        ItemsSource = new[]
+        {
+            "1 call (standard)", "2 calls (draft + state)", "3 calls (adjudicate + draft + state)",
+            "4 calls (adjudicate + plan + draft + state)", "5 calls (adds plan critic)",
+            "7 calls (full sequential analysis)", "7 calls (parallel analysis)", "8 calls (full analysis + prose revision)"
+        }
     };
     private readonly Picker _logLevel = new()
     {
@@ -141,7 +146,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         content.Children.Add(_turnPipeline);
         content.Children.Add(new Label
         {
-            Text = "1 call is the standard response. 4 calls add adjudication and planning. 7 calls also analyse Story Bible updates, planned events, and conditions/summary. More calls cost more and take longer.",
+            Text = "2 calls separate draft and state. 3â€“5 calls add adjudication, planning, and a plan critic. 7 calls add Story Bible, event, and condition/summary analysis; its parallel variant is faster. 8 calls also revises the prose. More calls cost more.",
             FontSize = 12
         });
 
@@ -348,7 +353,13 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
             TurnPipeline = _turnPipeline.SelectedIndex switch
             {
                 0 => TurnPipelineMode.OneCall,
-                2 => TurnPipelineMode.SevenCalls,
+                1 => TurnPipelineMode.TwoCalls,
+                2 => TurnPipelineMode.ThreeCalls,
+                3 => TurnPipelineMode.FourCalls,
+                4 => TurnPipelineMode.FiveCalls,
+                5 => TurnPipelineMode.SevenCalls,
+                6 => TurnPipelineMode.SevenCallsParallel,
+                7 => TurnPipelineMode.EightCalls,
                 _ => TurnPipelineMode.FourCalls
             },
             StoryGeneration = new(
@@ -417,8 +428,14 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         _turnPipeline.SelectedIndex = settings.TurnPipeline switch
         {
             TurnPipelineMode.OneCall => 0,
-            TurnPipelineMode.SevenCalls => 2,
-            _ => 1
+            TurnPipelineMode.TwoCalls => 1,
+            TurnPipelineMode.ThreeCalls => 2,
+            TurnPipelineMode.FourCalls => 3,
+            TurnPipelineMode.FiveCalls => 4,
+            TurnPipelineMode.SevenCalls => 5,
+            TurnPipelineMode.SevenCallsParallel => 6,
+            TurnPipelineMode.EightCalls => 7,
+            _ => 3
         };
         _recentTurns.Text = settings.StoryGeneration.RecentTurnCount.ToString(CultureInfo.InvariantCulture);
         _maxEntries.Text = settings.StoryGeneration.MaxStoryBibleEntries.ToString(CultureInfo.InvariantCulture);

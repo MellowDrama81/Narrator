@@ -294,10 +294,46 @@ export class LlmService {
       return this.completeWithCorrection(settings, messages, this.turnSchema(settings), value =>
         this.parseTurn(value, settings, next, action, turns, victory, loss));
 
+    if (settings.turnPipeline === 'twoCalls')
+      return this.generateTurnWithTwoCallPipeline(settings, messages, next, action, turns, victory, loss);
+    if (settings.turnPipeline === 'threeCalls')
+      return this.generateTurnWithThreeCallPipeline(settings, messages, next, action, turns, victory, loss);
     if (settings.turnPipeline === 'fourCalls')
       return this.generateTurnWithFourCallPipeline(settings, messages, next, action, turns, victory, loss);
+    if (settings.turnPipeline === 'fiveCalls')
+      return this.generateTurnWithFiveCallPipeline(settings, messages, next, action, turns, victory, loss);
+    if (settings.turnPipeline === 'sevenCallsParallel')
+      return this.generateTurnWithSevenCallPipeline(settings, messages, next, action, turns, victory, loss, true);
+    if (settings.turnPipeline === 'eightCalls')
+      return this.generateTurnWithEightCallPipeline(settings, messages, next, action, turns, victory, loss);
 
     return this.generateTurnWithSevenCallPipeline(settings, messages, next, action, turns, victory, loss);
+  }
+
+  private async generateTurnWithTwoCallPipeline(settings: AppSettings, baseMessages: Message[], next: number, action: string | null, turns: StoryState['turns'], victory: ConditionsContext, loss: ConditionsContext): Promise<TurnGeneration> {
+    const draft = await this.generateNarrationDraft(settings, baseMessages,
+      'You are the narrator. Resolve the current turn and write only player-facing narration and suggested actions. Do not return state updates.');
+    return this.extractTurn(settings, baseMessages, { narration: draft.narration, suggestedActions: draft.suggestedActions }, next, action, turns, victory, loss, draft);
+  }
+
+  private async generateTurnWithThreeCallPipeline(settings: AppSettings, baseMessages: Message[], next: number, action: string | null, turns: StoryState['turns'], victory: ConditionsContext, loss: ConditionsContext): Promise<TurnGeneration> {
+    const adjudication = await this.generateStage(settings, baseMessages,
+      'You are the turn adjudicator. Decide the outcome of the player action and whether each conditional planned event was already eligible before this turn. Return a compact internal decision; do not write player-facing prose.');
+    const draft = await this.generateNarrationDraft(settings, baseMessages,
+      'You are the narrator. Write only player-facing narration and suggested actions from this adjudication. Do not make new rule, condition, or state decisions.\nADJUDICATION:\n' + adjudication);
+    return this.extractTurn(settings, baseMessages, { adjudication, narration: draft.narration, suggestedActions: draft.suggestedActions }, next, action, turns, victory, loss, draft);
+  }
+
+  private async generateTurnWithFiveCallPipeline(settings: AppSettings, baseMessages: Message[], next: number, action: string | null, turns: StoryState['turns'], victory: ConditionsContext, loss: ConditionsContext): Promise<TurnGeneration> {
+    const adjudication = await this.generateStage(settings, baseMessages,
+      'You are the turn adjudicator. Decide the outcome of the player action and whether each conditional planned event was already eligible before this turn. Return a compact internal decision; do not write player-facing prose.');
+    const scenePlan = await this.generateStage(settings, baseMessages,
+      'You are the scene planner. Using this adjudication, plan concrete scene beats that materially change the situation and end at the next player decision. Do not write final prose.\nADJUDICATION:\n' + adjudication);
+    const critique = await this.generateStage(settings, baseMessages,
+      'You are the continuity and rule critic. Check this scene plan against the story context and adjudication. Identify any invented facts, premature planned events, broken conditions, or lack of meaningful progress, then give binding corrections. Do not write final prose.\nADJUDICATION:\n' + adjudication + '\nSCENE PLAN:\n' + scenePlan);
+    const draft = await this.generateNarrationDraft(settings, baseMessages,
+      'You are the narrator. Write only player-facing narration and suggested actions from this approved scene plan and binding critique. Do not make new rule, condition, or state decisions.\nSCENE PLAN:\n' + scenePlan + '\nCRITIQUE:\n' + critique);
+    return this.extractTurn(settings, baseMessages, { adjudication, scenePlan, critique, narration: draft.narration, suggestedActions: draft.suggestedActions }, next, action, turns, victory, loss, draft);
   }
 
   // Separating hidden-state decisions from the player-facing prose makes the decision trail explicit
@@ -336,6 +372,7 @@ export class LlmService {
     turns: StoryState['turns'],
     victory: ConditionsContext,
     loss: ConditionsContext,
+    parallelAnalyses = false,
   ): Promise<TurnGeneration> {
     const adjudication = await this.generateStage(settings, baseMessages,
       'You are the turn adjudicator. Decide the outcome of the player action and whether each conditional planned event was already eligible before this turn. Return a compact internal decision; do not write player-facing prose.');
@@ -344,12 +381,21 @@ export class LlmService {
     const draft = await this.generateNarrationDraft(settings, baseMessages,
       'You are the narrator. Write only the player-facing narration and suggested actions from this approved scene plan. Do not make new rule, condition, or state decisions.\nSCENE PLAN:\n' + scenePlan);
     const artifacts = { adjudication, scenePlan, narration: draft.narration, suggestedActions: draft.suggestedActions };
-    const bibleAnalysis = await this.generateStage(settings, baseMessages,
-      'You are the Story Bible analyst. Identify only durable facts that should be added, changed, or removed after the approved scene. Do not write player-facing prose.\nAPPROVED ARTIFACTS:\n' + JSON.stringify(artifacts));
-    const eventAnalysis = await this.generateStage(settings, baseMessages,
-      'You are the planned-event analyst. Determine only planned-event relevance and updates, strictly enforcing event conditions from the adjudication. Do not write player-facing prose.\nAPPROVED ARTIFACTS:\n' + JSON.stringify(artifacts));
-    const outcomeAnalysis = await this.generateStage(settings, baseMessages,
-      'You are the condition and summary analyst. Determine victory/loss condition reports and a concise replacement summary from the approved scene. Do not write player-facing prose.\nAPPROVED ARTIFACTS:\n' + JSON.stringify(artifacts));
+    const artifactJson = JSON.stringify(artifacts);
+    const bibleInstruction = 'You are the Story Bible analyst. Identify only durable facts that should be added, changed, or removed after the approved scene. Do not write player-facing prose.\nAPPROVED ARTIFACTS:\n' + artifactJson;
+    const eventInstruction = 'You are the planned-event analyst. Determine only planned-event relevance and updates, strictly enforcing event conditions from the adjudication. Do not write player-facing prose.\nAPPROVED ARTIFACTS:\n' + artifactJson;
+    const outcomeInstruction = 'You are the condition and summary analyst. Determine victory/loss condition reports and a concise replacement summary from the approved scene. Do not write player-facing prose.\nAPPROVED ARTIFACTS:\n' + artifactJson;
+    const [bibleAnalysis, eventAnalysis, outcomeAnalysis] = parallelAnalyses
+      ? await Promise.all([
+          this.generateStage(settings, baseMessages, bibleInstruction),
+          this.generateStage(settings, baseMessages, eventInstruction),
+          this.generateStage(settings, baseMessages, outcomeInstruction),
+        ])
+      : [
+          await this.generateStage(settings, baseMessages, bibleInstruction),
+          await this.generateStage(settings, baseMessages, eventInstruction),
+          await this.generateStage(settings, baseMessages, outcomeInstruction),
+        ];
     const extracted = await this.completeWithCorrection(settings, [
       ...baseMessages,
       {
@@ -357,6 +403,24 @@ export class LlmService {
         content: 'You are the state extractor. Preserve the supplied narration and suggested actions exactly. Return the complete turn JSON, deriving Story Bible updates, Planned Event updates, condition reports, and the replacement summary only from the supplied analyses.',
       },
       { role: 'user', content: JSON.stringify({ artifacts, bibleAnalysis, eventAnalysis, outcomeAnalysis }) },
+    ], this.turnSchema(settings), value => this.parseTurn(value, settings, next, action, turns, victory, loss));
+    return { ...extracted, narration: draft.narration, suggestedActions: draft.suggestedActions };
+  }
+
+  private async generateTurnWithEightCallPipeline(settings: AppSettings, baseMessages: Message[], next: number, action: string | null, turns: StoryState['turns'], victory: ConditionsContext, loss: ConditionsContext): Promise<TurnGeneration> {
+    // The final prose-only call runs after state extraction and cannot change persistent state.
+    const extracted = await this.generateTurnWithSevenCallPipeline(settings, baseMessages, next, action, turns, victory, loss);
+    const revised = await this.generateNarrationDraft(settings, baseMessages,
+      'You are a player-facing prose editor. Rewrite the supplied narration and suggested actions for clarity and vivid pacing while preserving every fact, outcome, condition status, and decision exactly. Do not add events or state changes.\nAPPROVED TURN:\n' +
+      JSON.stringify({ narration: extracted.narration, suggestedActions: extracted.suggestedActions, storySummary: extracted.storySummary }));
+    return { ...extracted, narration: revised.narration, suggestedActions: revised.suggestedActions };
+  }
+
+  private async extractTurn(settings: AppSettings, baseMessages: Message[], artifacts: object, next: number, action: string | null, turns: StoryState['turns'], victory: ConditionsContext, loss: ConditionsContext, draft: { narration: string; suggestedActions: string[] }): Promise<TurnGeneration> {
+    const extracted = await this.completeWithCorrection(settings, [
+      ...baseMessages,
+      { role: 'system', content: 'You are the state extractor. Preserve the supplied narration and suggested actions exactly. Return the complete turn JSON, deriving only Story Bible updates, Planned Event updates, condition reports, and the replacement summary from the approved artifacts.' },
+      { role: 'user', content: JSON.stringify(artifacts) },
     ], this.turnSchema(settings), value => this.parseTurn(value, settings, next, action, turns, victory, loss));
     return { ...extracted, narration: draft.narration, suggestedActions: draft.suggestedActions };
   }

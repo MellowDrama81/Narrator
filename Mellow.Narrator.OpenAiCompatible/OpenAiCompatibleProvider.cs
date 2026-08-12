@@ -123,10 +123,20 @@ public sealed class OpenAiCompatibleProvider(
     private async Task<StoryGenerationResponse> GenerateStoryAsync(
         ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
     {
+        if (settings.TurnPipeline == TurnPipelineMode.TwoCalls)
+            return await GenerateStoryWithTwoCallPipelineAsync(settings, credential, context, opening, cancellationToken);
+        if (settings.TurnPipeline == TurnPipelineMode.ThreeCalls)
+            return await GenerateStoryWithThreeCallPipelineAsync(settings, credential, context, opening, cancellationToken);
         if (settings.TurnPipeline == TurnPipelineMode.FourCalls)
             return await GenerateStoryWithFourCallPipelineAsync(settings, credential, context, opening, cancellationToken);
+        if (settings.TurnPipeline == TurnPipelineMode.FiveCalls)
+            return await GenerateStoryWithFiveCallPipelineAsync(settings, credential, context, opening, cancellationToken);
         if (settings.TurnPipeline == TurnPipelineMode.SevenCalls)
             return await GenerateStoryWithSevenCallPipelineAsync(settings, credential, context, opening, cancellationToken);
+        if (settings.TurnPipeline == TurnPipelineMode.SevenCallsParallel)
+            return await GenerateStoryWithSevenCallPipelineAsync(settings, credential, context, opening, cancellationToken, parallelAnalyses: true);
+        if (settings.TurnPipeline == TurnPipelineMode.EightCalls)
+            return await GenerateStoryWithEightCallPipelineAsync(settings, credential, context, opening, cancellationToken);
         var messages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration, context, opening);
         return await CompleteWithCorrectionAsync(
             settings,
@@ -166,8 +176,44 @@ public sealed class OpenAiCompatibleProvider(
         return extracted with { Narration = draft.Narration, SuggestedActions = draft.SuggestedActions };
     }
 
-    private async Task<StoryGenerationResponse> GenerateStoryWithSevenCallPipelineAsync(
+    private async Task<StoryGenerationResponse> GenerateStoryWithTwoCallPipelineAsync(
         ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
+    {
+        var messages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration, context, opening);
+        var draft = await GenerateNarrationDraftAsync(settings, credential, messages,
+            "You are the narrator. Resolve the current turn and write only player-facing narration and suggested actions. Do not return state updates.", cancellationToken);
+        return await ExtractStoryAsync(settings, credential, messages, new { narration = draft.Narration, suggestedActions = draft.SuggestedActions }, context, opening, cancellationToken, draft);
+    }
+
+    private async Task<StoryGenerationResponse> GenerateStoryWithThreeCallPipelineAsync(
+        ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
+    {
+        var messages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration, context, opening);
+        var adjudication = await GenerateStageAsync(settings, credential, messages,
+            "You are the turn adjudicator. Decide the outcome of the player action and whether each conditional planned event was already eligible before this turn. Return a compact internal decision; do not write player-facing prose.", cancellationToken);
+        var draft = await GenerateNarrationDraftAsync(settings, credential, messages,
+            "You are the narrator. Write only player-facing narration and suggested actions from this adjudication. Do not make new rule, condition, or state decisions.\nADJUDICATION:\n" + adjudication, cancellationToken);
+        return await ExtractStoryAsync(settings, credential, messages, new { adjudication, narration = draft.Narration, suggestedActions = draft.SuggestedActions }, context, opening, cancellationToken, draft);
+    }
+
+    private async Task<StoryGenerationResponse> GenerateStoryWithFiveCallPipelineAsync(
+        ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
+    {
+        var messages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration, context, opening);
+        var adjudication = await GenerateStageAsync(settings, credential, messages,
+            "You are the turn adjudicator. Decide the outcome of the player action and whether each conditional planned event was already eligible before this turn. Return a compact internal decision; do not write player-facing prose.", cancellationToken);
+        var scenePlan = await GenerateStageAsync(settings, credential, messages,
+            "You are the scene planner. Using this adjudication, plan concrete scene beats that materially change the situation and end at the next player decision. Do not write final prose.\nADJUDICATION:\n" + adjudication, cancellationToken);
+        var critique = await GenerateStageAsync(settings, credential, messages,
+            "You are the continuity and rule critic. Check this scene plan against the story context and adjudication. Identify any invented facts, premature planned events, broken conditions, or lack of meaningful progress, then give binding corrections. Do not write final prose.\nADJUDICATION:\n" + adjudication + "\nSCENE PLAN:\n" + scenePlan, cancellationToken);
+        var draft = await GenerateNarrationDraftAsync(settings, credential, messages,
+            "You are the narrator. Write only player-facing narration and suggested actions from this approved scene plan and binding critique. Do not make new rule, condition, or state decisions.\nSCENE PLAN:\n" + scenePlan + "\nCRITIQUE:\n" + critique, cancellationToken);
+        return await ExtractStoryAsync(settings, credential, messages, new { adjudication, scenePlan, critique, narration = draft.Narration, suggestedActions = draft.SuggestedActions }, context, opening, cancellationToken, draft);
+    }
+
+    private async Task<StoryGenerationResponse> GenerateStoryWithSevenCallPipelineAsync(
+        ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken,
+        bool parallelAnalyses = false)
     {
         var baseMessages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration, context, opening);
         var adjudication = await GenerateStageAsync(settings, credential, baseMessages,
@@ -177,15 +223,57 @@ public sealed class OpenAiCompatibleProvider(
         var draft = await GenerateNarrationDraftAsync(settings, credential, baseMessages,
             "You are the narrator. Write only the player-facing narration and suggested actions from this approved scene plan. Do not make new rule, condition, or state decisions.\nSCENE PLAN:\n" + scenePlan, cancellationToken);
         var artifacts = new { adjudication, scenePlan, narration = draft.Narration, suggestedActions = draft.SuggestedActions };
-        var bibleAnalysis = await GenerateStageAsync(settings, credential, baseMessages,
-            "You are the Story Bible analyst. Identify only durable facts that should be added, changed, or removed after the approved scene. Do not write player-facing prose.\nAPPROVED ARTIFACTS:\n" + JsonSerializer.Serialize(artifacts, Json), cancellationToken);
-        var eventAnalysis = await GenerateStageAsync(settings, credential, baseMessages,
-            "You are the planned-event analyst. Determine only planned-event relevance and updates, strictly enforcing event conditions from the adjudication. Do not write player-facing prose.\nAPPROVED ARTIFACTS:\n" + JsonSerializer.Serialize(artifacts, Json), cancellationToken);
-        var outcomeAnalysis = await GenerateStageAsync(settings, credential, baseMessages,
-            "You are the condition and summary analyst. Determine victory/loss condition reports and a concise replacement summary from the approved scene. Do not write player-facing prose.\nAPPROVED ARTIFACTS:\n" + JsonSerializer.Serialize(artifacts, Json), cancellationToken);
+        var artifactJson = JsonSerializer.Serialize(artifacts, Json);
+        string bibleAnalysis, eventAnalysis, outcomeAnalysis;
+        if (parallelAnalyses)
+        {
+            var bibleTask = GenerateStageAsync(settings, credential, baseMessages,
+                "You are the Story Bible analyst. Identify only durable facts that should be added, changed, or removed after the approved scene. Do not write player-facing prose.\nAPPROVED ARTIFACTS:\n" + artifactJson, cancellationToken);
+            var eventTask = GenerateStageAsync(settings, credential, baseMessages,
+                "You are the planned-event analyst. Determine only planned-event relevance and updates, strictly enforcing event conditions from the adjudication. Do not write player-facing prose.\nAPPROVED ARTIFACTS:\n" + artifactJson, cancellationToken);
+            var outcomeTask = GenerateStageAsync(settings, credential, baseMessages,
+                "You are the condition and summary analyst. Determine victory/loss condition reports and a concise replacement summary from the approved scene. Do not write player-facing prose.\nAPPROVED ARTIFACTS:\n" + artifactJson, cancellationToken);
+            await Task.WhenAll(bibleTask, eventTask, outcomeTask);
+            bibleAnalysis = await bibleTask;
+            eventAnalysis = await eventTask;
+            outcomeAnalysis = await outcomeTask;
+        }
+        else
+        {
+            bibleAnalysis = await GenerateStageAsync(settings, credential, baseMessages,
+                "You are the Story Bible analyst. Identify only durable facts that should be added, changed, or removed after the approved scene. Do not write player-facing prose.\nAPPROVED ARTIFACTS:\n" + artifactJson, cancellationToken);
+            eventAnalysis = await GenerateStageAsync(settings, credential, baseMessages,
+                "You are the planned-event analyst. Determine only planned-event relevance and updates, strictly enforcing event conditions from the adjudication. Do not write player-facing prose.\nAPPROVED ARTIFACTS:\n" + artifactJson, cancellationToken);
+            outcomeAnalysis = await GenerateStageAsync(settings, credential, baseMessages,
+                "You are the condition and summary analyst. Determine victory/loss condition reports and a concise replacement summary from the approved scene. Do not write player-facing prose.\nAPPROVED ARTIFACTS:\n" + artifactJson, cancellationToken);
+        }
         var extracted = await CompleteWithCorrectionAsync(settings, credential, baseMessages.Concat([
             Message("system", "You are the state extractor. Preserve the supplied narration and suggested actions exactly. Return the complete turn JSON, deriving Story Bible updates, Planned Event updates, condition reports, and the replacement summary only from the supplied analyses."),
             Message("user", JsonSerializer.Serialize(new { artifacts, bibleAnalysis, eventAnalysis, outcomeAnalysis }, Json))
+        ]).ToArray(), TurnSchema(settings), node => ParseStoryResponse(node, settings, context, opening), cancellationToken);
+        return extracted with { Narration = draft.Narration, SuggestedActions = draft.SuggestedActions };
+    }
+
+    private async Task<StoryGenerationResponse> GenerateStoryWithEightCallPipelineAsync(
+        ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
+    {
+        // The seven-call result is deliberately generated first. The eighth call may improve only the
+        // prose and suggestions; it never gets to change the already-extracted persistent state.
+        var extracted = await GenerateStoryWithSevenCallPipelineAsync(settings, credential, context, opening, cancellationToken);
+        var messages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration, context, opening);
+        var revised = await GenerateNarrationDraftAsync(settings, credential, messages,
+            "You are a player-facing prose editor. Rewrite the supplied narration and suggested actions for clarity and vivid pacing while preserving every fact, outcome, condition status, and decision exactly. Do not add events or state changes.\nAPPROVED TURN:\n" +
+            JsonSerializer.Serialize(new { extracted.Narration, extracted.SuggestedActions, extracted.StorySummary }, Json), cancellationToken);
+        return extracted with { Narration = revised.Narration, SuggestedActions = revised.SuggestedActions };
+    }
+
+    private async Task<StoryGenerationResponse> ExtractStoryAsync(
+        ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> baseMessages, object artifacts,
+        GenerationContext context, bool opening, CancellationToken cancellationToken, NarrationDraft draft)
+    {
+        var extracted = await CompleteWithCorrectionAsync(settings, credential, baseMessages.Concat([
+            Message("system", "You are the state extractor. Preserve the supplied narration and suggested actions exactly. Return the complete turn JSON, deriving only Story Bible updates, Planned Event updates, condition reports, and the replacement summary from the approved artifacts."),
+            Message("user", JsonSerializer.Serialize(artifacts, Json))
         ]).ToArray(), TurnSchema(settings), node => ParseStoryResponse(node, settings, context, opening), cancellationToken);
         return extracted with { Narration = draft.Narration, SuggestedActions = draft.SuggestedActions };
     }

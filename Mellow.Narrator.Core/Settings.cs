@@ -82,7 +82,7 @@ public sealed record ContentLimitSettings(
 public enum StructuredOutputTier { Untested, StrictJsonSchema, JsonMode, PromptedJson, Unsupported }
 public enum OutputTokenParameter { MaxCompletionTokens, MaxTokens }
 public enum InstructionMessageRole { Developer, System }
-public enum TurnPipelineMode { OneCall, FourCalls, SevenCalls }
+public enum TurnPipelineMode { OneCall, TwoCalls, ThreeCalls, FourCalls, FiveCalls, SevenCalls, SevenCallsParallel, EightCalls }
 
 public sealed record ConnectionCapabilities(
     bool SupportsModelDiscovery,

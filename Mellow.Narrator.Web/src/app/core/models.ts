@@ -142,7 +142,7 @@ export type OutputTokenParameter = 'maxCompletionTokens' | 'maxTokens';
 // Mirrors ConnectionCapabilities.InstructionMessageRole - which message role this provider accepts for
 // system-level instructions.
 export type InstructionMessageRole = 'system' | 'developer';
-export type TurnPipelineMode = 'oneCall' | 'fourCalls' | 'sevenCalls';
+export type TurnPipelineMode = 'oneCall' | 'twoCalls' | 'threeCalls' | 'fourCalls' | 'fiveCalls' | 'sevenCalls' | 'sevenCallsParallel' | 'eightCalls';
 
 export interface AppSettings {
   key: 'app';

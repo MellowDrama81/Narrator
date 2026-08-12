@@ -95,11 +95,16 @@ import { validateSettings } from '../core/settings-validator';
           <mat-label>Turn generation pipeline</mat-label>
           <mat-select [(ngModel)]="settings.turnPipeline">
             <mat-option value="oneCall">1 call (standard)</mat-option>
+            <mat-option value="twoCalls">2 calls (draft + state)</mat-option>
+            <mat-option value="threeCalls">3 calls (adjudicate + draft + state)</mat-option>
             <mat-option value="fourCalls">4 calls (experimental)</mat-option>
-            <mat-option value="sevenCalls">7 calls (experimental)</mat-option>
+            <mat-option value="fiveCalls">5 calls (adds plan critic)</mat-option>
+            <mat-option value="sevenCalls">7 calls (full sequential analysis)</mat-option>
+            <mat-option value="sevenCallsParallel">7 calls (parallel analysis)</mat-option>
+            <mat-option value="eightCalls">8 calls (full analysis + prose revision)</mat-option>
           </mat-select>
         </mat-form-field>
-        <p class="notice">1 call is the standard response. 4 calls add adjudication and planning. 7 calls also analyse Story Bible updates, planned events, and conditions/summary. More calls cost more and take longer.</p>
+        <p class="notice">2 calls separate draft and state. 3–5 calls add adjudication, planning, and a plan critic. 7 calls add Story Bible, event, and condition/summary analysis; its parallel variant is faster. 8 calls also revises the prose. More calls cost more.</p>
       </mat-expansion-panel>
       <mat-expansion-panel>
         <mat-expansion-panel-header>
