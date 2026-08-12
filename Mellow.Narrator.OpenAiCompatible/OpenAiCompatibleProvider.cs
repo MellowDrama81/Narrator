@@ -5,7 +5,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 using Mellow.Narrator.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -110,7 +109,6 @@ public sealed class OpenAiCompatibleProvider(
             messages,
             DefinitionSchema(settings),
             node => ParseDefinitionResponse(node, settings),
-            null,
             cancellationToken);
     }
 
@@ -132,7 +130,6 @@ public sealed class OpenAiCompatibleProvider(
             messages,
             TurnSchema(settings),
             node => ParseStoryResponse(node, settings, context, opening),
-            node => ParseStoryResponse(node, settings, context, opening, validateNarrationStructure: false),
             cancellationToken);
     }
 
@@ -142,7 +139,6 @@ public sealed class OpenAiCompatibleProvider(
         IReadOnlyList<JsonObject> messages,
         JsonObject schema,
         Func<JsonObject, T> parseAndValidate,
-        Func<JsonObject, T>? parseWithFormatRelaxed,
         CancellationToken cancellationToken)
     {
         var tier = settings.Capabilities.StructuredOutputTier;
@@ -159,19 +155,7 @@ public sealed class OpenAiCompatibleProvider(
                     ex.Message,
                     StringComparison.Ordinal))
             ]).ToArray();
-            var correctedNode = await CompleteAsync(settings, credential, corrected, schema, tier, cancellationToken);
-            try
-            {
-                return parseAndValidate(correctedNode);
-            }
-            catch (NarrationFormatException formatException) when (parseWithFormatRelaxed is not null)
-            {
-                // A weak model can repeat a prose-length mistake even after an explicit corrective
-                // retry. Never let that formatting-only miss prevent a story from starting: all JSON,
-                // identity, update, and content validation still runs through the relaxed parse.
-                _logger.LogWarning(formatException, "Accepting a narration that still misses the configured prose format after correction.");
-                return parseWithFormatRelaxed(correctedNode);
-            }
+            return parseAndValidate(await CompleteAsync(settings, credential, corrected, schema, tier, cancellationToken));
         }
     }
 
@@ -654,8 +638,7 @@ public sealed class OpenAiCompatibleProvider(
         JsonObject node,
         ApiConnectionSettings settings,
         GenerationContext context,
-        bool opening,
-        bool validateNarrationStructure = true)
+        bool opening)
     {
         var meta = node["_transport"] as JsonObject;
         node.Remove("_transport");
@@ -697,7 +680,6 @@ public sealed class OpenAiCompatibleProvider(
         var narration = RequiredString(node, "narration");
         if (string.IsNullOrWhiteSpace(narration) || narration.Length > settings.ContentLimits.MaxNarrationCharacters)
             throw new JsonException("Narration is empty or exceeds the configured limit.");
-        if (validateNarrationStructure) ValidateNarrationStructure(narration, settings.ContentLimits);
         if (!opening && context.RecentTurns.Any(turn => IsSubstantiallyDuplicate(narration, turn.Narration)))
             throw new JsonException(
                 "The narration duplicates a recent scene. Advance the story by resolving currentPlayerAction instead.");
@@ -1077,29 +1059,6 @@ public sealed class OpenAiCompatibleProvider(
                intersection / (double)smaller >= 0.90 &&
                intersection / (double)union >= 0.80;
     }
-
-    private static void ValidateNarrationStructure(string narration, ContentLimitSettings limits)
-    {
-        var paragraphs = Regex.Split(narration.Trim(), @"\r?\n\s*\r?\n")
-            .Where(paragraph => !string.IsNullOrWhiteSpace(paragraph))
-            .ToArray();
-        if (paragraphs.Length < limits.MinParagraphsPerResponse || paragraphs.Length > limits.MaxParagraphsPerResponse)
-            throw new NarrationFormatException(
-                $"Narration must contain {limits.MinParagraphsPerResponse} to {limits.MaxParagraphsPerResponse} paragraphs separated by blank lines; it contains {paragraphs.Length}.");
-
-        for (var index = 0; index < paragraphs.Length; index++)
-        {
-            // This is a format guard rather than linguistic analysis: ordinary sentence-ending
-            // punctuation gives models a clear, actionable correction when their prose is too short.
-            var sentences = Regex.Matches(paragraphs[index], "[.!?]+(?=\\s|$|[\\\"'\\u201d\\u2019)\\]])").Count;
-            if (sentences == 0 && !string.IsNullOrWhiteSpace(paragraphs[index])) sentences = 1;
-            if (sentences < limits.MinSentencesPerParagraph || sentences > limits.MaxSentencesPerParagraph)
-                throw new NarrationFormatException(
-                    $"Narration paragraph {index + 1} must contain {limits.MinSentencesPerParagraph} to {limits.MaxSentencesPerParagraph} sentences; it contains {sentences}.");
-        }
-    }
-
-    private sealed class NarrationFormatException(string message) : JsonException(message);
 
     // Some models, when not constrained by a strict JSON schema (json_object mode or the PromptedJson
     // fallback tier), mistakenly echo the request's field name (currentPlayerAction) as if it were the

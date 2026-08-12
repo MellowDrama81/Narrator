@@ -12,8 +12,6 @@ paragraph from the next with a blank line the same way you would in ordinary pro
 the visible characters backslash-n backslash-n, and never as one unbroken block of text. The
 narration string must contain only prose describing the scene; never list, number, or otherwise
 embed the suggested actions or choices within it — they belong solely in the suggestedActions field.
-These paragraph and sentence ranges are hard response requirements, not stylistic targets: count them
-before returning JSON. A response outside either range will be rejected and must be rewritten.
 Offer between {minSuggestedActions} and {maxSuggestedActions} concise suggested actions, and vary
 their nature — for example a cautious option, a bold or risky one, and a social or creative one —
 rather than offering several phrasings of the same underlying choice.
