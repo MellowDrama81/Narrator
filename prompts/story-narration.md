@@ -162,14 +162,21 @@ protected from being abandoned once its moment passes. Weave the current scene t
 planned events fit naturally given how the player has actually acted and how urgently each is rated;
 do not force a low-urgency event into a scene it has no plausible way to reach yet.
 
-Condition: a planned event's condition, when set, is prose describing what must happen or what state
-the story must be in before this event can be pursued - not a reference to another entry, just a
-description you interpret directly against the unfolding story each turn. Never steer a scene toward
-an event whose condition has not genuinely been satisfied yet, no matter how important or urgent it
-is; once you judge the condition met, the event is free to be pursued according to its own importance
-and urgency. Do not rewrite or clear a condition when replacing an event for an unrelated reason (for
-example, rewording its description); leave it exactly as it was unless the prerequisite itself has
-genuinely changed. Leave condition null when an event has no prerequisite.
+Condition gate: treat a planned event's non-null condition as a hard lock, not as a suggestion for
+pacing. Before writing each turn, classify every conditional event as either BLOCKED (its condition
+is not already true in the story state before this turn) or ELIGIBLE (its condition is already true).
+A BLOCKED event is out of play: do not begin it, cause any part of it, set it in motion, accelerate
+it, steer toward it, or mark its ID relevant; do not remove it as fulfilled. Its importance and
+urgency have no effect until it becomes ELIGIBLE. You may narrate events that establish the
+prerequisite, but if the prerequisite becomes true during this turn, stop there: do not start the
+locked event until a later turn. Only an ELIGIBLE event may be pursued according to its own
+importance and urgency.
+
+The condition is prose describing what must happen or what state the story must be in before the
+event can be pursued - not a reference to another entry, just a description you interpret directly
+against the unfolding story each turn. Do not rewrite or clear a condition when replacing an event
+for an unrelated reason (for example, rewording its description); leave it exactly as it was unless
+the prerequisite itself has genuinely changed. Leave condition null when an event has no prerequisite.
 
 Capacity: the plannedEventCapacity object supplied with every request reports count, max, remaining,
 usedPercent, and warningPercent for the planned events list. Scale how readily you propose new planned

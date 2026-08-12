@@ -35,6 +35,8 @@ public sealed class SettingsTests
         Assert.Contains(
             PromptTemplateDefaults.MaxSuggestedActionsPlaceholder,
             templates.StoryNarrationInstruction);
+        Assert.Contains("Condition gate: treat a planned event's non-null condition as a hard lock", templates.StoryNarrationInstruction);
+        Assert.Contains("locked event until a later turn", templates.StoryNarrationInstruction);
     }
 
     [Fact]
