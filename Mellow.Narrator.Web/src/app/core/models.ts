@@ -187,6 +187,8 @@ export interface AppSettings {
   retryInitialDelaySeconds: number;
   retryMaxDelaySeconds: number;
   retryMaxRetryAfterSeconds: number;
+  // Experimental: split each story turn into adjudication, planning, narration, and state extraction.
+  useMultiCallTurnPipeline: boolean;
   // Connection-capability state, learned by probing the provider (see ConnectionCapabilities in
   // Settings.cs). Not user-editable - a later agent negotiates/probes and persists these
   // automatically. Whenever baseUrl or modelId changes, these get reset back toward their untested

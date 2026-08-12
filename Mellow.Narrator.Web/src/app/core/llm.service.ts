@@ -290,8 +290,65 @@ export class LlmService {
       }),
     });
 
-    return this.completeWithCorrection(settings, messages, this.turnSchema(settings), value =>
-      this.parseTurn(value, settings, next, action, turns, victory, loss));
+    if (!settings.useMultiCallTurnPipeline)
+      return this.completeWithCorrection(settings, messages, this.turnSchema(settings), value =>
+        this.parseTurn(value, settings, next, action, turns, victory, loss));
+
+    return this.generateTurnWithPipeline(settings, messages, next, action, turns, victory, loss);
+  }
+
+  // Separating hidden-state decisions from the player-facing prose makes the decision trail explicit
+  // and gives the narrator an approved plan to follow. The final call owns only persistent state.
+  private async generateTurnWithPipeline(
+    settings: AppSettings,
+    baseMessages: Message[],
+    next: number,
+    action: string | null,
+    turns: StoryState['turns'],
+    victory: ConditionsContext,
+    loss: ConditionsContext,
+  ): Promise<TurnGeneration> {
+    const adjudication = await this.generateStage(settings, baseMessages,
+      'You are the turn adjudicator. Decide the outcome of the player action and whether each conditional planned event was already eligible before this turn. Return a compact internal decision; do not write player-facing prose.');
+    const scenePlan = await this.generateStage(settings, baseMessages,
+      'You are the scene planner. Using this adjudication, plan concrete scene beats that materially change the situation and end at the next player decision. Do not write final prose.\nADJUDICATION:\n' + adjudication);
+    const draft = await this.generateNarrationDraft(settings, baseMessages,
+      'You are the narrator. Write only the player-facing narration and suggested actions from this approved scene plan. Do not make new rule, condition, or state decisions.\nSCENE PLAN:\n' + scenePlan);
+    const extracted = await this.completeWithCorrection(settings, [
+      ...baseMessages,
+      {
+        role: 'system',
+        content: 'You are the state extractor. Preserve the supplied narration and suggested actions exactly. Return the complete turn JSON, deriving only Story Bible updates, Planned Event updates, condition reports, and the replacement summary from the approved artifacts.',
+      },
+      { role: 'user', content: JSON.stringify({ adjudication, scenePlan, narration: draft.narration, suggestedActions: draft.suggestedActions }) },
+    ], this.turnSchema(settings), value => this.parseTurn(value, settings, next, action, turns, victory, loss));
+    return { ...extracted, narration: draft.narration, suggestedActions: draft.suggestedActions };
+  }
+
+  private async generateStage(settings: AppSettings, baseMessages: Message[], instruction: string): Promise<string> {
+    return this.completeWithCorrection(settings, [...baseMessages, { role: 'system', content: instruction }],
+      this.stageSchema(), value => {
+        const result = value['result'];
+        if (typeof result !== 'string' || !result.trim()) throw new Error('The pipeline stage returned no result.');
+        return result;
+      });
+  }
+
+  private async generateNarrationDraft(
+    settings: AppSettings, baseMessages: Message[], instruction: string,
+  ): Promise<{ narration: string; suggestedActions: string[] }> {
+    return this.completeWithCorrection(settings, [...baseMessages, { role: 'system', content: instruction }],
+      this.narrationDraftSchema(settings), value => {
+        const narration = value['narration'];
+        const suggestedActions = value['suggestedActions'];
+        if (typeof narration !== 'string' || !narration.trim() || narration.length > settings.maxNarrationCharacters)
+          throw new Error('Narration is empty or exceeds the configured limit.');
+        if (!Array.isArray(suggestedActions) || suggestedActions.length < settings.minSuggestedActions ||
+            suggestedActions.length > settings.maxSuggestedActions ||
+            suggestedActions.some(item => typeof item !== 'string' || !item.trim() || item.length > settings.maxSuggestedActionCharacters))
+          throw new Error('Suggested actions do not meet the configured limits.');
+        return { narration, suggestedActions };
+      });
   }
 
   private parseTurn(
@@ -584,6 +641,22 @@ export class LlmService {
       revealedLossConditionIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
       metLossConditionIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
       storySummary: { type: 'string', maxLength: settings.maxStorySummaryCharacters },
+    });
+  }
+
+  private stageSchema(): JsonSchema {
+    return this.objectSchema({ result: { type: 'string', maxLength: 12000 } });
+  }
+
+  private narrationDraftSchema(settings: AppSettings): JsonSchema {
+    return this.objectSchema({
+      narration: { type: 'string', maxLength: settings.maxNarrationCharacters },
+      suggestedActions: {
+        type: 'array',
+        minItems: settings.minSuggestedActions,
+        maxItems: settings.maxSuggestedActions,
+        items: { type: 'string', maxLength: settings.maxSuggestedActionCharacters },
+      },
     });
   }
 

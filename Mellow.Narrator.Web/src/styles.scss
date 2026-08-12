@@ -90,6 +90,8 @@ h1 {
 .empty-state p { max-width:560px; color:var(--muted); line-height:1.6; }
 .empty-mark { display:grid; place-items:center; width:64px; height:64px; border-radius:21px 21px 21px 6px; color:white; background:linear-gradient(145deg,var(--accent),var(--accent-2)); font:700 1.5rem var(--serif); }
 .notice { margin:1.25rem 0 0; padding:1rem; color:var(--muted); background:var(--soft); border-radius:12px; font-size:.82rem; line-height:1.5; }
+.toggle-option { display:flex; align-items:center; gap:.6rem; margin-top:1rem; font-size:.9rem; }
+.toggle-option input { inline-size:1.1rem; block-size:1.1rem; accent-color:var(--accent); }
 .storage-warning { margin:0 0 1rem; color:#6d421f; background:#fff0d9; border:1px solid #e7c796; }
 .danger { color:var(--danger) !important; }
 .list-stack { display:grid; gap:.8rem; }

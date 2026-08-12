@@ -91,6 +91,11 @@ import { validateSettings } from '../core/settings-validator';
           <mat-form-field appearance="outline"><mat-label>Reasoning effort</mat-label><input matInput [(ngModel)]="settings.reasoningEffort" placeholder="low, medium, high"></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Recent turns in context</mat-label><input matInput type="number" [(ngModel)]="settings.recentTurnCount"></mat-form-field>
         </div>
+        <label class="toggle-option">
+          <input type="checkbox" [(ngModel)]="settings.useMultiCallTurnPipeline">
+          <span>Use experimental multi-call turn pipeline</span>
+        </label>
+        <p class="notice">Uses four LLM calls per scene: adjudication, scene planning, narration/actions, then state extraction. This improves rule adherence but costs more and takes longer.</p>
       </mat-expansion-panel>
       <mat-expansion-panel>
         <mat-expansion-panel-header>

@@ -56,6 +56,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
     private readonly Entry _temperature = Numeric();
     private readonly Entry _topP = Numeric();
     private readonly Entry _reasoning = new();
+    private readonly CheckBox _multiCallTurnPipeline = new();
     private readonly Picker _logLevel = new()
     {
         Title = "Logging level",
@@ -133,6 +134,20 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         content.Children.Add(Field("Recent turns (default 8; range 0–100)", _recentTurns));
         content.Children.Add(Field("Maximum Story Bible entries (default 200; range 1–2000)", _maxEntries));
         content.Children.Add(Field("Maximum Planned Events (default 50; range 1–500)", _maxPlannedEvents));
+        content.Children.Add(new HorizontalStackLayout
+        {
+            Spacing = 8,
+            Children =
+            {
+                _multiCallTurnPipeline,
+                new Label { Text = "Use experimental multi-call turn pipeline", VerticalOptions = LayoutOptions.Center }
+            }
+        });
+        content.Children.Add(new Label
+        {
+            Text = "Uses four LLM calls per scene: adjudication, scene planning, narration/actions, then state extraction. This improves rule adherence but costs more and takes longer.",
+            FontSize = 12
+        });
 
         var logging = Section(content, "Logging", expanded: false);
         logging.Children.Add(new Label { Text = "Log level" });
@@ -334,6 +349,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
                 Optional(_temperature, "temperature"),
                 Optional(_topP, "top-p"),
                 string.IsNullOrWhiteSpace(_reasoning.Text) ? null : _reasoning.Text),
+            UseMultiCallTurnPipeline = _multiCallTurnPipeline.IsChecked,
             StoryGeneration = new(
                 (int)Parse(_recentTurns, "recent turns"),
                 (int)Parse(_maxEntries, "maximum Story Bible entries"),
@@ -397,6 +413,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         _temperature.Text = settings.Parameters.Temperature?.ToString(CultureInfo.InvariantCulture) ?? "";
         _topP.Text = settings.Parameters.TopP?.ToString(CultureInfo.InvariantCulture) ?? "";
         _reasoning.Text = settings.Parameters.ReasoningEffort ?? "";
+        _multiCallTurnPipeline.IsChecked = settings.UseMultiCallTurnPipeline;
         _recentTurns.Text = settings.StoryGeneration.RecentTurnCount.ToString(CultureInfo.InvariantCulture);
         _maxEntries.Text = settings.StoryGeneration.MaxStoryBibleEntries.ToString(CultureInfo.InvariantCulture);
         _maxPlannedEvents.Text = settings.StoryGeneration.MaxPlannedEvents.ToString(CultureInfo.InvariantCulture);
