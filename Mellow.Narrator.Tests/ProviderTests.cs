@@ -1418,6 +1418,52 @@ public sealed class ProviderTests
         Assert.Contains("narrow stair", result.Narration);
     }
 
+    [Fact]
+    public async Task GenerateOpening_AcceptsAFormatMissAfterItsCorrectiveRetry()
+    {
+        var requests = 0;
+        var handler = new StubHandler(_ =>
+        {
+            requests++;
+            return Task.FromResult(Response(JsonSerializer.Serialize(new
+            {
+                turnNumber = 0,
+                acknowledgedPlayerAction = (string?)null,
+                narration = "A short opening scene.",
+                suggestedActions = new[] { "Look around", "Wait" },
+                relevantStoryBibleEntryIds = Array.Empty<string>(),
+                storyBibleUpdates = Array.Empty<object>(),
+                relevantPlannedEventIds = Array.Empty<string>(),
+                plannedEventUpdates = Array.Empty<object>(),
+                revealedVictoryConditionIds = Array.Empty<string>(),
+                metVictoryConditionIds = Array.Empty<string>(),
+                revealedLossConditionIds = Array.Empty<string>(),
+                metLossConditionIds = Array.Empty<string>(),
+                storySummary = ""
+            })));
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var settings = Settings() with
+        {
+            ContentLimits = Settings().ContentLimits with { MinParagraphsPerResponse = 2, MaxParagraphsPerResponse = 2 }
+        };
+        var context = new GenerationContext(
+            new("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty),
+            StoryBible.Empty,
+            PlannedEvents.Empty,
+            new(StoryConditions.Empty, [], []),
+            new(StoryConditions.Empty, [], []),
+            "",
+            [],
+            null,
+            0);
+
+        var result = await provider.GenerateOpeningAsync(settings, null, context);
+
+        Assert.Equal(2, requests);
+        Assert.Equal("A short opening scene.", result.Narration);
+    }
+
     private static ApiConnectionSettings Settings() => NarratorDefaults.Create() with
     {
         BaseUrl = new("https://example.test/v1/"),
