@@ -1,0 +1,2 @@
+@foreach (var item in Items) { <label>@item.Label<input type="number" @bind="Values[item.Key]" /></label> }
+@code { [Parameter, EditorRequired] public Dictionary<string,string> Values { get; set; } = []; [Parameter, EditorRequired] public IReadOnlyList<Mellow.Narrator.MauiBlazor.Pages.Settings.Field> Items { get; set; } = []; }
