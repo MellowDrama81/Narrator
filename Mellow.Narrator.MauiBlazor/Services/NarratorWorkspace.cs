@@ -28,10 +28,12 @@ public sealed class NarratorWorkspace(
     public Task SaveStoryAsync(StoryState state) => stories.SaveAsync(state);
     public Task UpdateStoryLabelAsync(Guid id, string label) => stories.UpdateLabelAsync(id, label);
     public Task<StoryDefinition> SaveDefinitionBibleAsync(Guid id, StoryBible bible) => application.UpdateInitialStoryBibleAsync(id, bible);
+    public Task<StoryDefinition> CullDefinitionAsync(Guid id) => application.CullDefinitionAsync(id);
     public Task<StoryDefinition> SaveDefinitionEventsAsync(Guid id, PlannedEvents events) => application.UpdateInitialPlannedEventsAsync(id, events);
     public Task<StoryDefinition> SaveDefinitionVictoryConditionsAsync(Guid id, StoryConditions conditions) => application.UpdateInitialVictoryConditionsAsync(id, conditions);
     public Task<StoryDefinition> SaveDefinitionLossConditionsAsync(Guid id, StoryConditions conditions) => application.UpdateInitialLossConditionsAsync(id, conditions);
     public Task<StoryState> SaveStoryBibleAsync(Guid id, StoryBible bible) => application.UpdateCurrentStoryBibleAsync(id, bible);
+    public Task<StoryState> CullStoryAsync(Guid id) => application.CullStoryStateAsync(id);
     public Task<StoryState> SaveStoryEventsAsync(Guid id, PlannedEvents events) => application.UpdateCurrentPlannedEventsAsync(id, events);
     public Task<StoryState> SaveStorySummaryAsync(Guid id, string summary) => application.UpdateStorySummaryAsync(id, summary);
     public Task<IReadOnlyList<string>> DiscoverModelsAsync(Guid connectionId) => application.DiscoverModelsAsync(connectionId);
