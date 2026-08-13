@@ -1,7 +1,9 @@
 @page "/stories"
 @inject NarratorWorkspace Workspace
 @inject NavigationManager Navigation
+@inject ImportExportService ImportExport
 
-<header><p class="eyebrow">Play</p><h1>Stories</h1><p class="lead">Resume, copy, or archive any playthrough.</p></header>
+<header><p class="eyebrow">Play</p><h1>Stories</h1><p class="lead">Resume, copy, import, or archive any playthrough.</p></header>
+<div class="actions"><button class="button" @onclick="Import">Import story</button></div>
 @if (_items is null) { <p>Loading stories…</p> } else if (_items.Count == 0) { <div class="empty">No stories in progress. Start one from a definition.</div> } else { <section class="cards">@foreach (var item in _items) { <article><h2>@item.Label</h2><p>Last played: @(item.LastActionAtUtc?.ToLocalTime().ToString("g") ?? "not yet")</p><div class="actions"><a class="button" href="story/@item.Id">Resume</a><button class="button" @onclick="() => Copy(item.Id)">Copy</button><button class="button danger" @onclick="() => Delete(item.Id)">Trash</button></div></article> }</section> }
-@code { private IReadOnlyList<StoryStateSummary>? _items; protected override async Task OnInitializedAsync() => await Refresh(); private async Task Refresh() => _items = await Workspace.StoriesAsync(); private async Task Copy(Guid id) { var copy = await Workspace.CopyStoryAsync(id); Navigation.NavigateTo($"story/{copy.Id}"); } private async Task Delete(Guid id) { await Workspace.DeleteStoryAsync(id); await Refresh(); } }
+@code { private IReadOnlyList<StoryStateSummary>? _items; protected override async Task OnInitializedAsync() => await Refresh(); private async Task Refresh() => _items = await Workspace.StoriesAsync(); private async Task Copy(Guid id) { var copy = await Workspace.CopyStoryAsync(id); Navigation.NavigateTo($"story/{copy.Id}"); } private async Task Delete(Guid id) { await Workspace.DeleteStoryAsync(id); await Refresh(); } private async Task Import() { var value = await ImportExport.ImportStoryAsync(); if (value is not null) Navigation.NavigateTo($"story/{value.Id}"); } }

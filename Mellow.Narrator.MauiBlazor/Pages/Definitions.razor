@@ -1,13 +1,14 @@
 @page "/definitions"
 @inject NarratorWorkspace Workspace
 @inject NavigationManager Navigation
+@inject ImportExportService ImportExport
 
 <header><p class="eyebrow">Story design</p><h1>Story definitions</h1><p class="lead">Create a blank definition or describe every aspect of a story for the generator to organise.</p></header>
 <section class="editor-card">
     <h2>Generate a definition</h2>
     <input @bind="_generatedTitle" placeholder="Optional working title" />
     <textarea @bind="_generationPrompt" placeholder="Story Definition Prompt — premise, characters, tone, starting state, future events, Story Bible and outcomes."></textarea>
-    <div class="actions"><button class="button primary" @onclick="Generate" disabled="@_busy">@(_busy ? "Generating…" : "Generate Story Definition")</button><button class="button" @onclick="Create" disabled="@_busy">Blank definition</button></div>
+    <div class="actions"><button class="button primary" @onclick="Generate" disabled="@_busy">@(_busy ? "Generating…" : "Generate Story Definition")</button><button class="button" @onclick="Create" disabled="@_busy">Blank definition</button><button class="button" @onclick="Import">Import definition</button></div>
     @if (_error is not null) { <p class="error">@_error</p> }
 </section>
 @if (_items is null) { <p>Loading definitions…</p> } else if (_items.Count == 0) { <div class="empty">No definitions yet. Start with a blank canvas or generate one from a prompt.</div> } else { <section class="cards">@foreach (var item in _items) { <article><h2>@item.Title</h2><p>@item.UpdatedAtUtc.ToLocalTime().ToString("g")</p><div class="actions"><a class="button" href="definition/@item.Id">Open</a><button class="button danger" @onclick="() => Delete(item.Id)">Trash</button></div></article> }</section> }
@@ -22,4 +23,5 @@
     private async Task Create() { var item = await Workspace.CreateBlankDefinitionAsync(string.IsNullOrWhiteSpace(_generatedTitle) ? "Untitled story" : _generatedTitle); Navigation.NavigateTo($"definition/{item.Id}"); }
     private async Task Generate() { if (string.IsNullOrWhiteSpace(_generationPrompt)) { _error = "Enter a Story Definition Prompt first."; return; } _busy = true; _error = null; try { var item = await Workspace.GenerateDefinitionAsync(new(null, _generatedTitle, _generationPrompt), false, Guid.NewGuid()); Navigation.NavigateTo($"definition/{item.Id}"); } catch (Exception ex) { _error = ex.Message; } finally { _busy = false; } }
     private async Task Delete(Guid id) { await Workspace.DeleteDefinitionAsync(id); await Refresh(); }
+    private async Task Import() { try { var item = await ImportExport.ImportDefinitionAsync(); if (item is not null) Navigation.NavigateTo($"definition/{item.Id}"); } catch (Exception ex) { _error = ex.Message; } }
 }
