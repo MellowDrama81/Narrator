@@ -1,0 +1,5 @@
+@page "/connections"
+@inject NarratorWorkspace Workspace
+<header><p class="eyebrow">Providers</p><h1>Connections</h1><p class="lead">API connections are shared with the native MAUI app and stored securely on this device.</p></header>
+@if (_settings is null) { <p>Loading connections…</p> } else if (_settings.Connections.Count == 0) { <div class="empty">No connections configured. Use the native MAUI settings page to add one; Hybrid configuration editing is the next UI surface to migrate.</div> } else { <section class="cards">@foreach (var item in _settings.Connections) { <article><h2>@item.Name</h2><p>@item.BaseUrl</p><small>@item.ModelCapabilities.Count tested model(s)</small></article> }</section> }
+@code { private ApiConnectionSettings? _settings; protected override async Task OnInitializedAsync() => _settings = await Workspace.SettingsAsync(); }

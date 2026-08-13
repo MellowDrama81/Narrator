@@ -1,0 +1,5 @@
+@page "/trash"
+@inject NarratorWorkspace Workspace
+<header><p class="eyebrow">Recovery</p><h1>Trash</h1></header>
+@if (_items is null) { <p>Loading trash…</p> } else if (_items.Count == 0) { <div class="empty">Nothing in trash.</div> } else { <section class="cards">@foreach (var item in _items) { <article><h2>@item.DisplayName</h2><p>@item.Type · deleted @item.DeletedAtUtc.ToLocalTime().ToString("g")</p></article> }</section> }
+@code { private IReadOnlyList<TrashItem>? _items; protected override async Task OnInitializedAsync() => _items = await Workspace.TrashAsync(); }

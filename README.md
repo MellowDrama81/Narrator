@@ -267,6 +267,7 @@ remove it for good — both actions ask for confirmation first, since they canno
 - `Mellow.Narrator.OpenAiCompatible` — non-streaming Chat Completions adapter with structured JSON output and retry handling.
 - `Mellow.Narrator.Persistence` — versioned folder-of-JSON persistence, backups, recovery, staging, copying, and trash.
 - `Mellow.Narrator.Maui` — standard MAUI `TabbedPage` UI and secure-storage adapter.
+- `Mellow.Narrator.MauiBlazor` — MAUI Blazor Hybrid UI using the same Core, provider, and persistence services.
 - `Mellow.Narrator.Web` — client-side Angular Material UI with IndexedDB persistence.
 - `prompts` — canonical Markdown prompt templates and their manifest, shared by both applications.
 - `tools/Mellow.Narrator.PromptGenerator` — build-time generator for typed C# and TypeScript prompt constants.

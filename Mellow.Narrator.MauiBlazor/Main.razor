@@ -1,0 +1,6 @@
+@inject NarratorWorkspace Workspace
+
+<Router AppAssembly="@typeof(Main).Assembly">
+  <Found Context="routeData"><RouteView RouteData="@routeData" DefaultLayout="@typeof(Layout)" /></Found>
+  <NotFound><Layout><p>That page does not exist.</p></Layout></NotFound>
+</Router>

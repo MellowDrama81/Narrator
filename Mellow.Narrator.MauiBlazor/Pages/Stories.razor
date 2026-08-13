@@ -1,0 +1,6 @@
+@page "/stories"
+@inject NarratorWorkspace Workspace
+
+<header><p class="eyebrow">Story play</p><h1>Active stories</h1><p class="lead">Open an existing story to continue from its latest turn.</p></header>
+@if (_items is null) { <p>Loading stories…</p> } else if (_items.Count == 0) { <div class="empty">No active stories. Start one from a story definition.</div> } else { <section class="cards">@foreach (var item in _items) { <article><h2>@item.Label</h2><p>Last active @item.LastActionAtUtc?.ToLocalTime().ToString("g")</p><a href="story/@item.Id">Continue story →</a></article> }</section> }
+@code { private IReadOnlyList<StoryStateSummary>? _items; protected override async Task OnInitializedAsync() => _items = await Workspace.StoriesAsync(); }

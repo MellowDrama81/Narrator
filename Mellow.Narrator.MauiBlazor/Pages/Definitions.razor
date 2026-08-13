@@ -1,0 +1,8 @@
+@page "/definitions"
+@inject NarratorWorkspace Workspace
+@inject NavigationManager Navigation
+
+<header><p class="eyebrow">Story design</p><h1>Story definitions</h1><p class="lead">Build the rules, starting state, events, and outcomes for a story.</p></header>
+<section class="actions"><button class="button primary" @onclick="Create">Blank definition</button></section>
+@if (_items is null) { <p>Loading definitions…</p> } else if (_items.Count == 0) { <div class="empty">No definitions yet. Start with a blank canvas or generate one from a prompt.</div> } else { <section class="cards">@foreach (var item in _items) { <article><h2>@item.Title</h2><p>@item.UpdatedAtUtc.ToLocalTime().ToString("g")</p><a href="definition/@item.Id">Open definition →</a></article> }</section> }
+@code { private IReadOnlyList<StoryDefinitionSummary>? _items; protected override async Task OnInitializedAsync() => _items = await Workspace.DefinitionsAsync(); private async Task Create() { var item = await Workspace.CreateBlankDefinitionAsync("Untitled story"); Navigation.NavigateTo($"definition/{item.Id}"); } }

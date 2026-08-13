@@ -1,0 +1,5 @@
+@page "/settings"
+@inject NarratorWorkspace Workspace
+<header><p class="eyebrow">Configuration</p><h1>Settings</h1><p class="lead">Review the shared generation limits and selected pipeline.</p></header>
+@if (_settings is null) { <p>Loading settings…</p> } else { <section class="cards"><article><h2>Pipeline</h2><p>@_settings.TurnPipeline</p></article><article><h2>Generation</h2><p>@_settings.MaxOutputTokens max tokens · @_settings.RequestTimeout.TotalSeconds second timeout</p></article><article><h2>Memory</h2><p>@_settings.StoryGeneration.RecentTurnCount recent turns · @_settings.StoryGeneration.MaxStoryBibleEntries Bible entries</p></article></section><div class="empty">Settings are shared with Mellow.Narrator.Maui. Editing controls will be migrated here alongside the definition editor.</div> }
+@code { private ApiConnectionSettings? _settings; protected override async Task OnInitializedAsync() => _settings = await Workspace.SettingsAsync(); }
