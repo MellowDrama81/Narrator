@@ -1403,6 +1403,40 @@ public sealed class ProviderTests
     }
 
     [Fact]
+    public async Task GenerateTurn_FourCallPipelineSuppliesInvalidNarrationDraftToCorrection()
+    {
+        var requests = 0;
+        string? correctionRequest = null;
+        var handler = new StubHandler(async request =>
+        {
+            requests++;
+            if (requests == 4) correctionRequest = await request.Content!.ReadAsStringAsync();
+            var content = requests switch
+            {
+                1 => """{"result":"The action succeeds."}""",
+                2 => """{"result":"The door opens."}""",
+                3 => """{"result":"The doorway stands open."}""",
+                4 => """{"narration":"The door gives beneath your hand. Cold air rises from the stairwell beyond.","suggestedActions":["Descend the stairs","Listen at the threshold"]}""",
+                5 => """{"turnNumber":1,"acknowledgedPlayerAction":"Open the door","narration":"Placeholder","suggestedActions":["Placeholder","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[],"storySummary":"The door has opened."}""",
+                _ => throw new InvalidOperationException("The pipeline made an unexpected extra request.")
+            };
+            return Response(content);
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty),
+            StoryBible.Empty, PlannedEvents.Empty, new(StoryConditions.Empty, [], []), new(StoryConditions.Empty, [], []),
+            "", [], "Open the door", 1);
+
+        var result = await provider.GenerateTurnAsync(Settings() with { TurnPipeline = TurnPipelineMode.FourCalls }, null, context);
+
+        Assert.Equal(5, requests);
+        Assert.Equal("The door gives beneath your hand. Cold air rises from the stairwell beyond.", result.Narration);
+        Assert.NotNull(correctionRequest);
+        Assert.Contains("The doorway stands open.", correctionRequest);
+    }
+
+    [Fact]
     public async Task GenerateTurn_UsesEightCallPipelineAndReturnsRevisedNarration()
     {
         var requests = 0;

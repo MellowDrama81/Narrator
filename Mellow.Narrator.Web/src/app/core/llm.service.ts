@@ -599,7 +599,10 @@ export class LlmService {
     } catch (error) {
       if (error instanceof ProviderNetworkError) throw error;
       const validationError = error instanceof Error ? error.message : String(error);
-      const corrected = [...messages, {
+      const corrected: Message[] = [...messages, {
+        role: 'assistant',
+        content: JSON.stringify(value),
+      }, {
         role: 'system',
         content: promptTemplates.correctiveRetryInstruction.replace('{validationError}', validationError),
       }];

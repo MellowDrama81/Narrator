@@ -336,13 +336,17 @@ public sealed class OpenAiCompatibleProvider(
         credential = resolved.Credential;
         var tier = settings.Capabilities.StructuredOutputTier;
         if (tier is StructuredOutputTier.Untested or StructuredOutputTier.Unsupported) tier = StructuredOutputTier.PromptedJson;
+        JsonObject? invalidResponse = null;
         try
         {
-            return parseAndValidate(await CompleteAsync(settings, credential, messages, schema, tier, cancellationToken));
+            invalidResponse = await CompleteAsync(settings, credential, messages, schema, tier, cancellationToken);
+            return parseAndValidate(invalidResponse);
         }
         catch (Exception ex) when (ex is JsonException or NarratorException)
         {
-            var corrected = messages.Concat([
+            var corrected = messages.Concat(invalidResponse is null ? [] : [
+                Message("assistant", invalidResponse.ToJsonString(Json))
+            ]).Concat([
                 Message("system", Templates.CorrectiveRetryInstruction.Replace(
                     PromptTemplateDefaults.ValidationErrorPlaceholder,
                     ex.Message,
