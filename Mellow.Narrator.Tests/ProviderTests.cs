@@ -58,7 +58,7 @@ public sealed class ProviderTests
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    """{"data":[{"id":"model-b"},{"id":"model-a"},{"id":"model-b"}]}""",
+                    """{"data":[{"id":"model-b"},{"id":"text-embedding-3-small"},{"id":"model-a"},{"id":"model-b"}]}""",
                     Encoding.UTF8,
                     "application/json")
             });
@@ -1365,11 +1365,130 @@ public sealed class ProviderTests
             provider.GenerateStoryDefinitionAsync(Settings(), null, "Story"));
     }
 
+    [Fact]
+    public async Task GenerateTurn_UsesFourCallPipelineAndReturnsNarrationDraft()
+    {
+        var requests = 0;
+        var handler = new StubHandler(_ =>
+        {
+            requests++;
+            var content = requests switch
+            {
+                1 => """{"result":"The action succeeds; conditional events remain blocked."}""",
+                2 => """{"result":"The door opens, revealing a choice at the stairs."}""",
+                3 => """{"narration":"The door gives beneath your hand. Cold air rises from the stairwell beyond.","suggestedActions":["Descend the stairs","Listen at the threshold"]}""",
+                4 => """{"turnNumber":1,"acknowledgedPlayerAction":"Open the door","narration":"This must be replaced by the narration draft.","suggestedActions":["This must be replaced","This must also be replaced"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[],"storySummary":"The door has opened."}""",
+                _ => throw new InvalidOperationException("The pipeline made an unexpected extra request.")
+            };
+            return Task.FromResult(Response(content));
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty),
+            StoryBible.Empty,
+            PlannedEvents.Empty,
+            new(StoryConditions.Empty, [], []),
+            new(StoryConditions.Empty, [], []),
+            "",
+            [],
+            "Open the door",
+            1);
+
+        var result = await provider.GenerateTurnAsync(Settings() with { TurnPipeline = TurnPipelineMode.FourCalls }, null, context);
+
+        Assert.Equal(4, requests);
+        Assert.Equal("The door gives beneath your hand. Cold air rises from the stairwell beyond.", result.Narration);
+        Assert.Equal(["Descend the stairs", "Listen at the threshold"], result.SuggestedActions);
+        Assert.Equal("The door has opened.", result.StorySummary);
+    }
+
+    [Fact]
+    public async Task GenerateTurn_FourCallPipelineAcceptsNarrationDraftWithTransportMetadataInStrictMode()
+    {
+        var requests = 0;
+        var handler = new StubHandler(_ => Task.FromResult(Response(++requests switch
+        {
+            1 => """{"result":"The action succeeds."}""",
+            2 => """{"result":"The door opens."}""",
+            3 => """{"narration":"The door gives beneath your hand.","suggestedActions":["Descend","Listen"]}""",
+            _ => """{"turnNumber":1,"acknowledgedPlayerAction":"Open the door","narration":"Placeholder","suggestedActions":["Placeholder","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[],"storySummary":"The door has opened."}"""
+        })));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(new("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty), StoryBible.Empty, PlannedEvents.Empty, new(StoryConditions.Empty, [], []), new(StoryConditions.Empty, [], []), "", [], "Open the door", 1);
+
+        var result = await provider.GenerateTurnAsync(Settings() with { TurnPipeline = TurnPipelineMode.FourCalls, Capabilities = Settings().Capabilities with { StructuredOutputTier = StructuredOutputTier.StrictJsonSchema } }, null, context);
+
+        Assert.Equal(4, requests);
+        Assert.Equal("The door gives beneath your hand.", result.Narration);
+    }
+
+    [Fact]
+    public async Task GenerateTurn_FourCallPipelineSuppliesInvalidNarrationDraftToCorrection()
+    {
+        var requests = 0;
+        string? initialNarrationRequest = null;
+        var handler = new StubHandler(async request =>
+        {
+            requests++;
+            if (requests == 3) initialNarrationRequest = await request.Content!.ReadAsStringAsync();
+            var content = requests switch
+            {
+                1 => """{"result":"The action succeeds."}""",
+                2 => """{"result":"The door opens."}""",
+                3 => """{"result":"The doorway stands open."}""",
+                4 => """{"turnNumber":1,"acknowledgedPlayerAction":"Open the door","narration":"Placeholder","suggestedActions":["Placeholder","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[],"storySummary":"The door has opened."}""",
+                _ => throw new InvalidOperationException("The pipeline made an unexpected extra request.")
+            };
+            return Response(content);
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty),
+            StoryBible.Empty, PlannedEvents.Empty, new(StoryConditions.Empty, [], []), new(StoryConditions.Empty, [], []),
+            "", [], "Open the door", 1);
+
+        var result = await provider.GenerateTurnAsync(Settings() with { TurnPipeline = TurnPipelineMode.FourCalls }, null, context);
+
+        Assert.Equal(4, requests);
+        Assert.Equal("The doorway stands open.", result.Narration);
+        Assert.Contains("Return this exact JSON shape", initialNarrationRequest);
+        Assert.Equal(["Look around", "Continue the story"], result.SuggestedActions);
+    }
+
+    [Fact]
+    public async Task GenerateTurn_UsesEightCallPipelineAndReturnsRevisedNarration()
+    {
+        var requests = 0;
+        var handler = new StubHandler(_ =>
+        {
+            requests++;
+            var content = requests switch
+            {
+                3 => """{"narration":"The door gives beneath your hand.","suggestedActions":["Descend the stairs","Listen at the threshold"]}""",
+                7 => """{"turnNumber":1,"acknowledgedPlayerAction":"Open the door","narration":"Placeholder","suggestedActions":["Placeholder"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[],"storySummary":"The door has opened."}""",
+                8 => """{"narration":"The door yields, and cold air rises from the stairwell.","suggestedActions":["Descend the stairs","Listen at the threshold"]}""",
+                _ => """{"result":"Internal analysis."}"""
+            };
+            return Task.FromResult(Response(content));
+        });
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(
+            new("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty),
+            StoryBible.Empty, PlannedEvents.Empty, new(StoryConditions.Empty, [], []), new(StoryConditions.Empty, [], []),
+            "", [], "Open the door", 1);
+
+        var result = await provider.GenerateTurnAsync(Settings() with { TurnPipeline = TurnPipelineMode.EightCalls }, null, context);
+
+        Assert.Equal(8, requests);
+        Assert.Equal("The door yields, and cold air rises from the stairwell.", result.Narration);
+    }
+
     private static ApiConnectionSettings Settings() => NarratorDefaults.Create() with
     {
         BaseUrl = new("https://example.test/v1/"),
         ModelId = "story-model",
-        Capabilities = new(false, StructuredOutputTier.PromptedJson, "story-model", DateTimeOffset.UtcNow)
+        Capabilities = new(false, StructuredOutputTier.PromptedJson, "story-model", DateTimeOffset.UtcNow),
+        TurnPipeline = TurnPipelineMode.OneCall
     };
 
     private static HttpResponseMessage Response(string content)

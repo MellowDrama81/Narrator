@@ -142,6 +142,28 @@ export type OutputTokenParameter = 'maxCompletionTokens' | 'maxTokens';
 // Mirrors ConnectionCapabilities.InstructionMessageRole - which message role this provider accepts for
 // system-level instructions.
 export type InstructionMessageRole = 'system' | 'developer';
+export type TurnPipelineMode = 'oneCall' | 'twoCalls' | 'threeCalls' | 'fourCalls' | 'fiveCalls' | 'sevenCalls' | 'sevenCallsParallel' | 'eightCalls';
+export type GenerationCall = 'storyDefinition' | 'turn' | 'adjudication' | 'scenePlan' | 'planCritic' | 'narration' | 'storyBibleAnalysis' | 'plannedEventAnalysis' | 'conditionSummaryAnalysis' | 'stateExtraction' | 'proseRevision';
+export interface ModelCapability {
+  structuredOutputTier: StructuredOutputTier;
+  outputTokenParameter: OutputTokenParameter;
+  instructionMessageRole: InstructionMessageRole;
+  testedAtUtc: string;
+}
+export interface ApiConnectionProfile { id: string; name: string; baseUrl: string; apiKey: string; modelCapabilities?: Record<string, ModelCapability>; }
+export interface GenerationCallRoute {
+  connectionId: string;
+  modelId: string;
+  requestTimeoutSeconds?: number;
+  maxOutputTokens?: number;
+  temperature?: number | null;
+  topP?: number | null;
+  reasoningEffort?: string;
+  maxAutomaticRetries?: number;
+  retryInitialDelaySeconds?: number;
+  retryMaxDelaySeconds?: number;
+  retryMaxRetryAfterSeconds?: number;
+}
 
 export interface AppSettings {
   key: 'app';
@@ -187,6 +209,11 @@ export interface AppSettings {
   retryInitialDelaySeconds: number;
   retryMaxDelaySeconds: number;
   retryMaxRetryAfterSeconds: number;
+  maxResponseBodyBytes: number;
+  // Experimental: split each story turn into focused calls that can be compared with one another.
+  turnPipeline: TurnPipelineMode;
+  connections: ApiConnectionProfile[];
+  generationCallRoutes: Partial<Record<GenerationCall, GenerationCallRoute>>;
   // Connection-capability state, learned by probing the provider (see ConnectionCapabilities in
   // Settings.cs). Not user-editable - a later agent negotiates/probes and persists these
   // automatically. Whenever baseUrl or modelId changes, these get reset back toward their untested

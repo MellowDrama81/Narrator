@@ -17,6 +17,7 @@ const settings = (): AppSettings => ({
   // Fast enough that the HTTP-retry backoff tests don't actually wait real seconds.
   retryInitialDelaySeconds: 0.01,
   retryMaxDelaySeconds: 0.02,
+  turnPipeline: 'oneCall',
 });
 
 const story = (): StoryState => ({
@@ -87,6 +88,88 @@ afterEach(() => {
 });
 
 describe('LlmService', () => {
+  it('uses four calls when the multi-call turn pipeline is enabled', async () => {
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      call++;
+      const content = call === 1 ? { result: 'The planned event is not yet eligible.' }
+        : call === 2 ? { result: 'Resolve the lantern search and end with a decision.' }
+        : call === 3 ? { narration: 'You find a lantern beneath the desk.', suggestedActions: ['Search the desk', 'Climb the stairs'] }
+        : {
+            turnNumber: 1,
+            acknowledgedPlayerAction: 'Search for a light',
+            narration: 'Placeholder narration that will be replaced.',
+            suggestedActions: ['Placeholder action'],
+            relevantStoryBibleEntryIds: [], storyBibleUpdates: [], relevantPlannedEventIds: [], plannedEventUpdates: [],
+            revealedVictoryConditionIds: [], metVictoryConditionIds: [], revealedLossConditionIds: [], metLossConditionIds: [],
+            storySummary: 'You found a lantern in the observatory.',
+          };
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }), { status: 200 });
+    }));
+
+    const result = await new LlmService(fakeDb()).turn(
+      { ...settings(), turnPipeline: 'fourCalls' }, story(), 'Search for a light');
+
+    expect(call).toBe(4);
+    expect(result.narration).toBe('You find a lantern beneath the desk.');
+    expect(result.suggestedActions).toEqual(['Search the desk', 'Climb the stairs']);
+  });
+
+  it('uses seven calls when the full multi-call pipeline is enabled', async () => {
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      call++;
+      const content = call === 3 ? { narration: 'You find a lantern beneath the desk.', suggestedActions: ['Search the desk', 'Climb the stairs'] }
+        : call === 7 ? {
+            turnNumber: 1, acknowledgedPlayerAction: 'Search for a light', narration: 'Placeholder.', suggestedActions: ['Placeholder'],
+            relevantStoryBibleEntryIds: [], storyBibleUpdates: [], relevantPlannedEventIds: [], plannedEventUpdates: [],
+            revealedVictoryConditionIds: [], metVictoryConditionIds: [], revealedLossConditionIds: [], metLossConditionIds: [],
+            storySummary: 'You found a lantern in the observatory.',
+          }
+        : { result: `Internal analysis ${call}.` };
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }), { status: 200 });
+    }));
+
+    const result = await new LlmService(fakeDb()).turn(
+      { ...settings(), turnPipeline: 'sevenCalls' }, story(), 'Search for a light');
+
+    expect(call).toBe(7);
+    expect(result.narration).toBe('You find a lantern beneath the desk.');
+    expect(result.suggestedActions).toEqual(['Search the desk', 'Climb the stairs']);
+  });
+
+  it.each([
+    ['twoCalls', 2, [1]],
+    ['threeCalls', 3, [2]],
+    ['fiveCalls', 5, [4]],
+    ['sevenCallsParallel', 7, [3]],
+    ['eightCalls', 8, [3, 8]],
+  ] as const)('uses %s with %i calls', async (mode, expectedCalls, draftCalls) => {
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      call++;
+      const isRevision = call === 8;
+      const finalCall = mode === 'eightCalls' ? 7 : expectedCalls;
+      const content = call === finalCall ? {
+            turnNumber: 1, acknowledgedPlayerAction: 'Search for a light', narration: 'Placeholder.', suggestedActions: ['Placeholder'],
+            relevantStoryBibleEntryIds: [], storyBibleUpdates: [], relevantPlannedEventIds: [], plannedEventUpdates: [],
+            revealedVictoryConditionIds: [], metVictoryConditionIds: [], revealedLossConditionIds: [], metLossConditionIds: [],
+            storySummary: 'You found a lantern in the observatory.',
+          }
+        : (draftCalls as readonly number[]).includes(call)
+          ? { narration: isRevision ? 'The lantern flares brightly beneath the desk.' : 'You find a lantern beneath the desk.', suggestedActions: ['Search the desk', 'Climb the stairs'] }
+        : { result: `Internal analysis ${call}.` };
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }), { status: 200 });
+    }));
+
+    const result = await new LlmService(fakeDb()).turn({ ...settings(), turnPipeline: mode }, story(), 'Search for a light');
+
+    expect(call).toBe(expectedCalls);
+    expect(result.narration).toBe(mode === 'eightCalls'
+      ? 'The lantern flares brightly beneath the desk.'
+      : 'You find a lantern beneath the desk.');
+  });
+
   it('uses the configured suggestion range in a strict turn schema', async () => {
     const requests: Array<Record<string, unknown>> = [];
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

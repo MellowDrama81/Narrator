@@ -133,8 +133,13 @@ public interface INarratorApplication
     Task<ApiConnectionSettings> GetSettingsAsync(CancellationToken cancellationToken = default);
     Task<bool> HasApiCredentialAsync(CancellationToken cancellationToken = default);
     Task SaveSettingsAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default);
+    Task SaveConnectionCredentialAsync(Guid connectionId, string? credential, CancellationToken cancellationToken = default);
+    Task<string?> GetConnectionCredentialAsync(Guid connectionId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<string>> DiscoverModelsAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<string>> DiscoverModelsAsync(Guid connectionId, CancellationToken cancellationToken = default);
     Task<ConnectionTestResult> TestConnectionAsync(CancellationToken cancellationToken = default);
+    Task<ConnectionTestResult> TestConnectionAsync(Guid connectionId, CancellationToken cancellationToken = default);
+    Task<ConnectionTestResult> TestConnectionAsync(Guid connectionId, string modelId, CancellationToken cancellationToken = default);
     Task<BibleLimitImpact> GetBibleLimitImpactAsync(StoryGenerationSettings proposed, CancellationToken cancellationToken = default);
     Task<StoryDefinition> CreateBlankDefinitionAsync(string? title = null, CancellationToken cancellationToken = default);
     Task<StoryDefinition> GenerateDefinitionAsync(StoryPromptDraft draft, bool overwrite, Guid targetId, CancellationToken cancellationToken = default);

@@ -3,10 +3,14 @@ import { DefinitionEditorComponent } from './pages/definition-editor.component';
 import { DefinitionsComponent } from './pages/definitions.component';
 import { PlayComponent } from './pages/play.component';
 import { SettingsComponent } from './pages/settings.component';
+import { ConnectionsComponent } from './pages/connections.component';
+import { PipelineSettingsComponent } from './pages/pipeline-settings.component';
 import { StoriesComponent } from './pages/stories.component';
 import { TrashComponent } from './pages/trash.component';
 
 export const routes: Routes = [
+  { path: 'connections', component: ConnectionsComponent, title: 'API Connections' },
+  { path: 'pipeline', component: PipelineSettingsComponent, title: 'Pipeline Calls' },
   { path: '', pathMatch: 'full', redirectTo: 'definitions' },
   { path: 'settings', component: SettingsComponent, title: 'Settings · Mellow Narrator' },
   { path: 'definitions', component: DefinitionsComponent, title: 'Story Definitions · Mellow Narrator' },

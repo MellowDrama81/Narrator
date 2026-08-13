@@ -352,4 +352,95 @@ internal static class GeneratedPromptTemplates
         acknowledgedPlayerAction.
         """;
 
+    public const string TurnAdjudicationInstruction = """
+        You are the turn adjudicator. Decide the outcome of the player action and whether each conditional planned event was already eligible before this turn. Return a compact internal decision; do not write player-facing prose.
+        """;
+
+    public const string ScenePlanInstruction = """
+        You are the scene planner. Using this adjudication, plan concrete scene beats that materially change the situation and end at the next player decision. Do not write final prose.
+
+        ADJUDICATION:
+        {adjudication}
+        """;
+
+    public const string PlanCriticInstruction = """
+        You are the continuity and rule critic. Check this scene plan against the story context and adjudication. Identify any invented facts, premature planned events, broken conditions, or lack of meaningful progress, then give binding corrections. Do not write final prose.
+
+        ADJUDICATION:
+        {adjudication}
+
+        SCENE PLAN:
+        {scenePlan}
+        """;
+
+    public const string NarrationFromAdjudicationInstruction = """
+        You are the narrator. Write only player-facing narration and suggested actions from this adjudication. Return JSON only with exactly narration and suggestedActions. Return this exact JSON shape: {"narration":"player-facing scene text","suggestedActions":["first action","second action"]}. Do not make new rule, condition, or state decisions.
+
+        ADJUDICATION:
+        {adjudication}
+        """;
+
+    public const string NarrationFromPlanInstruction = """
+        You are the narrator. Write only the player-facing narration and suggested actions from this approved scene plan. Return JSON only with exactly narration and suggestedActions. Return this exact JSON shape: {"narration":"player-facing scene text","suggestedActions":["first action","second action"]}. Do not make new rule, condition, or state decisions.
+
+        SCENE PLAN:
+        {scenePlan}
+        """;
+
+    public const string NarrationFromCritiqueInstruction = """
+        You are the narrator. Write only player-facing narration and suggested actions from this approved scene plan and binding critique. Return JSON only with exactly narration and suggestedActions. Return this exact JSON shape: {"narration":"player-facing scene text","suggestedActions":["first action","second action"]}. Do not make new rule, condition, or state decisions.
+
+        SCENE PLAN:
+        {scenePlan}
+
+        CRITIQUE:
+        {critique}
+        """;
+
+    public const string NarrationOnlyInstruction = """
+        You are the narrator. Resolve the current turn and write only player-facing narration and suggested actions. Return JSON only with exactly narration and suggestedActions. Return this exact JSON shape: {"narration":"player-facing scene text","suggestedActions":["first action","second action"]}. Do not return state updates.
+        """;
+
+    public const string StoryBibleAnalysisInstruction = """
+        You are the Story Bible analyst. Identify only durable facts that should be added, changed, or removed after the approved scene. Do not write player-facing prose.
+
+        APPROVED ARTIFACTS:
+        {artifacts}
+        """;
+
+    public const string PlannedEventAnalysisInstruction = """
+        You are the planned-event analyst. Determine only planned-event relevance and updates, strictly enforcing event conditions from the adjudication. Do not write player-facing prose.
+
+        APPROVED ARTIFACTS:
+        {artifacts}
+        """;
+
+    public const string ConditionSummaryAnalysisInstruction = """
+        You are the condition and summary analyst. Determine victory/loss condition reports and a concise replacement summary from the approved scene. Do not write player-facing prose.
+
+        APPROVED ARTIFACTS:
+        {artifacts}
+        """;
+
+    public const string StateExtractionInstruction = """
+        You are the state extractor. Preserve the supplied narration and suggested actions exactly. Return the complete turn JSON, deriving only Story Bible updates, Planned Event updates, condition reports, and the replacement summary from the approved artifacts.
+
+        APPROVED ARTIFACTS:
+        {artifacts}
+        """;
+
+    public const string StateExtractionFromAnalysesInstruction = """
+        You are the state extractor. Preserve the supplied narration and suggested actions exactly. Return the complete turn JSON, deriving Story Bible updates, Planned Event updates, condition reports, and the replacement summary only from the supplied analyses.
+
+        ANALYSES:
+        {analyses}
+        """;
+
+    public const string ProseRevisionInstruction = """
+        You are a player-facing prose editor. Rewrite the supplied narration and suggested actions for clarity and vivid pacing while preserving every fact, outcome, condition status, and decision exactly. Return this exact JSON shape: {"narration":"player-facing scene text","suggestedActions":["first action","second action"]}. Do not add events or state changes.
+
+        APPROVED TURN:
+        {turn}
+        """;
+
 }

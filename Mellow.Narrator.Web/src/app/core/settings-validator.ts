@@ -42,6 +42,30 @@ export function validateSettings(settings: AppSettings): Record<string, string> 
   if (settings.baseUrl && !isAbsoluteHttpUrl(settings.baseUrl)) {
     errors['baseUrl'] = 'Must be an absolute http or https URL.';
   }
+  const names = new Set<string>();
+  for (const connection of settings.connections ?? []) {
+    const name = connection.name.trim().toLocaleLowerCase();
+    if (!name || connection.name.length > 100 || names.has(name)) errors['connections'] = 'Connection names must be unique and at most 100 characters.';
+    names.add(name);
+    if (connection.baseUrl && !isAbsoluteHttpUrl(connection.baseUrl)) errors['connections'] = 'Each connection needs an absolute http or https URL.';
+  }
+  const ids = new Set((settings.connections ?? []).map(connection => connection.id));
+  if (Object.values(settings.generationCallRoutes ?? {}).some(route => route?.connectionId && !ids.has(route.connectionId)))
+    errors['generationCallRoutes'] = 'A generation call references a removed connection.';
+  for (const route of Object.values(settings.generationCallRoutes ?? {})) {
+    if (!route) continue;
+    if (route.requestTimeoutSeconds !== undefined) range(errors, 'call request timeout', route.requestTimeoutSeconds, 10, 900);
+    if (route.maxOutputTokens !== undefined) range(errors, 'call maximum output tokens', route.maxOutputTokens, 256, 131072);
+    if (route.temperature !== undefined) optionalRange(errors, 'call temperature', route.temperature, 0, 2);
+    if (route.topP !== undefined) optionalRange(errors, 'call top P', route.topP, 0, 1);
+    if (route.maxAutomaticRetries !== undefined) range(errors, 'call automatic retries', route.maxAutomaticRetries, 0, 5);
+    if (route.retryInitialDelaySeconds !== undefined) range(errors, 'call initial retry delay', route.retryInitialDelaySeconds, .25, 30);
+    if (route.retryMaxDelaySeconds !== undefined) range(errors, 'call maximum retry delay', route.retryMaxDelaySeconds, 1, 120);
+    if (route.retryMaxRetryAfterSeconds !== undefined) range(errors, 'call maximum Retry-After', route.retryMaxRetryAfterSeconds, 1, 600);
+    if (route.retryMaxDelaySeconds !== undefined && route.retryInitialDelaySeconds !== undefined &&
+      route.retryMaxDelaySeconds < route.retryInitialDelaySeconds)
+      errors['call maximum retry delay'] = 'Must be at least the initial retry delay.';
+  }
 
   range(errors, 'requestTimeoutSeconds', settings.requestTimeoutSeconds, 10, 900);
   range(errors, 'maxOutputTokens', settings.maxOutputTokens, 256, 131072);
@@ -75,6 +99,7 @@ export function validateSettings(settings: AppSettings): Record<string, string> 
     && settings.retryMaxDelaySeconds < settings.retryInitialDelaySeconds) {
     errors['retryMaxDelaySeconds'] = 'Maximum retry delay must be at least the initial delay.';
   }
+  range(errors, 'maxResponseBodyBytes', settings.maxResponseBodyBytes, 64 * 1024, 16 * 1024 * 1024);
 
   range(errors, 'maxStoryTitleCharacters', settings.maxStoryTitleCharacters, 1, 1000);
   range(errors, 'maxStoryLabelCharacters', settings.maxStoryLabelCharacters, 1, 1000);

@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { DbService } from './db.service';
 import {
-  AppSettings, DefinitionGeneration, InstructionMessageRole, OutputTokenParameter, PlannedEventUpdate,
+  AppSettings, DefinitionGeneration, GenerationCall, InstructionMessageRole, OutputTokenParameter, PlannedEventUpdate,
   StoryBibleUpdate, StoryCondition, StoryDefinition, StoryState, StructuredOutputTier, TurnGeneration,
 } from './models';
 import { plannedEventCapacity } from './planned-events';
@@ -154,23 +154,31 @@ export class LlmService {
 
   async loadModels(settings: AppSettings): Promise<string[]> {
     const response = await this.fetch(settings, 'models', { method: 'GET' });
-    const body = await response.json() as { data?: Array<{ id?: string }> };
-    return (body.data ?? []).map(x => x.id ?? '').filter(Boolean).sort();
+    const body = await this.readJson<{ data?: Array<{ id?: string }> }>(settings, response);
+    return (body.data ?? []).map(x => x.id ?? '').filter(id => Boolean(id) && this.isTextGenerationModel(id)).sort();
   }
 
-  async test(settings: AppSettings): Promise<string> {
+  // Providers usually expose only model IDs, so this removes only clearly non-chat families and keeps
+  // unrecognized IDs available for third-party OpenAI-compatible servers.
+  private isTextGenerationModel(modelId: string): boolean {
+    return !['embed', 'embedding', 'moderation', 'whisper', 'transcri', 'tts', 'text-to-speech',
+      'dall-e', 'stable-diffusion', 'image-generation', 'imagegen', 'rerank', 're-rank']
+      .some(marker => modelId.toLocaleLowerCase().includes(marker));
+  }
+
+  async test(settings: AppSettings): Promise<{ message: string; tier: StructuredOutputTier; outputTokenParameter: OutputTokenParameter; instructionMessageRole: InstructionMessageRole }> {
     if (!settings.baseUrl) throw new Error('Configure an API base URL first.');
     if (!settings.modelId) throw new Error('Choose or enter a model first.');
-    const { value } = await this.completeStructured(settings, [
+    const { value, tier } = await this.completeStructured(settings, [
       { role: 'system', content: 'Return a JSON object with exactly one boolean property named ok.' },
       { role: 'user', content: 'Return ok as true.' },
     ], this.objectSchema({ ok: { type: 'boolean' } }));
     if (value['ok'] !== true) throw new Error('The model could not produce a valid structured response.');
-    return `Connected to ${settings.modelId}.`;
+    return { message: `Connected to ${settings.modelId} (${tier}).`, tier, outputTokenParameter: settings.outputTokenParameter, instructionMessageRole: settings.instructionMessageRole };
   }
 
   async generateDefinition(settings: AppSettings, storyDefinitionPrompt: string): Promise<DefinitionGeneration> {
-    return this.completeWithCorrection(settings, [
+    return this.completeWithCorrection(this.connectionSettings(settings, 'storyDefinition'), [
       { role: 'system', content: promptTemplates.storyDefinitionInstruction },
       { role: 'user', content: storyDefinitionPrompt },
     ], this.definitionSchema(settings), value => this.parseDefinition(value));
@@ -290,8 +298,207 @@ export class LlmService {
       }),
     });
 
-    return this.completeWithCorrection(settings, messages, this.turnSchema(settings), value =>
-      this.parseTurn(value, settings, next, action, turns, victory, loss));
+    if (settings.turnPipeline === 'oneCall')
+      return this.completeWithCorrection(this.connectionSettings(settings, 'turn'), messages, this.turnSchema(settings), value =>
+        this.parseTurn(value, settings, next, action, turns, victory, loss));
+
+    if (settings.turnPipeline === 'twoCalls')
+      return this.generateTurnWithTwoCallPipeline(settings, messages, next, action, turns, victory, loss);
+    if (settings.turnPipeline === 'threeCalls')
+      return this.generateTurnWithThreeCallPipeline(settings, messages, next, action, turns, victory, loss);
+    if (settings.turnPipeline === 'fourCalls')
+      return this.generateTurnWithFourCallPipeline(settings, messages, next, action, turns, victory, loss);
+    if (settings.turnPipeline === 'fiveCalls')
+      return this.generateTurnWithFiveCallPipeline(settings, messages, next, action, turns, victory, loss);
+    if (settings.turnPipeline === 'sevenCallsParallel')
+      return this.generateTurnWithSevenCallPipeline(settings, messages, next, action, turns, victory, loss, true);
+    if (settings.turnPipeline === 'eightCalls')
+      return this.generateTurnWithEightCallPipeline(settings, messages, next, action, turns, victory, loss);
+
+    return this.generateTurnWithSevenCallPipeline(settings, messages, next, action, turns, victory, loss);
+  }
+
+  private async generateTurnWithTwoCallPipeline(settings: AppSettings, baseMessages: Message[], next: number, action: string | null, turns: StoryState['turns'], victory: ConditionsContext, loss: ConditionsContext): Promise<TurnGeneration> {
+    const draft = await this.generateNarrationDraft(settings, baseMessages,
+      promptTemplates.narrationOnlyInstruction);
+    return this.extractTurn(settings, baseMessages, { narration: draft.narration, suggestedActions: draft.suggestedActions }, next, action, turns, victory, loss, draft);
+  }
+
+  private async generateTurnWithThreeCallPipeline(settings: AppSettings, baseMessages: Message[], next: number, action: string | null, turns: StoryState['turns'], victory: ConditionsContext, loss: ConditionsContext): Promise<TurnGeneration> {
+    const adjudication = await this.generateStage(settings, baseMessages,
+      promptTemplates.turnAdjudicationInstruction);
+    const draft = await this.generateNarrationDraft(settings, baseMessages,
+      promptTemplates.narrationFromAdjudicationInstruction.replace('{adjudication}', adjudication));
+    return this.extractTurn(settings, baseMessages, { adjudication, narration: draft.narration, suggestedActions: draft.suggestedActions }, next, action, turns, victory, loss, draft);
+  }
+
+  private async generateTurnWithFiveCallPipeline(settings: AppSettings, baseMessages: Message[], next: number, action: string | null, turns: StoryState['turns'], victory: ConditionsContext, loss: ConditionsContext): Promise<TurnGeneration> {
+    const adjudication = await this.generateStage(settings, baseMessages,
+      promptTemplates.turnAdjudicationInstruction);
+    const scenePlan = await this.generateStage(settings, baseMessages,
+      promptTemplates.scenePlanInstruction.replace('{adjudication}', adjudication));
+    const critique = await this.generateStage(settings, baseMessages,
+      promptTemplates.planCriticInstruction.replace('{adjudication}', adjudication).replace('{scenePlan}', scenePlan));
+    const draft = await this.generateNarrationDraft(settings, baseMessages,
+      promptTemplates.narrationFromCritiqueInstruction.replace('{scenePlan}', scenePlan).replace('{critique}', critique));
+    return this.extractTurn(settings, baseMessages, { adjudication, scenePlan, critique, narration: draft.narration, suggestedActions: draft.suggestedActions }, next, action, turns, victory, loss, draft);
+  }
+
+  // Separating hidden-state decisions from the player-facing prose makes the decision trail explicit
+  // and gives the narrator an approved plan to follow. The final call owns only persistent state.
+  private async generateTurnWithFourCallPipeline(
+    settings: AppSettings,
+    baseMessages: Message[],
+    next: number,
+    action: string | null,
+    turns: StoryState['turns'],
+    victory: ConditionsContext,
+    loss: ConditionsContext,
+  ): Promise<TurnGeneration> {
+    const adjudication = await this.generateStage(settings, baseMessages,
+      promptTemplates.turnAdjudicationInstruction);
+    const scenePlan = await this.generateStage(settings, baseMessages,
+      promptTemplates.scenePlanInstruction.replace('{adjudication}', adjudication));
+    const draft = await this.generateNarrationDraft(settings, baseMessages,
+      promptTemplates.narrationFromPlanInstruction.replace('{scenePlan}', scenePlan));
+    const extracted = await this.completeWithCorrection(this.connectionSettings(settings, 'stateExtraction'), [
+      ...baseMessages,
+      {
+        role: 'system',
+        content: promptTemplates.stateExtractionInstruction.replace('{artifacts}', ''),
+      },
+      { role: 'user', content: JSON.stringify({ adjudication, scenePlan, narration: draft.narration, suggestedActions: draft.suggestedActions }) },
+    ], this.turnSchema(settings), value => this.parseTurn(value, settings, next, action, turns, victory, loss));
+    return { ...extracted, narration: draft.narration, suggestedActions: draft.suggestedActions };
+  }
+
+  private async generateTurnWithSevenCallPipeline(
+    settings: AppSettings,
+    baseMessages: Message[],
+    next: number,
+    action: string | null,
+    turns: StoryState['turns'],
+    victory: ConditionsContext,
+    loss: ConditionsContext,
+    parallelAnalyses = false,
+  ): Promise<TurnGeneration> {
+    const adjudication = await this.generateStage(settings, baseMessages,
+      promptTemplates.turnAdjudicationInstruction);
+    const scenePlan = await this.generateStage(settings, baseMessages,
+      promptTemplates.scenePlanInstruction.replace('{adjudication}', adjudication));
+    const draft = await this.generateNarrationDraft(settings, baseMessages,
+      promptTemplates.narrationFromPlanInstruction.replace('{scenePlan}', scenePlan));
+    const artifacts = { adjudication, scenePlan, narration: draft.narration, suggestedActions: draft.suggestedActions };
+    const artifactJson = JSON.stringify(artifacts);
+    const bibleInstruction = promptTemplates.storyBibleAnalysisInstruction.replace('{artifacts}', artifactJson);
+    const eventInstruction = promptTemplates.plannedEventAnalysisInstruction.replace('{artifacts}', artifactJson);
+    const outcomeInstruction = promptTemplates.conditionSummaryAnalysisInstruction.replace('{artifacts}', artifactJson);
+    const [bibleAnalysis, eventAnalysis, outcomeAnalysis] = parallelAnalyses
+      ? await Promise.all([
+          this.generateStage(settings, baseMessages, bibleInstruction),
+          this.generateStage(settings, baseMessages, eventInstruction),
+          this.generateStage(settings, baseMessages, outcomeInstruction),
+        ])
+      : [
+          await this.generateStage(settings, baseMessages, bibleInstruction),
+          await this.generateStage(settings, baseMessages, eventInstruction),
+          await this.generateStage(settings, baseMessages, outcomeInstruction),
+        ];
+    const extracted = await this.completeWithCorrection(this.connectionSettings(settings, 'stateExtraction'), [
+      ...baseMessages,
+      {
+        role: 'system',
+        content: promptTemplates.stateExtractionFromAnalysesInstruction.replace('{analyses}', ''),
+      },
+      { role: 'user', content: JSON.stringify({ artifacts, bibleAnalysis, eventAnalysis, outcomeAnalysis }) },
+    ], this.turnSchema(settings), value => this.parseTurn(value, settings, next, action, turns, victory, loss));
+    return { ...extracted, narration: draft.narration, suggestedActions: draft.suggestedActions };
+  }
+
+  private async generateTurnWithEightCallPipeline(settings: AppSettings, baseMessages: Message[], next: number, action: string | null, turns: StoryState['turns'], victory: ConditionsContext, loss: ConditionsContext): Promise<TurnGeneration> {
+    // The final prose-only call runs after state extraction and cannot change persistent state.
+    const extracted = await this.generateTurnWithSevenCallPipeline(settings, baseMessages, next, action, turns, victory, loss);
+    const revised = await this.generateNarrationDraft(settings, baseMessages,
+      promptTemplates.proseRevisionInstruction.replace('{turn}', '') +
+      JSON.stringify({ narration: extracted.narration, suggestedActions: extracted.suggestedActions, storySummary: extracted.storySummary }), 'proseRevision');
+    return { ...extracted, narration: revised.narration, suggestedActions: revised.suggestedActions };
+  }
+
+  private async extractTurn(settings: AppSettings, baseMessages: Message[], artifacts: object, next: number, action: string | null, turns: StoryState['turns'], victory: ConditionsContext, loss: ConditionsContext, draft: { narration: string; suggestedActions: string[] }): Promise<TurnGeneration> {
+    const extracted = await this.completeWithCorrection(this.connectionSettings(settings, 'stateExtraction'), [
+      ...baseMessages,
+      { role: 'system', content: promptTemplates.stateExtractionInstruction.replace('{artifacts}', '') },
+      { role: 'user', content: JSON.stringify(artifacts) },
+    ], this.turnSchema(settings), value => this.parseTurn(value, settings, next, action, turns, victory, loss));
+    return { ...extracted, narration: draft.narration, suggestedActions: draft.suggestedActions };
+  }
+
+  private connectionSettings(settings: AppSettings, call: GenerationCall): AppSettings {
+    const route = settings.generationCallRoutes?.[call];
+    const connection = settings.connections?.find(candidate => candidate.id === route?.connectionId) ?? settings.connections?.[0];
+    if (!connection) return settings;
+    const modelId = route?.modelId || settings.modelId;
+    const capability = connection.modelCapabilities?.[modelId];
+    return {
+      ...settings,
+      baseUrl: connection.baseUrl,
+      apiKey: connection.apiKey,
+      modelId,
+      structuredOutputTier: capability?.structuredOutputTier ?? 'untested',
+      outputTokenParameter: capability?.outputTokenParameter ?? 'maxCompletionTokens',
+      instructionMessageRole: capability?.instructionMessageRole ?? 'developer',
+      requestTimeoutSeconds: route?.requestTimeoutSeconds ?? settings.requestTimeoutSeconds,
+      maxOutputTokens: route?.maxOutputTokens ?? settings.maxOutputTokens,
+      temperature: route?.temperature ?? settings.temperature,
+      topP: route?.topP ?? settings.topP,
+      reasoningEffort: route?.reasoningEffort ?? settings.reasoningEffort,
+      maxAutomaticRetries: route?.maxAutomaticRetries ?? settings.maxAutomaticRetries,
+      retryInitialDelaySeconds: route?.retryInitialDelaySeconds ?? settings.retryInitialDelaySeconds,
+      retryMaxDelaySeconds: route?.retryMaxDelaySeconds ?? settings.retryMaxDelaySeconds,
+      retryMaxRetryAfterSeconds: route?.retryMaxRetryAfterSeconds ?? settings.retryMaxRetryAfterSeconds,
+    };
+  }
+
+  private async generateStage(settings: AppSettings, baseMessages: Message[], instruction: string, call: GenerationCall = 'turn'): Promise<string> {
+    const routedCall = call === 'turn' ? this.stageCall(instruction) : call;
+    return this.completeWithCorrection(this.connectionSettings(settings, routedCall), [...baseMessages, { role: 'system', content: instruction }],
+      this.stageSchema(), value => {
+        const result = value['result'];
+        if (typeof result !== 'string' || !result.trim()) throw new Error('The pipeline stage returned no result.');
+        return result;
+      });
+  }
+
+  private stageCall(instruction: string): GenerationCall {
+    if (instruction.includes('turn adjudicator')) return 'adjudication';
+    if (instruction.includes('scene planner')) return 'scenePlan';
+    if (instruction.includes('continuity and rule critic')) return 'planCritic';
+    if (instruction.includes('Story Bible analyst')) return 'storyBibleAnalysis';
+    if (instruction.includes('planned-event analyst')) return 'plannedEventAnalysis';
+    if (instruction.includes('condition and summary analyst')) return 'conditionSummaryAnalysis';
+    return 'turn';
+  }
+
+  private async generateNarrationDraft(
+    settings: AppSettings, baseMessages: Message[], instruction: string, call: GenerationCall = 'narration',
+  ): Promise<{ narration: string; suggestedActions: string[] }> {
+    return this.completeWithCorrection(this.connectionSettings(settings, call), [...baseMessages, { role: 'system', content: instruction }],
+      this.narrationDraftSchema(settings), value => {
+        const stageResult = value['result'];
+        if (typeof stageResult === 'string' && stageResult.trim() && stageResult.length <= settings.maxNarrationCharacters) {
+          const defaults = ['Look around', 'Continue the story', 'Proceed cautiously'];
+          return { narration: stageResult, suggestedActions: Array.from({ length: settings.minSuggestedActions }, (_, index) => defaults[index % defaults.length]).slice(0, settings.maxSuggestedActions) };
+        }
+        const narration = value['narration'];
+        const suggestedActions = value['suggestedActions'];
+        if (typeof narration !== 'string' || !narration.trim() || narration.length > settings.maxNarrationCharacters)
+          throw new Error('Narration is empty or exceeds the configured limit.');
+        if (!Array.isArray(suggestedActions) || suggestedActions.length < settings.minSuggestedActions ||
+            suggestedActions.length > settings.maxSuggestedActions ||
+            suggestedActions.some(item => typeof item !== 'string' || !item.trim() || item.length > settings.maxSuggestedActionCharacters))
+          throw new Error('Suggested actions do not meet the configured limits.');
+        return { narration, suggestedActions };
+      });
   }
 
   private parseTurn(
@@ -402,7 +609,10 @@ export class LlmService {
     } catch (error) {
       if (error instanceof ProviderNetworkError) throw error;
       const validationError = error instanceof Error ? error.message : String(error);
-      const corrected = [...messages, {
+      const corrected: Message[] = [...messages, {
+        role: 'assistant',
+        content: JSON.stringify(value),
+      }, {
         role: 'system',
         content: promptTemplates.correctiveRetryInstruction.replace('{validationError}', validationError),
       }];
@@ -497,7 +707,7 @@ export class LlmService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const envelope = await response.json() as { choices?: Array<{ message?: { content?: string; refusal?: string } }> };
+    const envelope = await this.readJson<{ choices?: Array<{ message?: { content?: string; refusal?: string } }> }>(settings, response);
     const message = envelope.choices?.[0]?.message;
     if (message?.refusal) throw new Error('The model refused the request.');
     const content = message?.content;
@@ -587,6 +797,22 @@ export class LlmService {
     });
   }
 
+  private stageSchema(): JsonSchema {
+    return this.objectSchema({ result: { type: 'string', maxLength: 12000 } });
+  }
+
+  private narrationDraftSchema(settings: AppSettings): JsonSchema {
+    return this.objectSchema({
+      narration: { type: 'string', maxLength: settings.maxNarrationCharacters },
+      suggestedActions: {
+        type: 'array',
+        minItems: settings.minSuggestedActions,
+        maxItems: settings.maxSuggestedActions,
+        items: { type: 'string', maxLength: settings.maxSuggestedActionCharacters },
+      },
+    });
+  }
+
   // condition is freeform prose describing what must happen, or what state the story must be in, before
   // this event can be pursued - not a structured reference to another entry. Nullable: most events have
   // no prerequisite. See the ProposedPlannedEvent comment in models.ts.
@@ -654,7 +880,12 @@ export class LlmService {
       const timer = window.setTimeout(() => controller.abort(), settings.requestTimeoutSeconds * 1000);
       try {
         const response = await fetch(`${base}/${relative}`, { ...init, headers, signal: controller.signal });
-        if (response.ok) return response;
+        if (response.ok) {
+          const length = Number(response.headers.get('content-length'));
+          if (Number.isFinite(length) && length > settings.maxResponseBodyBytes)
+            throw new Error('The provider response exceeds the configured maximum API response size.');
+          return response;
+        }
         const text = (await response.text()).slice(0, 2000);
         const retryable = response.status === 429 || response.status === 408 || response.status >= 500;
         const error = this.classifyHttpError(response, text, settings.apiKey);
@@ -678,6 +909,13 @@ export class LlmService {
     throw new ProviderNetworkError(timedOut
       ? 'The provider request timed out.'
       : 'The provider could not be reached. Check the URL and whether it permits browser CORS requests.');
+  }
+
+  private async readJson<T>(settings: AppSettings, response: Response): Promise<T> {
+    const bytes = await response.arrayBuffer();
+    if (bytes.byteLength > settings.maxResponseBodyBytes)
+      throw new Error('The provider response exceeds the configured maximum API response size.');
+    return JSON.parse(new TextDecoder().decode(bytes)) as T;
   }
 
   // Mirrors Error(): maps a non-success HTTP response into a friendly, specific message where the status

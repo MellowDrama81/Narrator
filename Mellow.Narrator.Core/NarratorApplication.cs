@@ -34,6 +34,17 @@ public sealed class NarratorApplication(
                 await secureStorage.GetAsync(SecureStorageKeys.ApiCredential, cancellationToken));
         }, cancellationToken);
 
+    public Task SaveConnectionCredentialAsync(Guid connectionId, string? credential, CancellationToken cancellationToken = default) =>
+        connectionCoordinator.RunExclusiveAsync(async () =>
+        {
+            var key = SecureStorageKeys.ApiCredentialForConnection(connectionId);
+            if (string.IsNullOrEmpty(credential)) await secureStorage.RemoveAsync(key, cancellationToken);
+            else await secureStorage.SetAsync(key, credential, cancellationToken);
+        }, cancellationToken);
+
+    public Task<string?> GetConnectionCredentialAsync(Guid connectionId, CancellationToken cancellationToken = default) =>
+        connectionCoordinator.RunExclusiveAsync(() => secureStorage.GetAsync(SecureStorageKeys.ApiCredentialForConnection(connectionId), cancellationToken), cancellationToken);
+
     public async Task SaveSettingsAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default)
     {
         var errors = SettingsValidator.Validate(settings);
@@ -111,6 +122,42 @@ public sealed class NarratorApplication(
         return result;
     }
 
+    public Task<ConnectionTestResult> TestConnectionAsync(Guid connectionId, CancellationToken cancellationToken = default) =>
+        TestConnectionAsync(connectionId, null, cancellationToken);
+
+    public Task<ConnectionTestResult> TestConnectionAsync(Guid connectionId, string? requestedModelId, CancellationToken cancellationToken = default) =>
+        connectionCoordinator.RunExclusiveAsync(async () =>
+        {
+            var current = await settingsStore.LoadAsync(cancellationToken);
+            var profile = current.Connections.FirstOrDefault(candidate => candidate.Id == connectionId)
+                ?? throw new NarratorException("The selected API connection no longer exists.");
+            var model = requestedModelId ?? current.GenerationCallRoutes.Values
+                .FirstOrDefault(route => route.ConnectionId == connectionId && !string.IsNullOrWhiteSpace(route.ModelId))?.ModelId
+                ?? current.ModelId;
+            if (string.IsNullOrWhiteSpace(model))
+                throw new NarratorException("Assign a model to this connection on a call-routing page before testing it.");
+            var credential = await secureStorage.GetAsync(SecureStorageKeys.ApiCredentialForConnection(connectionId), cancellationToken)
+                ?? await secureStorage.GetAsync(SecureStorageKeys.ApiCredential, cancellationToken);
+            var capabilities = profile.ModelCapabilities.TryGetValue(model, out var tested)
+                ? tested : profile.Capabilities with { StructuredOutputTier = StructuredOutputTier.Untested, TestedModelId = null, TestedAtUtc = null };
+            var settings = current with { BaseUrl = profile.BaseUrl, ModelId = model, Capabilities = capabilities };
+            var result = await provider.TestConnectionAsync(settings, credential, cancellationToken);
+            if (result.Success)
+            {
+                var updated = current with
+                {
+                    Connections = current.Connections.Select(connection => connection.Id == connectionId
+                        ? connection with { ModelCapabilities = connection.ModelCapabilities
+                            .Concat(new[] { new KeyValuePair<string, ConnectionCapabilities>(model, result.Capabilities) })
+                            .GroupBy(pair => pair.Key, StringComparer.Ordinal)
+                            .ToDictionary(group => group.Key, group => group.Last().Value, StringComparer.Ordinal) }
+                        : connection).ToArray()
+                };
+                await settingsStore.SaveAsync(updated, cancellationToken);
+            }
+            return result;
+        }, cancellationToken);
+
     public async Task<IReadOnlyList<string>> DiscoverModelsAsync(CancellationToken cancellationToken = default)
     {
         var (settings, credential) = await DiscoveryConnectionAsync(cancellationToken);
@@ -128,6 +175,25 @@ public sealed class NarratorApplication(
         _logger.LogInformation("Model discovery completed; {ModelCount} models returned.", models.Count);
         return models;
     }
+
+    public Task<IReadOnlyList<string>> DiscoverModelsAsync(Guid connectionId, CancellationToken cancellationToken = default) =>
+        connectionCoordinator.RunExclusiveAsync(async () =>
+        {
+            var current = await settingsStore.LoadAsync(cancellationToken);
+            var profile = current.Connections.FirstOrDefault(candidate => candidate.Id == connectionId)
+                ?? throw new NarratorException("The selected API connection no longer exists.");
+            var credential = await secureStorage.GetAsync(SecureStorageKeys.ApiCredentialForConnection(connectionId), cancellationToken)
+                ?? await secureStorage.GetAsync(SecureStorageKeys.ApiCredential, cancellationToken);
+            var settings = current with { BaseUrl = profile.BaseUrl, Capabilities = profile.Capabilities };
+            var models = await provider.DiscoverModelsAsync(settings, credential, cancellationToken);
+            var updated = current with
+            {
+                Connections = current.Connections.Select(connection => connection.Id == connectionId
+                    ? connection with { Capabilities = connection.Capabilities with { SupportsModelDiscovery = true } } : connection).ToArray()
+            };
+            await settingsStore.SaveAsync(updated, cancellationToken);
+            return models;
+        }, cancellationToken);
 
     public async Task<BibleLimitImpact> GetBibleLimitImpactAsync(
         StoryGenerationSettings proposed,

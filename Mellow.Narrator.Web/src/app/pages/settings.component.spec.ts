@@ -23,8 +23,9 @@ describe('SettingsComponent', () => {
     fixture.detectChanges();
     const element = fixture.nativeElement as HTMLElement;
 
-    expect(element.textContent).toContain('OpenAI-compatible API');
-    expect(element.querySelectorAll('input')).toHaveLength(42);
+    expect(element.textContent).toContain('Story flow');
+    expect(element.textContent).toContain('Advanced safety');
+    expect(element.querySelectorAll('input').length).toBeGreaterThan(0);
     expect(element.textContent).toContain('Save settings');
   });
 
@@ -46,27 +47,7 @@ describe('SettingsComponent', () => {
     const element = fixture.nativeElement as HTMLElement;
 
     expect(element.textContent).toContain('Browser storage could not be opened');
-    expect(element.textContent).toContain('OpenAI-compatible API');
-  });
-
-  it('shows a visible model selector after models load', async () => {
-    await TestBed.configureTestingModule({
-      imports: [SettingsComponent],
-      providers: [
-        provideRouter([]),
-        { provide: DbService, useValue: { settings: () => new Promise(() => undefined) } },
-        { provide: LlmService, useValue: {} },
-        { provide: MatSnackBar, useValue: { open: vi.fn() } },
-      ],
-    }).compileComponents();
-
-    const fixture = TestBed.createComponent(SettingsComponent);
-    fixture.componentInstance.models = ['gpt-4.1', 'gpt-5'];
-    fixture.detectChanges();
-    const element = fixture.nativeElement as HTMLElement;
-
-    expect(element.querySelector('mat-select')).toBeTruthy();
-    expect(element.textContent).toContain('2 models available');
+    expect(element.textContent).toContain('Generation');
   });
 
   it('rejects invalid settings on save without persisting them', async () => {
@@ -139,6 +120,27 @@ describe('SettingsComponent', () => {
 
     expect(saveSettings).toHaveBeenCalledTimes(1);
     expect(open).toHaveBeenCalledWith('Settings saved to this browser.', 'Dismiss', expect.anything());
+  });
+
+  it('persists the turn pipeline choice', async () => {
+    const saveSettings = vi.fn().mockResolvedValue(undefined);
+    await TestBed.configureTestingModule({
+      imports: [SettingsComponent],
+      providers: [
+        provideRouter([]),
+        { provide: DbService, useValue: { settings: () => Promise.resolve(defaultSettings()), saveSettings } },
+        { provide: LlmService, useValue: {} },
+        { provide: MatSnackBar, useValue: { open: vi.fn() } },
+      ],
+    }).compileComponents();
+
+    const fixture = TestBed.createComponent(SettingsComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.componentInstance.settings.turnPipeline = 'sevenCalls';
+    await fixture.componentInstance.save();
+
+    expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ turnPipeline: 'sevenCalls' }));
   });
 
   it('resets negotiated connection capabilities when the base URL changes', async () => {

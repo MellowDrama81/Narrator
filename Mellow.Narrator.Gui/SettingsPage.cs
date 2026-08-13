@@ -48,14 +48,19 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
     private readonly Entry _model = new() { Placeholder = "Model ID" };
     private readonly Picker _discoveredModels = new() { Title = "Discovered models" };
     private readonly Entry _apiKey = new() { Placeholder = "API key (optional)", IsPassword = true };
-    private readonly Entry _timeout = Numeric();
-    private readonly Entry _maxOutput = Numeric();
     private readonly Entry _recentTurns = Numeric();
     private readonly Entry _maxEntries = Numeric();
     private readonly Entry _maxPlannedEvents = Numeric();
-    private readonly Entry _temperature = Numeric();
-    private readonly Entry _topP = Numeric();
-    private readonly Entry _reasoning = new();
+    private readonly Picker _turnPipeline = new()
+    {
+        Title = "Turn generation pipeline",
+        ItemsSource = new[]
+        {
+            "1 call (standard)", "2 calls (draft + state)", "3 calls (adjudicate + draft + state)",
+            "4 calls (adjudicate + plan + draft + state)", "5 calls (adds plan critic)",
+            "7 calls (full sequential analysis)", "7 calls (parallel analysis)", "8 calls (full analysis + prose revision)"
+        }
+    };
     private readonly Picker _logLevel = new()
     {
         Title = "Logging level",
@@ -115,26 +120,59 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
 
         var content = new VerticalStackLayout { Padding = 16, Spacing = 8 };
         content.Children.Add(Ui.Heading("Settings"));
-        content.Children.Add(Ui.Heading("API Connection"));
-        content.Children.Add(Field("Base URL", _baseUrl));
-        content.Children.Add(Field("Model ID", _model));
-        content.Children.Add(_discoveredModels);
-        content.Children.Add(new Label { Text = "Changing the model applies to every subsequent LLM request, including existing stories.", FontSize = 12 });
-        content.Children.Add(Field("API key", _apiKey));
-        content.Children.Add(new Label { Text = "A masked value means an API key is saved securely. Focus the field to replace it.", FontSize = 12 });
-        content.Children.Add(clear);
+        content.Children.Add(Ui.Heading("Story Flow"));
+        content.Children.Add(_turnPipeline);
+        content.Children.Add(new Label
+        {
+            Text = "2 calls separate draft and state. 3â€“5 calls add adjudication, planning, and a plan critic. 7 calls add Story Bible, event, and condition/summary analysis; its parallel variant is faster. 8 calls also revises the prose. More calls cost more.",
+            FontSize = 12
+        });
+        content.Children.Add(Ui.SecondaryButton("Configure Pipeline Calls", async (_, _) =>
+            await Navigation.PushAsync(new PipelineSettingsPage(_app, PipelineCalls(SelectedPipeline())))));
+        content.Children.Add(Ui.SecondaryButton("Manage API Connections", async (_, _) =>
+            await Navigation.PushAsync(new ConnectionProfilesPage(_app))));
 
-        content.Children.Add(Ui.Heading("Generation"));
-        content.Children.Add(Field("Timeout seconds (default 120; range 10–900)", _timeout));
-        content.Children.Add(Field("Maximum output tokens (default 4096; range 256–131072)", _maxOutput));
-        content.Children.Add(Field("Temperature (blank; range 0–2)", _temperature));
-        content.Children.Add(Field("Top-p (blank; range 0–1)", _topP));
-        content.Children.Add(Field("Reasoning effort (blank = provider default)", _reasoning));
-        content.Children.Add(Field("Recent turns (default 8; range 0–100)", _recentTurns));
-        content.Children.Add(Field("Maximum Story Bible entries (default 200; range 1–2000)", _maxEntries));
-        content.Children.Add(Field("Maximum Planned Events (default 50; range 1–500)", _maxPlannedEvents));
+        var memory = Section(content, "Context & Memory", expanded: false);
+        memory.Children.Add(Field("Recent turns in context", _recentTurns));
+        memory.Children.Add(Field("Maximum Story Bible entries", _maxEntries));
+        memory.Children.Add(Field("Maximum Planned Events", _maxPlannedEvents));
+        Add(memory, "Bible entry character limit", "bibleEntry");
+        Add(memory, "Bible total character limit", "bibleTotal");
+        Add(memory, "Bible capacity warning percent", "bibleWarning");
+        Add(memory, "Planned Event entry character limit", "plannedEventEntry");
+        Add(memory, "Planned Events total character limit", "plannedEventTotal");
+        Add(memory, "Planned Events capacity warning percent", "plannedEventWarning");
+        Add(memory, "Story summary characters", "storySummary");
 
-        var logging = Section(content, "Logging", expanded: false);
+        var narration = Section(content, "Narration & Player Input", expanded: false);
+        Add(narration, "Player action characters", "action");
+        Add(narration, "Narration characters", "narration");
+        Add(narration, "Minimum suggested actions", "suggestedMin");
+        Add(narration, "Maximum suggested actions", "suggestedCount");
+        Add(narration, "Suggested action characters", "suggestedLength");
+        Add(narration, "Minimum paragraphs per response", "paragraphsMin");
+        Add(narration, "Maximum paragraphs per response", "paragraphsMax");
+        Add(narration, "Minimum sentences per paragraph", "sentencesMin");
+        Add(narration, "Maximum sentences per paragraph", "sentencesMax");
+
+        var structure = Section(content, "Story Structure", expanded: false);
+        Add(structure, "Title characters", "title");
+        Add(structure, "Label characters", "label");
+        Add(structure, "Story Definition Prompt / Story Prompt characters", "prompt");
+        Add(structure, "Bible category characters", "category");
+        Add(structure, "Bible name characters", "name");
+        Add(structure, "Bible updates per response", "updates");
+        Add(structure, "Planned Event description characters", "plannedEventDescription");
+        Add(structure, "Planned Event condition characters", "plannedEventCondition");
+        Add(structure, "Planned Event updates per response", "plannedEventUpdates");
+        Add(structure, "Victory/Loss Conditions per list", "conditionCount");
+        Add(structure, "Condition description characters", "conditionDescription");
+
+        var safety = Section(content, "Advanced Safety", expanded: false);
+        Add(safety, "Maximum API response size (bytes)", "responseBytes");
+        safety.Children.Add(new Label { Text = "Rejects unexpectedly large provider responses before they use excessive memory.", FontSize = 12 });
+
+        var logging = Section(content, "Diagnostics", expanded: false);
         logging.Children.Add(new Label { Text = "Log level" });
         logging.Children.Add(_logLevel);
         logging.Children.Add(new Label { Text = "default Information", FontSize = 11, TextColor = Colors.Gray });
@@ -144,48 +182,8 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
             FontSize = 12
         });
 
-        var bibleAndRetries = Section(content, "Story Bible & Retries", expanded: false);
-        Add(bibleAndRetries, "Bible entry character limit", "bibleEntry");
-        Add(bibleAndRetries, "Bible total character limit", "bibleTotal");
-        Add(bibleAndRetries, "Bible warning percent", "bibleWarning");
-        Add(bibleAndRetries, "Automatic retries", "retries");
-        Add(bibleAndRetries, "Initial retry delay seconds", "retryInitial");
-        Add(bibleAndRetries, "Maximum retry delay seconds", "retryMax");
-        Add(bibleAndRetries, "Maximum Retry-After seconds", "retryAfter");
-
-        var plannedEvents = Section(content, "Planned Events", expanded: false);
-        Add(plannedEvents, "Planned Event entry character limit", "plannedEventEntry");
-        Add(plannedEvents, "Planned Events total character limit", "plannedEventTotal");
-        Add(plannedEvents, "Planned Events warning percent", "plannedEventWarning");
-
-        var contentLimits = Section(content, "Content Limits", expanded: false);
-        Add(contentLimits, "Title characters", "title");
-        Add(contentLimits, "Label characters", "label");
-        Add(contentLimits, "Story Definition Prompt / Story Prompt characters", "prompt");
-        Add(contentLimits, "Player action characters", "action");
-        Add(contentLimits, "Narration characters", "narration");
-        Add(contentLimits, "Minimum suggested actions", "suggestedMin");
-        Add(contentLimits, "Maximum suggested actions", "suggestedCount");
-        Add(contentLimits, "Suggested action characters", "suggestedLength");
-        Add(contentLimits, "Minimum paragraphs per response", "paragraphsMin");
-        Add(contentLimits, "Maximum paragraphs per response", "paragraphsMax");
-        Add(contentLimits, "Minimum sentences per paragraph", "sentencesMin");
-        Add(contentLimits, "Maximum sentences per paragraph", "sentencesMax");
-        Add(contentLimits, "Bible category characters", "category");
-        Add(contentLimits, "Bible name characters", "name");
-        Add(contentLimits, "Bible updates per response", "updates");
-        Add(contentLimits, "Planned Event description characters", "plannedEventDescription");
-        Add(contentLimits, "Planned Event condition characters", "plannedEventCondition");
-        Add(contentLimits, "Planned Event updates per response", "plannedEventUpdates");
-        Add(contentLimits, "Victory/Loss Conditions per list", "conditionCount");
-        Add(contentLimits, "Condition description characters", "conditionDescription");
-        Add(contentLimits, "Story summary characters", "storySummary");
-        Add(contentLimits, "HTTP response bytes", "responseBytes");
-
         content.Children.Add(Ui.Buttons(
             Ui.Button("Save", Save),
-            Ui.SecondaryButton("Load Models", DiscoverModels),
-            Ui.SecondaryButton("Test Connection", Test),
             Ui.SecondaryButton("Reset defaults", Reset)));
         content.Children.Add(Ui.SecondaryButton("Manage Trash", async (_, _) => await Navigation.PushModalAsync(new NavigationPage(new TrashPage(_trash)))));
         content.Children.Add(_status);
@@ -210,6 +208,24 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         parent.Children.Add(body);
         return body;
     }
+
+    private TurnPipelineMode SelectedPipeline() => _turnPipeline.SelectedIndex switch
+    {
+        0 => TurnPipelineMode.OneCall, 1 => TurnPipelineMode.TwoCalls, 2 => TurnPipelineMode.ThreeCalls,
+        3 => TurnPipelineMode.FourCalls, 4 => TurnPipelineMode.FiveCalls, 5 => TurnPipelineMode.SevenCalls,
+        6 => TurnPipelineMode.SevenCallsParallel, 7 => TurnPipelineMode.EightCalls, _ => TurnPipelineMode.FourCalls
+    };
+
+    private static IReadOnlyList<GenerationCall> PipelineCalls(TurnPipelineMode pipeline) => pipeline switch
+    {
+        TurnPipelineMode.OneCall => [GenerationCall.StoryDefinition, GenerationCall.Turn],
+        TurnPipelineMode.TwoCalls => [GenerationCall.StoryDefinition, GenerationCall.Narration, GenerationCall.StateExtraction],
+        TurnPipelineMode.ThreeCalls => [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.Narration, GenerationCall.StateExtraction],
+        TurnPipelineMode.FourCalls => [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.Narration, GenerationCall.StateExtraction],
+        TurnPipelineMode.FiveCalls => [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.PlanCritic, GenerationCall.Narration, GenerationCall.StateExtraction],
+        TurnPipelineMode.EightCalls => [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.Narration, GenerationCall.StoryBibleAnalysis, GenerationCall.PlannedEventAnalysis, GenerationCall.ConditionSummaryAnalysis, GenerationCall.StateExtraction, GenerationCall.ProseRevision],
+        _ => [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.Narration, GenerationCall.StoryBibleAnalysis, GenerationCall.PlannedEventAnalysis, GenerationCall.ConditionSummaryAnalysis, GenerationCall.StateExtraction]
+    };
 
     PendingOperationState? IPendingOperationPage.PendingOperation => _pendingOperation;
     bool IInFlightRequestPage.HasInFlightRequest => _request is not null;
@@ -326,14 +342,25 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         var modelId = string.IsNullOrWhiteSpace(_model.Text) ? null : _model.Text.Trim();
         return current with
         {
-            BaseUrl = baseUrl,
-            ModelId = modelId,
-            RequestTimeout = TimeSpan.FromSeconds(Parse(_timeout, "timeout")),
-            MaxOutputTokens = (int)Parse(_maxOutput, "maximum output tokens"),
-            Parameters = new(
-                Optional(_temperature, "temperature"),
-                Optional(_topP, "top-p"),
-                string.IsNullOrWhiteSpace(_reasoning.Text) ? null : _reasoning.Text),
+            // Connection profiles and their models are configured on dedicated pages. Retain the
+            // legacy values solely as a migration fallback for existing workspaces.
+            BaseUrl = current.BaseUrl,
+            ModelId = current.ModelId,
+            RequestTimeout = current.RequestTimeout,
+            MaxOutputTokens = current.MaxOutputTokens,
+            Parameters = current.Parameters,
+            TurnPipeline = _turnPipeline.SelectedIndex switch
+            {
+                0 => TurnPipelineMode.OneCall,
+                1 => TurnPipelineMode.TwoCalls,
+                2 => TurnPipelineMode.ThreeCalls,
+                3 => TurnPipelineMode.FourCalls,
+                4 => TurnPipelineMode.FiveCalls,
+                5 => TurnPipelineMode.SevenCalls,
+                6 => TurnPipelineMode.SevenCallsParallel,
+                7 => TurnPipelineMode.EightCalls,
+                _ => TurnPipelineMode.FourCalls
+            },
             StoryGeneration = new(
                 (int)Parse(_recentTurns, "recent turns"),
                 (int)Parse(_maxEntries, "maximum Story Bible entries"),
@@ -344,7 +371,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
                 Int("plannedEventEntry"),
                 Int("plannedEventTotal"),
                 Int("plannedEventWarning")),
-            Retry = new(Int("retries"), Seconds("retryInitial"), Seconds("retryMax"), Seconds("retryAfter")),
+            Retry = current.Retry,
             ContentLimits = new(Int("title"), Int("label"), Int("prompt"), Int("action"), Int("narration"),
                 Int("suggestedCount"), Int("suggestedLength"),
                 Int("category"), Int("name"), Int("updates"),
@@ -362,11 +389,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
             // Compare parsed Uri objects, not strings: current.BaseUrl.ToString() is normalized (trailing
             // slash, casing, escaping) while the entered text isn't, so a string comparison would treat
             // an unchanged URL as "changed" and reset Capabilities to Untested for no reason.
-            Capabilities = !Equals(current.BaseUrl, baseUrl)
-                ? new(false, StructuredOutputTier.Untested, null, null)
-                : current.ModelId != modelId
-                    ? new(current.Capabilities.SupportsModelDiscovery, StructuredOutputTier.Untested, null, null)
-                    : current.Capabilities
+            Capabilities = current.Capabilities
         };
     }
 
@@ -392,11 +415,18 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
     {
         _baseUrl.Text = settings.BaseUrl?.ToString() ?? "";
         _model.Text = settings.ModelId ?? "";
-        _timeout.Text = settings.RequestTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture);
-        _maxOutput.Text = settings.MaxOutputTokens.ToString(CultureInfo.InvariantCulture);
-        _temperature.Text = settings.Parameters.Temperature?.ToString(CultureInfo.InvariantCulture) ?? "";
-        _topP.Text = settings.Parameters.TopP?.ToString(CultureInfo.InvariantCulture) ?? "";
-        _reasoning.Text = settings.Parameters.ReasoningEffort ?? "";
+        _turnPipeline.SelectedIndex = settings.TurnPipeline switch
+        {
+            TurnPipelineMode.OneCall => 0,
+            TurnPipelineMode.TwoCalls => 1,
+            TurnPipelineMode.ThreeCalls => 2,
+            TurnPipelineMode.FourCalls => 3,
+            TurnPipelineMode.FiveCalls => 4,
+            TurnPipelineMode.SevenCalls => 5,
+            TurnPipelineMode.SevenCallsParallel => 6,
+            TurnPipelineMode.EightCalls => 7,
+            _ => 3
+        };
         _recentTurns.Text = settings.StoryGeneration.RecentTurnCount.ToString(CultureInfo.InvariantCulture);
         _maxEntries.Text = settings.StoryGeneration.MaxStoryBibleEntries.ToString(CultureInfo.InvariantCulture);
         _maxPlannedEvents.Text = settings.StoryGeneration.MaxPlannedEvents.ToString(CultureInfo.InvariantCulture);
@@ -407,10 +437,6 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         Set("plannedEventEntry", settings.StoryGeneration.MaxPlannedEventCharacters);
         Set("plannedEventTotal", settings.StoryGeneration.MaxPlannedEventsCharacters);
         Set("plannedEventWarning", settings.StoryGeneration.PlannedEventsWarningPercent);
-        Set("retries", settings.Retry.MaxAutomaticRetries);
-        Set("retryInitial", settings.Retry.InitialDelay.TotalSeconds);
-        Set("retryMax", settings.Retry.MaxDelay.TotalSeconds);
-        Set("retryAfter", settings.Retry.MaxRetryAfter.TotalSeconds);
         var c = settings.ContentLimits;
         Set("title", c.MaxStoryTitleCharacters);
         Set("label", c.MaxStoryLabelCharacters);
