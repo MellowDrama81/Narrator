@@ -1,4 +1,7 @@
 @inherits LayoutComponentBase
+@implements IDisposable
+@inject NavigationManager Navigation
+@inject HybridWorkspace Workspace
 
 <div class="shell">
   <aside><a class="brand" href="">Mellow <em>Narrator</em></a><nav>
@@ -10,5 +13,28 @@
     <NavLink href="pipeline">Pipeline calls</NavLink>
     <NavLink href="trash">Trash</NavLink>
   </nav></aside>
-  <main>@Body</main>
+  <main>@if (Workspace.InterruptedMessage is not null) { <div class="status">@Workspace.InterruptedMessage</div> } @Body</main>
 </div>
+@code {
+  protected override async Task OnInitializedAsync()
+  {
+    await Workspace.InitializeAsync();
+    Navigation.LocationChanged += OnLocationChanged;
+    await TrackCurrentAsync();
+  }
+  private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(TrackCurrentAsync);
+  private Task TrackCurrentAsync()
+  {
+    var path = Navigation.ToBaseRelativePath(Navigation.Uri).Trim('/');
+    var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+    return parts.FirstOrDefault() switch
+    {
+      "definition" when parts.Length > 1 && Guid.TryParse(parts[1], out var definitionId) => Workspace.TrackAsync(TabType.StoryDefinition, definitionId),
+      "story" when parts.Length > 1 && Guid.TryParse(parts[1], out var storyId) => Workspace.TrackAsync(TabType.PlayStory, storyId),
+      "definitions" => Workspace.TrackAsync(TabType.StoryDefinitionList, null),
+      "stories" => Workspace.TrackAsync(TabType.PlayStoryList, null),
+      _ => Task.CompletedTask
+    };
+  }
+  public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+}
