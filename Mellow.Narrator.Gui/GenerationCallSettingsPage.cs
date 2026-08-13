@@ -8,6 +8,7 @@ public sealed class PipelineSettingsPage : ContentPage
     private readonly INarratorApplication _app;
     private readonly IReadOnlyList<GenerationCall> _calls;
     private readonly Dictionary<GenerationCall, RouteEditor> _editors = [];
+    private readonly Dictionary<Guid, IReadOnlyList<string>> _modelsByConnection = [];
     private bool _loaded;
 
     public PipelineSettingsPage(INarratorApplication app, IReadOnlyList<GenerationCall> calls)
@@ -51,6 +52,7 @@ public sealed class PipelineSettingsPage : ContentPage
         {
             editor.Connection.ItemsSource = settings.Connections.ToArray();
             editor.Connection.ItemDisplayBinding = new Binding(nameof(ApiConnectionProfile.Name));
+            editor.Connection.SelectedIndexChanged += (_, _) => ApplyCachedModels(editor);
             var route = settings.GenerationCallRoutes.TryGetValue(call, out var configured) ? configured : null;
             editor.Connection.SelectedItem = settings.Connections.FirstOrDefault(profile => profile.Id == route?.ConnectionId) ?? settings.Connections.FirstOrDefault();
             editor.Model.Text = route?.ModelId ?? settings.ModelId;
@@ -103,10 +105,17 @@ public sealed class PipelineSettingsPage : ContentPage
         try
         {
             var profile = editor.Connection.SelectedItem as ApiConnectionProfile ?? throw new NarratorException("Select a connection before loading models.");
-            var models = await _app.DiscoverModelsAsync(profile.Id);
-            editor.AvailableModels.ItemsSource = models.ToArray();
+            if (!_modelsByConnection.TryGetValue(profile.Id, out var models))
+            {
+                models = await _app.DiscoverModelsAsync(profile.Id);
+                _modelsByConnection[profile.Id] = models;
+            }
             if (models.Count == 0) throw new NarratorException("This connection returned no models. Enter a model ID manually.");
-            if (!models.Contains(editor.Model.Text)) editor.AvailableModels.SelectedItem = models[0];
+            foreach (var otherEditor in _editors.Values.Where(candidate => (candidate.Connection.SelectedItem as ApiConnectionProfile)?.Id == profile.Id))
+            {
+                otherEditor.AvailableModels.ItemsSource = models.ToArray();
+                if (!models.Contains(otherEditor.Model.Text)) otherEditor.AvailableModels.SelectedItem = models[0];
+            }
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
@@ -149,5 +158,17 @@ public sealed class PipelineSettingsPage : ContentPage
         }
 
         private static Entry Numeric() => new() { Keyboard = Keyboard.Numeric };
+    }
+
+    private void ApplyCachedModels(RouteEditor editor)
+    {
+        if (editor.Connection.SelectedItem is not ApiConnectionProfile profile || !_modelsByConnection.TryGetValue(profile.Id, out var models))
+        {
+            editor.AvailableModels.ItemsSource = null;
+            return;
+        }
+        editor.AvailableModels.ItemsSource = models.ToArray();
+        var selected = models.FirstOrDefault(model => string.Equals(model, editor.Model.Text, StringComparison.Ordinal));
+        if (selected is not null) editor.AvailableModels.SelectedItem = selected;
     }
 }
