@@ -1,0 +1,16 @@
+<section class="editor-card">
+    <h2>@Title</h2>
+    @foreach (var item in Values.Entries) { <details><summary>@item.Description</summary><label>Description<textarea @bind="_edits[item.Id].Description"></textarea></label><label class="check"><input type="checkbox" @bind="_edits[item.Id].Secret" /> Keep secret from the player</label><div class="actions"><button class="button" @onclick="() => SaveItem(item.Id)">Save</button><button class="button danger" @onclick="() => Remove(item.Id)">Remove</button></div></details> }
+    <details><summary>Add condition</summary><label>Description<textarea @bind="_newDescription"></textarea></label><label class="check"><input type="checkbox" @bind="_newSecret" /> Keep secret from the player</label><button class="button" @onclick="Add">Add condition</button></details>
+</section>
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "Conditions";
+    [Parameter, EditorRequired] public StoryConditions Values { get; set; } = StoryConditions.Empty;
+    [Parameter, EditorRequired] public EventCallback<StoryConditions> OnSave { get; set; }
+    private readonly Dictionary<Guid, Edit> _edits = []; private string _newDescription = ""; private bool _newSecret;
+    protected override void OnParametersSet() { foreach (var item in Values.Entries) if (!_edits.ContainsKey(item.Id)) _edits[item.Id] = new(item.Description, item.Secret); foreach (var id in _edits.Keys.Except(Values.Entries.Select(x => x.Id)).ToArray()) _edits.Remove(id); }
+    private Task SaveItem(Guid id) => OnSave.InvokeAsync(new StoryConditions(Values.Entries.Select(x => x.Id == id ? new StoryCondition(id, _edits[id].Description, _edits[id].Secret) : x).ToArray()));
+    private Task Remove(Guid id) => OnSave.InvokeAsync(new StoryConditions(Values.Entries.Where(x => x.Id != id).ToArray()));
+    private async Task Add() { await OnSave.InvokeAsync(new StoryConditions(Values.Entries.Append(new StoryCondition(Guid.NewGuid(), _newDescription, _newSecret)).ToArray())); _newDescription = ""; _newSecret = false; }
+    private sealed class Edit(string description, bool secret) { public string Description { get; set; } = description; public bool Secret { get; set; } = secret; }
+}

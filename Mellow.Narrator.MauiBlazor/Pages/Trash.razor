@@ -1,5 +1,6 @@
 @page "/trash"
 @inject NarratorWorkspace Workspace
-<header><p class="eyebrow">Recovery</p><h1>Trash</h1></header>
-@if (_items is null) { <p>Loading trash…</p> } else if (_items.Count == 0) { <div class="empty">Nothing in trash.</div> } else { <section class="cards">@foreach (var item in _items) { <article><h2>@item.DisplayName</h2><p>@item.Type · deleted @item.DeletedAtUtc.ToLocalTime().ToString("g")</p></article> }</section> }
-@code { private IReadOnlyList<TrashItem>? _items; protected override async Task OnInitializedAsync() => _items = await Workspace.TrashAsync(); }
+
+<header><p class="eyebrow">Recovery</p><h1>Trash</h1><p class="lead">Restore a story or definition, or permanently remove it.</p></header>
+@if (_items is null) { <p>Loading trash…</p> } else { <div class="actions"><button class="button danger" @onclick="Empty" disabled="@(_items.Count == 0)">Empty trash</button></div>@if (_items.Count == 0) { <div class="empty">Trash is empty.</div> } else { <section class="cards">@foreach (var item in _items) { <article><h2>@item.DisplayName</h2><p>@item.Type · deleted @item.DeletedAtUtc.ToLocalTime().ToString("g")</p><div class="actions"><button class="button" @onclick="() => Restore(item.TrashId)">Restore</button><button class="button danger" @onclick="() => Delete(item.TrashId)">Delete permanently</button></div></article> }</section> } }
+@code { private IReadOnlyList<TrashItem>? _items; protected override async Task OnInitializedAsync() => await Refresh(); private async Task Refresh() => _items = await Workspace.TrashAsync(); private async Task Restore(string id) { await Workspace.RestoreTrashAsync(id); await Refresh(); } private async Task Delete(string id) { await Workspace.DeleteTrashAsync(id); await Refresh(); } private async Task Empty() { await Workspace.EmptyTrashAsync(); await Refresh(); } }
