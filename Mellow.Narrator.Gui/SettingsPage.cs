@@ -143,10 +143,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         content.Children.Add(Ui.SecondaryButton("Manage API connections", async (_, _) =>
             await Navigation.PushAsync(new ConnectionProfilesPage(_app))));
         content.Children.Add(Ui.SecondaryButton("Configure selected pipeline calls", async (_, _) =>
-        {
-            foreach (var call in PipelineCalls(SelectedPipeline()))
-                await Navigation.PushAsync(new GenerationCallSettingsPage(_app, call));
-        }));
+            await Navigation.PushAsync(new PipelineSettingsPage(_app, PipelineCalls(SelectedPipeline())))));
 
         var logging = Section(content, "Logging", expanded: false);
         logging.Children.Add(new Label { Text = "Log level" });
