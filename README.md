@@ -266,7 +266,7 @@ remove it for good — both actions ask for confirmation first, since they canno
 - `Mellow.Narrator.Core` — domain models, use cases, limits, Story Bible processing, and interfaces.
 - `Mellow.Narrator.OpenAiCompatible` — non-streaming Chat Completions adapter with structured JSON output and retry handling.
 - `Mellow.Narrator.Persistence` — versioned folder-of-JSON persistence, backups, recovery, staging, copying, and trash.
-- `Mellow.Narrator.Gui` — standard MAUI `TabbedPage` UI and secure-storage adapter.
+- `Mellow.Narrator.Maui` — standard MAUI `TabbedPage` UI and secure-storage adapter.
 - `Mellow.Narrator.Web` — client-side Angular Material UI with IndexedDB persistence.
 - `prompts` — canonical Markdown prompt templates and their manifest, shared by both applications.
 - `tools/Mellow.Narrator.PromptGenerator` — build-time generator for typed C# and TypeScript prompt constants.
@@ -278,8 +278,8 @@ remove it for good — both actions ask for confirmation first, since they canno
 ```powershell
 dotnet restore Mellow.Narrator.slnx
 dotnet test Mellow.Narrator.Tests/Mellow.Narrator.Tests.csproj
-dotnet build Mellow.Narrator.Gui/Mellow.Narrator.Gui.csproj -f net10.0-windows10.0.19041.0
-dotnet build Mellow.Narrator.Gui/Mellow.Narrator.Gui.csproj -f net10.0-android
+dotnet build Mellow.Narrator.Maui/Mellow.Narrator.Maui.csproj -f net10.0-windows10.0.19041.0
+dotnet build Mellow.Narrator.Maui/Mellow.Narrator.Maui.csproj -f net10.0-android
 ```
 
 Every successful push to `master` also publishes the Android app in the Release configuration and
@@ -298,7 +298,7 @@ depending on a different shared Windows App SDK runtime installed on a user's co
 Publish .NET itself as self-contained as well:
 
 ```powershell
-dotnet publish Mellow.Narrator.Gui/Mellow.Narrator.Gui.csproj `
+dotnet publish Mellow.Narrator.Maui/Mellow.Narrator.Maui.csproj `
   -c Release `
   -f net10.0-windows10.0.19041.0 `
   -r win-x64 `

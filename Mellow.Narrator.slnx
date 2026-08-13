@@ -1,7 +1,7 @@
 <Solution>
   <Project Path="Mellow.Narrator.Cli/Mellow.Narrator.Cli.csproj" />
   <Project Path="Mellow.Narrator.Core/Mellow.Narrator.Core.csproj" />
-  <Project Path="Mellow.Narrator.Gui/Mellow.Narrator.Gui.csproj" />
+  <Project Path="Mellow.Narrator.Maui/Mellow.Narrator.Maui.csproj" />
   <Project Path="Mellow.Narrator.OpenAiCompatible/Mellow.Narrator.OpenAiCompatible.csproj" />
   <Project Path="Mellow.Narrator.Persistence/Mellow.Narrator.Persistence.csproj" />
   <Project Path="Mellow.Narrator.Tests/Mellow.Narrator.Tests.csproj" />
