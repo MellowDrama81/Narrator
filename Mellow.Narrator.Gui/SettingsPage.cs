@@ -120,22 +120,59 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
 
         var content = new VerticalStackLayout { Padding = 16, Spacing = 8 };
         content.Children.Add(Ui.Heading("Settings"));
-        content.Children.Add(Ui.Heading("Generation"));
-        content.Children.Add(Field("Recent turns (default 8; range 0–100)", _recentTurns));
-        content.Children.Add(Field("Maximum Story Bible entries (default 200; range 1–2000)", _maxEntries));
-        content.Children.Add(Field("Maximum Planned Events (default 50; range 1–500)", _maxPlannedEvents));
+        content.Children.Add(Ui.Heading("Story Flow"));
         content.Children.Add(_turnPipeline);
         content.Children.Add(new Label
         {
             Text = "2 calls separate draft and state. 3â€“5 calls add adjudication, planning, and a plan critic. 7 calls add Story Bible, event, and condition/summary analysis; its parallel variant is faster. 8 calls also revises the prose. More calls cost more.",
             FontSize = 12
         });
-        content.Children.Add(Ui.SecondaryButton("Manage API connections", async (_, _) =>
-            await Navigation.PushAsync(new ConnectionProfilesPage(_app))));
-        content.Children.Add(Ui.SecondaryButton("Configure selected pipeline calls", async (_, _) =>
+        content.Children.Add(Ui.SecondaryButton("Configure Pipeline Calls", async (_, _) =>
             await Navigation.PushAsync(new PipelineSettingsPage(_app, PipelineCalls(SelectedPipeline())))));
+        content.Children.Add(Ui.SecondaryButton("Manage API Connections", async (_, _) =>
+            await Navigation.PushAsync(new ConnectionProfilesPage(_app))));
 
-        var logging = Section(content, "Logging", expanded: false);
+        var memory = Section(content, "Context & Memory", expanded: false);
+        memory.Children.Add(Field("Recent turns in context", _recentTurns));
+        memory.Children.Add(Field("Maximum Story Bible entries", _maxEntries));
+        memory.Children.Add(Field("Maximum Planned Events", _maxPlannedEvents));
+        Add(memory, "Bible entry character limit", "bibleEntry");
+        Add(memory, "Bible total character limit", "bibleTotal");
+        Add(memory, "Bible capacity warning percent", "bibleWarning");
+        Add(memory, "Planned Event entry character limit", "plannedEventEntry");
+        Add(memory, "Planned Events total character limit", "plannedEventTotal");
+        Add(memory, "Planned Events capacity warning percent", "plannedEventWarning");
+        Add(memory, "Story summary characters", "storySummary");
+
+        var narration = Section(content, "Narration & Player Input", expanded: false);
+        Add(narration, "Player action characters", "action");
+        Add(narration, "Narration characters", "narration");
+        Add(narration, "Minimum suggested actions", "suggestedMin");
+        Add(narration, "Maximum suggested actions", "suggestedCount");
+        Add(narration, "Suggested action characters", "suggestedLength");
+        Add(narration, "Minimum paragraphs per response", "paragraphsMin");
+        Add(narration, "Maximum paragraphs per response", "paragraphsMax");
+        Add(narration, "Minimum sentences per paragraph", "sentencesMin");
+        Add(narration, "Maximum sentences per paragraph", "sentencesMax");
+
+        var structure = Section(content, "Story Structure", expanded: false);
+        Add(structure, "Title characters", "title");
+        Add(structure, "Label characters", "label");
+        Add(structure, "Story Definition Prompt / Story Prompt characters", "prompt");
+        Add(structure, "Bible category characters", "category");
+        Add(structure, "Bible name characters", "name");
+        Add(structure, "Bible updates per response", "updates");
+        Add(structure, "Planned Event description characters", "plannedEventDescription");
+        Add(structure, "Planned Event condition characters", "plannedEventCondition");
+        Add(structure, "Planned Event updates per response", "plannedEventUpdates");
+        Add(structure, "Victory/Loss Conditions per list", "conditionCount");
+        Add(structure, "Condition description characters", "conditionDescription");
+
+        var safety = Section(content, "Advanced Safety", expanded: false);
+        Add(safety, "Maximum API response size (bytes)", "responseBytes");
+        safety.Children.Add(new Label { Text = "Rejects unexpectedly large provider responses before they use excessive memory.", FontSize = 12 });
+
+        var logging = Section(content, "Diagnostics", expanded: false);
         logging.Children.Add(new Label { Text = "Log level" });
         logging.Children.Add(_logLevel);
         logging.Children.Add(new Label { Text = "default Information", FontSize = 11, TextColor = Colors.Gray });
@@ -144,40 +181,6 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
             Text = "Logs are rolling JSON-lines files in the app's private data folder. Trace includes complete LLM request and response bodies and may contain private story and player content. API credentials are never logged.",
             FontSize = 12
         });
-
-        var bibleAndRetries = Section(content, "Story Bible & Retries", expanded: false);
-        Add(bibleAndRetries, "Bible entry character limit", "bibleEntry");
-        Add(bibleAndRetries, "Bible total character limit", "bibleTotal");
-        Add(bibleAndRetries, "Bible warning percent", "bibleWarning");
-
-        var plannedEvents = Section(content, "Planned Events", expanded: false);
-        Add(plannedEvents, "Planned Event entry character limit", "plannedEventEntry");
-        Add(plannedEvents, "Planned Events total character limit", "plannedEventTotal");
-        Add(plannedEvents, "Planned Events warning percent", "plannedEventWarning");
-
-        var contentLimits = Section(content, "Content Limits", expanded: false);
-        Add(contentLimits, "Title characters", "title");
-        Add(contentLimits, "Label characters", "label");
-        Add(contentLimits, "Story Definition Prompt / Story Prompt characters", "prompt");
-        Add(contentLimits, "Player action characters", "action");
-        Add(contentLimits, "Narration characters", "narration");
-        Add(contentLimits, "Minimum suggested actions", "suggestedMin");
-        Add(contentLimits, "Maximum suggested actions", "suggestedCount");
-        Add(contentLimits, "Suggested action characters", "suggestedLength");
-        Add(contentLimits, "Minimum paragraphs per response", "paragraphsMin");
-        Add(contentLimits, "Maximum paragraphs per response", "paragraphsMax");
-        Add(contentLimits, "Minimum sentences per paragraph", "sentencesMin");
-        Add(contentLimits, "Maximum sentences per paragraph", "sentencesMax");
-        Add(contentLimits, "Bible category characters", "category");
-        Add(contentLimits, "Bible name characters", "name");
-        Add(contentLimits, "Bible updates per response", "updates");
-        Add(contentLimits, "Planned Event description characters", "plannedEventDescription");
-        Add(contentLimits, "Planned Event condition characters", "plannedEventCondition");
-        Add(contentLimits, "Planned Event updates per response", "plannedEventUpdates");
-        Add(contentLimits, "Victory/Loss Conditions per list", "conditionCount");
-        Add(contentLimits, "Condition description characters", "conditionDescription");
-        Add(contentLimits, "Story summary characters", "storySummary");
-        Add(contentLimits, "HTTP response bytes", "responseBytes");
 
         content.Children.Add(Ui.Buttons(
             Ui.Button("Save", Save),

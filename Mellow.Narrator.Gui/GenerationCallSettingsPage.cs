@@ -17,7 +17,7 @@ public sealed class PipelineSettingsPage : ContentPage
         Title = "Pipeline Calls";
         var content = new VerticalStackLayout { Padding = 16, Spacing = 10 };
         content.Children.Add(Ui.Heading("Pipeline Call Configuration"));
-        content.Children.Add(new Label { Text = "Choose the connection and model for every call in the selected pipeline. Leave a model blank to inherit the default model." });
+        content.Children.Add(new Label { Text = "Choose a connection and model for each call. Open Advanced Request Behavior only when a call needs different HTTP settings." });
         foreach (var call in _calls)
         {
             var editor = new RouteEditor();
@@ -26,15 +26,16 @@ public sealed class PipelineSettingsPage : ContentPage
             content.Children.Add(editor.Connection);
             content.Children.Add(Ui.SecondaryButton("Load available models", async (_, _) => await LoadModelsAsync(editor)));
             content.Children.Add(editor.Model);
-            content.Children.Add(Field("Timeout seconds", editor.Timeout));
-            content.Children.Add(Field("Maximum output tokens", editor.MaxOutputTokens));
-            content.Children.Add(Field("Temperature (blank = provider default)", editor.Temperature));
-            content.Children.Add(Field("Top-p (blank = provider default)", editor.TopP));
-            content.Children.Add(Field("Reasoning effort (blank = provider default)", editor.ReasoningEffort));
-            content.Children.Add(Field("Automatic retries", editor.MaxAutomaticRetries));
-            content.Children.Add(Field("Initial retry delay seconds", editor.InitialRetryDelay));
-            content.Children.Add(Field("Maximum retry delay seconds", editor.MaxRetryDelay));
-            content.Children.Add(Field("Maximum Retry-After seconds", editor.MaxRetryAfter));
+            var advanced = CollapsibleSection(content, "Advanced Request Behavior");
+            advanced.Children.Add(Field("Timeout seconds", editor.Timeout));
+            advanced.Children.Add(Field("Maximum output tokens", editor.MaxOutputTokens));
+            advanced.Children.Add(Field("Temperature (blank = provider default)", editor.Temperature));
+            advanced.Children.Add(Field("Top-p (blank = provider default)", editor.TopP));
+            advanced.Children.Add(Field("Reasoning effort (blank = provider default)", editor.ReasoningEffort));
+            advanced.Children.Add(Field("Automatic retries", editor.MaxAutomaticRetries));
+            advanced.Children.Add(Field("Initial retry delay seconds", editor.InitialRetryDelay));
+            advanced.Children.Add(Field("Maximum retry delay seconds", editor.MaxRetryDelay));
+            advanced.Children.Add(Field("Maximum Retry-After seconds", editor.MaxRetryAfter));
         }
         content.Children.Add(Ui.Button("Save all pipeline calls", Save));
         Content = new ScrollView { Content = content };
@@ -114,6 +115,14 @@ public sealed class PipelineSettingsPage : ContentPage
         double.TryParse(entry.Text, System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : throw new NarratorException($"Enter a valid {name}.");
     private static double? Optional(Entry entry, string name) => string.IsNullOrWhiteSpace(entry.Text) ? null : Parse(entry, name);
     private static VerticalStackLayout Field(string label, View control) => new() { Spacing = 2, Children = { new Label { Text = label }, control } };
+    private static VerticalStackLayout CollapsibleSection(Layout parent, string title)
+    {
+        var body = new VerticalStackLayout { Spacing = 6, IsVisible = false, Margin = new Thickness(8, 0, 0, 8) };
+        var button = Ui.SecondaryButton(title, (_, _) => body.IsVisible = !body.IsVisible);
+        parent.Children.Add(button);
+        parent.Children.Add(body);
+        return body;
+    }
 
     private sealed class RouteEditor
     {

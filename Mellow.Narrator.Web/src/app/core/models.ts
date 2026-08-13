@@ -203,6 +203,7 @@ export interface AppSettings {
   retryInitialDelaySeconds: number;
   retryMaxDelaySeconds: number;
   retryMaxRetryAfterSeconds: number;
+  maxResponseBodyBytes: number;
   // Experimental: split each story turn into focused calls that can be compared with one another.
   turnPipeline: TurnPipelineMode;
   connections: ApiConnectionProfile[];

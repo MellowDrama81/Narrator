@@ -154,7 +154,7 @@ export class LlmService {
 
   async loadModels(settings: AppSettings): Promise<string[]> {
     const response = await this.fetch(settings, 'models', { method: 'GET' });
-    const body = await response.json() as { data?: Array<{ id?: string }> };
+    const body = await this.readJson<{ data?: Array<{ id?: string }> }>(settings, response);
     return (body.data ?? []).map(x => x.id ?? '').filter(Boolean).sort();
   }
 
@@ -686,7 +686,7 @@ export class LlmService {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    const envelope = await response.json() as { choices?: Array<{ message?: { content?: string; refusal?: string } }> };
+    const envelope = await this.readJson<{ choices?: Array<{ message?: { content?: string; refusal?: string } }> }>(settings, response);
     const message = envelope.choices?.[0]?.message;
     if (message?.refusal) throw new Error('The model refused the request.');
     const content = message?.content;
@@ -859,7 +859,12 @@ export class LlmService {
       const timer = window.setTimeout(() => controller.abort(), settings.requestTimeoutSeconds * 1000);
       try {
         const response = await fetch(`${base}/${relative}`, { ...init, headers, signal: controller.signal });
-        if (response.ok) return response;
+        if (response.ok) {
+          const length = Number(response.headers.get('content-length'));
+          if (Number.isFinite(length) && length > settings.maxResponseBodyBytes)
+            throw new Error('The provider response exceeds the configured maximum API response size.');
+          return response;
+        }
         const text = (await response.text()).slice(0, 2000);
         const retryable = response.status === 429 || response.status === 408 || response.status >= 500;
         const error = this.classifyHttpError(response, text, settings.apiKey);
@@ -883,6 +888,13 @@ export class LlmService {
     throw new ProviderNetworkError(timedOut
       ? 'The provider request timed out.'
       : 'The provider could not be reached. Check the URL and whether it permits browser CORS requests.');
+  }
+
+  private async readJson<T>(settings: AppSettings, response: Response): Promise<T> {
+    const bytes = await response.arrayBuffer();
+    if (bytes.byteLength > settings.maxResponseBodyBytes)
+      throw new Error('The provider response exceeds the configured maximum API response size.');
+    return JSON.parse(new TextDecoder().decode(bytes)) as T;
   }
 
   // Mirrors Error(): maps a non-success HTTP response into a friendly, specific message where the status

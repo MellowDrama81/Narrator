@@ -33,12 +33,9 @@ import { validateSettings } from '../core/settings-validator';
     <mat-accordion multi>
       <mat-expansion-panel expanded>
         <mat-expansion-panel-header>
-          <mat-panel-title>Generation</mat-panel-title>
-          <mat-panel-description>Context and model parameters</mat-panel-description>
+          <mat-panel-title>Story flow</mat-panel-title>
+          <mat-panel-description>Choose how turns are generated</mat-panel-description>
         </mat-expansion-panel-header>
-        <div class="form-grid compact">
-          <mat-form-field appearance="outline"><mat-label>Recent turns in context</mat-label><input matInput type="number" [(ngModel)]="settings.recentTurnCount"></mat-form-field>
-        </div>
         <mat-form-field appearance="outline">
           <mat-label>Turn generation pipeline</mat-label>
           <mat-select [(ngModel)]="settings.turnPipeline">
@@ -52,12 +49,12 @@ import { validateSettings } from '../core/settings-validator';
             <mat-option value="eightCalls">8 calls (full analysis + prose revision)</mat-option>
           </mat-select>
         </mat-form-field>
-        <p class="notice">2 calls separate draft and state. 3â€“5 calls add adjudication, planning, and a plan critic. 7 calls add Story Bible, event, and condition/summary analysis; its parallel variant is faster. 8 calls also revises the prose. More calls cost more.</p>
+        <p class="notice">More calls can improve consistency, but cost more and take longer. Configure each active call's connection, model, and request behavior on Pipeline calls.</p>
       </mat-expansion-panel>
       <mat-expansion-panel>
         <mat-expansion-panel-header>
-          <mat-panel-title>Narration shape</mat-panel-title>
-          <mat-panel-description>Suggestions, paragraphs, and sentences per response</mat-panel-description>
+          <mat-panel-title>Narration & player input</mat-panel-title>
+          <mat-panel-description>Response shape, choices, and player actions</mat-panel-description>
         </mat-expansion-panel-header>
         <div class="form-grid compact">
           <mat-form-field appearance="outline"><mat-label>Minimum suggestions</mat-label><input matInput type="number" [(ngModel)]="settings.minSuggestedActions"></mat-form-field>
@@ -73,10 +70,11 @@ import { validateSettings } from '../core/settings-validator';
       </mat-expansion-panel>
       <mat-expansion-panel>
         <mat-expansion-panel-header>
-          <mat-panel-title>Story Bible</mat-panel-title>
-          <mat-panel-description>Persistent facts remembered across turns</mat-panel-description>
+          <mat-panel-title>Context & memory</mat-panel-title>
+          <mat-panel-description>Recent history, Story Bible, and Planned Events</mat-panel-description>
         </mat-expansion-panel-header>
         <div class="form-grid compact">
+          <mat-form-field appearance="outline"><mat-label>Recent turns in context</mat-label><input matInput type="number" [(ngModel)]="settings.recentTurnCount"></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Maximum Bible entries</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryBibleEntries"></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Maximum characters per entry</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryBibleEntryCharacters"></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Maximum total characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryBibleCharacters"></mat-form-field>
@@ -84,26 +82,19 @@ import { validateSettings } from '../core/settings-validator';
           <mat-form-field appearance="outline"><mat-label>Maximum category characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryBibleCategoryCharacters"></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Maximum name characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryBibleNameCharacters"></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Maximum updates per response</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryBibleUpdatesPerResponse"></mat-form-field>
-        </div>
-      </mat-expansion-panel>
-      <mat-expansion-panel>
-        <mat-expansion-panel-header>
-          <mat-panel-title>Planned Events</mat-panel-title>
-          <mat-panel-description>Secret plans and capacity</mat-panel-description>
-        </mat-expansion-panel-header>
-        <div class="form-grid compact">
           <mat-form-field appearance="outline"><mat-label>Maximum Planned Events</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEvents"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Capacity warning percent</mat-label><input matInput type="number" [(ngModel)]="settings.plannedEventsWarningPercent"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Maximum characters per event</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEventCharacters"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Maximum total characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEventsCharacters"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Maximum description characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEventDescriptionCharacters"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Maximum condition characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEventConditionCharacters"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Maximum updates per response</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEventUpdatesPerResponse"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Planned Event capacity warning percent</mat-label><input matInput type="number" [(ngModel)]="settings.plannedEventsWarningPercent"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum characters per Planned Event</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEventCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum total Planned Event characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEventsCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum Planned Event description characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEventDescriptionCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum Planned Event condition characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEventConditionCharacters"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Maximum Planned Event updates per response</mat-label><input matInput type="number" [(ngModel)]="settings.maxPlannedEventUpdatesPerResponse"></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>Story summary characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxStorySummaryCharacters"></mat-form-field>
         </div>
       </mat-expansion-panel>
       <mat-expansion-panel>
         <mat-expansion-panel-header>
-          <mat-panel-title>Content limits</mat-panel-title>
+          <mat-panel-title>Story structure</mat-panel-title>
           <mat-panel-description>Story metadata and victory/loss conditions</mat-panel-description>
         </mat-expansion-panel-header>
         <div class="form-grid compact">
@@ -112,8 +103,12 @@ import { validateSettings } from '../core/settings-validator';
           <mat-form-field appearance="outline"><mat-label>Maximum Story Definition Prompt / Story Prompt characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxStoryPromptCharacters"></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Maximum conditions</mat-label><input matInput type="number" [(ngModel)]="settings.maxConditions"></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Maximum condition characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxConditionDescriptionCharacters"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Story summary characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxStorySummaryCharacters"></mat-form-field>
         </div>
+      </mat-expansion-panel>
+      <mat-expansion-panel>
+        <mat-expansion-panel-header><mat-panel-title>Advanced safety</mat-panel-title><mat-panel-description>Protect the app from oversized provider responses</mat-panel-description></mat-expansion-panel-header>
+        <div class="form-grid compact"><mat-form-field appearance="outline"><mat-label>Maximum API response size · bytes</mat-label><input matInput type="number" [(ngModel)]="settings.maxResponseBodyBytes"></mat-form-field></div>
+        <p class="notice">Responses above this size are rejected before they use excessive memory.</p>
       </mat-expansion-panel>
     </mat-accordion>
     <div class="actions end"><button mat-flat-button (click)="save()">Save settings</button><button mat-button (click)="reset()">Reset defaults</button></div>

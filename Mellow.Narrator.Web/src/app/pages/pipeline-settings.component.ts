@@ -3,6 +3,7 @@ import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
+import { MatExpansionModule } from '@angular/material/expansion';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
@@ -14,14 +15,17 @@ import { AppSettings, GenerationCall, GenerationCallRoute } from '../core/models
 import { validateSettings } from '../core/settings-validator';
 
 @Component({
-  imports: [CommonModule, FormsModule, RouterLink, MatButtonModule, MatCardModule, MatFormFieldModule, MatInputModule, MatSelectModule],
+  imports: [CommonModule, FormsModule, RouterLink, MatButtonModule, MatCardModule, MatExpansionModule, MatFormFieldModule, MatInputModule, MatSelectModule],
   template: `
     <header class="page-header"><div><a class="back-link" routerLink="/settings">← Settings</a><p class="eyebrow">Generation</p><h1>Pipeline calls</h1></div></header>
-    <p class="lead">Choose the connection, model, and HTTP request behavior for every call in the selected pipeline.</p>
+    <p class="lead">Set the connection and model for each active call. Request behavior is available under Advanced for calls that need an override.</p>
     @for (call of selectedCalls; track call) {
       <mat-card class="feature-card"><mat-card-content><h2>{{ label(call) }}</h2><div class="form-grid compact">
         <mat-form-field appearance="outline"><mat-label>Connection</mat-label><mat-select [(ngModel)]="route(call).connectionId">@for (connection of settings.connections; track connection.id) { <mat-option [value]="connection.id">{{ connection.name }}</mat-option> }</mat-select></mat-form-field>
         <mat-form-field appearance="outline"><mat-label>Model</mat-label><input matInput [(ngModel)]="route(call).modelId" placeholder="Model ID"></mat-form-field>
+      </div><mat-expansion-panel>
+        <mat-expansion-panel-header><mat-panel-title>Advanced request behavior</mat-panel-title><mat-panel-description>Timeout, output, sampling, and retries</mat-panel-description></mat-expansion-panel-header>
+        <div class="form-grid compact">
         <mat-form-field appearance="outline"><mat-label>Timeout · seconds</mat-label><input matInput type="number" [(ngModel)]="route(call).requestTimeoutSeconds"></mat-form-field>
         <mat-form-field appearance="outline"><mat-label>Maximum output tokens</mat-label><input matInput type="number" [(ngModel)]="route(call).maxOutputTokens"></mat-form-field>
         <mat-form-field appearance="outline"><mat-label>Temperature</mat-label><input matInput type="number" step=".1" [(ngModel)]="route(call).temperature"></mat-form-field>
@@ -31,7 +35,8 @@ import { validateSettings } from '../core/settings-validator';
         <mat-form-field appearance="outline"><mat-label>Initial retry delay · seconds</mat-label><input matInput type="number" step=".25" [(ngModel)]="route(call).retryInitialDelaySeconds"></mat-form-field>
         <mat-form-field appearance="outline"><mat-label>Maximum retry delay · seconds</mat-label><input matInput type="number" [(ngModel)]="route(call).retryMaxDelaySeconds"></mat-form-field>
         <mat-form-field appearance="outline"><mat-label>Maximum Retry-After · seconds</mat-label><input matInput type="number" [(ngModel)]="route(call).retryMaxRetryAfterSeconds"></mat-form-field>
-      </div></mat-card-content></mat-card>
+        </div>
+      </mat-expansion-panel></mat-card-content></mat-card>
     }
     <div class="actions end"><button mat-flat-button (click)="save()">Save pipeline calls</button></div>
   `,

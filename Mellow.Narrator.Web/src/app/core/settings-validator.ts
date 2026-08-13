@@ -99,6 +99,7 @@ export function validateSettings(settings: AppSettings): Record<string, string> 
     && settings.retryMaxDelaySeconds < settings.retryInitialDelaySeconds) {
     errors['retryMaxDelaySeconds'] = 'Maximum retry delay must be at least the initial delay.';
   }
+  range(errors, 'maxResponseBodyBytes', settings.maxResponseBodyBytes, 64 * 1024, 16 * 1024 * 1024);
 
   range(errors, 'maxStoryTitleCharacters', settings.maxStoryTitleCharacters, 1, 1000);
   range(errors, 'maxStoryLabelCharacters', settings.maxStoryLabelCharacters, 1, 1000);
