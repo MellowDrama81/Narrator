@@ -368,15 +368,19 @@ public sealed class OpenAiCompatibleProvider(
             ? fallbackCredential
             : await _secureStorage.GetAsync(SecureStorageKeys.ApiCredentialForConnection(connection.Id), cancellationToken);
         credential ??= fallbackCredential;
+        var modelId = string.IsNullOrWhiteSpace(route.ModelId) ? settings.ModelId : route.ModelId;
+        var capabilities = modelId is not null && connection.ModelCapabilities.TryGetValue(modelId, out var tested)
+            ? tested
+            : connection.Capabilities with { StructuredOutputTier = StructuredOutputTier.Untested, TestedModelId = null, TestedAtUtc = null };
         return (settings with
         {
             BaseUrl = connection.BaseUrl,
-            ModelId = string.IsNullOrWhiteSpace(route.ModelId) ? settings.ModelId : route.ModelId,
+            ModelId = modelId,
             RequestTimeout = route.RequestTimeout ?? settings.RequestTimeout,
             MaxOutputTokens = route.MaxOutputTokens ?? settings.MaxOutputTokens,
             Parameters = route.Parameters ?? settings.Parameters,
             Retry = route.Retry ?? settings.Retry,
-            Capabilities = connection.Capabilities
+            Capabilities = capabilities
         }, credential);
     }
 

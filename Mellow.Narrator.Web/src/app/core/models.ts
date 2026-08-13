@@ -144,7 +144,13 @@ export type OutputTokenParameter = 'maxCompletionTokens' | 'maxTokens';
 export type InstructionMessageRole = 'system' | 'developer';
 export type TurnPipelineMode = 'oneCall' | 'twoCalls' | 'threeCalls' | 'fourCalls' | 'fiveCalls' | 'sevenCalls' | 'sevenCallsParallel' | 'eightCalls';
 export type GenerationCall = 'storyDefinition' | 'turn' | 'adjudication' | 'scenePlan' | 'planCritic' | 'narration' | 'storyBibleAnalysis' | 'plannedEventAnalysis' | 'conditionSummaryAnalysis' | 'stateExtraction' | 'proseRevision';
-export interface ApiConnectionProfile { id: string; name: string; baseUrl: string; apiKey: string; }
+export interface ModelCapability {
+  structuredOutputTier: StructuredOutputTier;
+  outputTokenParameter: OutputTokenParameter;
+  instructionMessageRole: InstructionMessageRole;
+  testedAtUtc: string;
+}
+export interface ApiConnectionProfile { id: string; name: string; baseUrl: string; apiKey: string; modelCapabilities?: Record<string, ModelCapability>; }
 export interface GenerationCallRoute {
   connectionId: string;
   modelId: string;

@@ -45,8 +45,11 @@ export class ConnectionsComponent implements OnInit {
     const modelId = route?.modelId || this.settings.modelId;
     if (!modelId) { this.snack.open('Assign a model to this connection before testing it.', 'Dismiss', { duration: 5000 }); return; }
     try {
-      const message = await this.llm.test({ ...this.settings, baseUrl: connection.baseUrl, apiKey: connection.apiKey, modelId });
-      this.snack.open(`${connection.name}: ${message}`, 'Dismiss', { duration: 4000 });
+      const result = await this.llm.test({ ...this.settings, baseUrl: connection.baseUrl, apiKey: connection.apiKey, modelId });
+      connection.modelCapabilities ??= {};
+      connection.modelCapabilities[modelId] = { structuredOutputTier: result.tier, outputTokenParameter: result.outputTokenParameter, instructionMessageRole: result.instructionMessageRole, testedAtUtc: new Date().toISOString() };
+      await this.db.saveSettings(this.settings);
+      this.snack.open(`${connection.name}: ${result.message}`, 'Dismiss', { duration: 4000 });
     } catch (error) { this.snack.open(error instanceof Error ? error.message : 'Connection test failed.', 'Dismiss', { duration: 6000 }); }
   }
   async save(): Promise<void> { const errors = Object.values(validateSettings(this.settings)); if (errors.length) { this.snack.open(errors[0], 'Dismiss', { duration: 5000 }); return; } await this.db.saveSettings(this.settings); this.snack.open('Connections saved.', 'Dismiss', { duration: 2500 }); }

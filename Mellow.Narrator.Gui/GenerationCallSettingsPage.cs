@@ -28,6 +28,7 @@ public sealed class PipelineSettingsPage : ContentPage
             content.Children.Add(Ui.SecondaryButton("Load available models", async (_, _) => await LoadModelsAsync(editor)));
             content.Children.Add(editor.AvailableModels);
             content.Children.Add(editor.Model);
+            content.Children.Add(editor.CapabilityStatus);
             var advanced = CollapsibleSection(content, "Advanced Request Behavior");
             advanced.Children.Add(Field("Timeout seconds", editor.Timeout));
             advanced.Children.Add(Field("Maximum output tokens", editor.MaxOutputTokens));
@@ -53,6 +54,7 @@ public sealed class PipelineSettingsPage : ContentPage
             editor.Connection.ItemsSource = settings.Connections.ToArray();
             editor.Connection.ItemDisplayBinding = new Binding(nameof(ApiConnectionProfile.Name));
             editor.Connection.SelectedIndexChanged += (_, _) => ApplyCachedModels(editor);
+            editor.Model.TextChanged += (_, _) => UpdateCapabilityStatus(editor);
             var route = settings.GenerationCallRoutes.TryGetValue(call, out var configured) ? configured : null;
             editor.Connection.SelectedItem = settings.Connections.FirstOrDefault(profile => profile.Id == route?.ConnectionId) ?? settings.Connections.FirstOrDefault();
             editor.Model.Text = route?.ModelId ?? settings.ModelId;
@@ -95,7 +97,18 @@ public sealed class PipelineSettingsPage : ContentPage
                 };
             }
             await _app.SaveSettingsAsync(settings with { GenerationCallRoutes = routes }, null);
-            await DisplayAlertAsync("Saved", "All selected pipeline call routes have been saved.", "OK");
+            var tested = new HashSet<(Guid ConnectionId, string ModelId)>();
+            foreach (var route in routes.Values)
+                if (route.ConnectionId is { } connectionId && !string.IsNullOrWhiteSpace(route.ModelId))
+                    tested.Add((connectionId, route.ModelId));
+            foreach (var (connectionId, modelId) in tested)
+            {
+                var connection = settings.Connections.FirstOrDefault(candidate => candidate.Id == connectionId);
+                if (connection is null || !connection.ModelCapabilities.ContainsKey(modelId))
+                    await _app.TestConnectionAsync(connectionId, modelId);
+            }
+            await DisplayAlertAsync("Saved", "Pipeline calls saved and each selected model has been tested.", "OK");
+            foreach (var editor in _editors.Values) UpdateCapabilityStatus(editor);
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
@@ -139,6 +152,7 @@ public sealed class PipelineSettingsPage : ContentPage
         public Picker Connection { get; } = new() { Title = "Connection" };
         public Picker AvailableModels { get; } = new() { Title = "Loaded models" };
         public Entry Model { get; } = new() { Placeholder = "Model ID (or select above)" };
+        public Label CapabilityStatus { get; } = new() { FontSize = 12 };
         public Entry Timeout { get; } = Numeric();
         public Entry MaxOutputTokens { get; } = Numeric();
         public Entry Temperature { get; } = Numeric();
@@ -170,5 +184,20 @@ public sealed class PipelineSettingsPage : ContentPage
         editor.AvailableModels.ItemsSource = models.ToArray();
         var selected = models.FirstOrDefault(model => string.Equals(model, editor.Model.Text, StringComparison.Ordinal));
         if (selected is not null) editor.AvailableModels.SelectedItem = selected;
+        UpdateCapabilityStatus(editor);
+    }
+
+    private async void UpdateCapabilityStatus(RouteEditor editor)
+    {
+        if (editor.Connection.SelectedItem is not ApiConnectionProfile profile || string.IsNullOrWhiteSpace(editor.Model.Text))
+        {
+            editor.CapabilityStatus.Text = "Model capability: not selected";
+            return;
+        }
+        var settings = await _app.GetSettingsAsync();
+        profile = settings.Connections.FirstOrDefault(connection => connection.Id == profile.Id) ?? profile;
+        editor.CapabilityStatus.Text = profile.ModelCapabilities.TryGetValue(editor.Model.Text.Trim(), out var capability)
+            ? $"Model capability: {capability.StructuredOutputTier} (tested {capability.TestedAtUtc?.ToLocalTime():g})"
+            : "Model capability: untested — it will be tested when you save.";
     }
 }

@@ -166,15 +166,15 @@ export class LlmService {
       .some(marker => modelId.toLocaleLowerCase().includes(marker));
   }
 
-  async test(settings: AppSettings): Promise<string> {
+  async test(settings: AppSettings): Promise<{ message: string; tier: StructuredOutputTier; outputTokenParameter: OutputTokenParameter; instructionMessageRole: InstructionMessageRole }> {
     if (!settings.baseUrl) throw new Error('Configure an API base URL first.');
     if (!settings.modelId) throw new Error('Choose or enter a model first.');
-    const { value } = await this.completeStructured(settings, [
+    const { value, tier } = await this.completeStructured(settings, [
       { role: 'system', content: 'Return a JSON object with exactly one boolean property named ok.' },
       { role: 'user', content: 'Return ok as true.' },
     ], this.objectSchema({ ok: { type: 'boolean' } }));
     if (value['ok'] !== true) throw new Error('The model could not produce a valid structured response.');
-    return `Connected to ${settings.modelId}.`;
+    return { message: `Connected to ${settings.modelId} (${tier}).`, tier, outputTokenParameter: settings.outputTokenParameter, instructionMessageRole: settings.instructionMessageRole };
   }
 
   async generateDefinition(settings: AppSettings, storyDefinitionPrompt: string): Promise<DefinitionGeneration> {
@@ -437,11 +437,16 @@ export class LlmService {
     const route = settings.generationCallRoutes?.[call];
     const connection = settings.connections?.find(candidate => candidate.id === route?.connectionId) ?? settings.connections?.[0];
     if (!connection) return settings;
+    const modelId = route?.modelId || settings.modelId;
+    const capability = connection.modelCapabilities?.[modelId];
     return {
       ...settings,
       baseUrl: connection.baseUrl,
       apiKey: connection.apiKey,
-      modelId: route?.modelId || settings.modelId,
+      modelId,
+      structuredOutputTier: capability?.structuredOutputTier ?? 'untested',
+      outputTokenParameter: capability?.outputTokenParameter ?? 'maxCompletionTokens',
+      instructionMessageRole: capability?.instructionMessageRole ?? 'developer',
       requestTimeoutSeconds: route?.requestTimeoutSeconds ?? settings.requestTimeoutSeconds,
       maxOutputTokens: route?.maxOutputTokens ?? settings.maxOutputTokens,
       temperature: route?.temperature ?? settings.temperature,

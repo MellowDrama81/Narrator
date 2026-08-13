@@ -11,6 +11,7 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { RouterLink } from '@angular/router';
 import { DbService } from '../core/db.service';
 import { defaultSettings } from '../core/defaults';
+import { LlmService } from '../core/llm.service';
 import { AppSettings, GenerationCall, GenerationCallRoute } from '../core/models';
 import { validateSettings } from '../core/settings-validator';
 
@@ -23,6 +24,7 @@ import { validateSettings } from '../core/settings-validator';
       <mat-card class="feature-card"><mat-card-content><h2>{{ label(call) }}</h2><div class="form-grid compact">
         <mat-form-field appearance="outline"><mat-label>Connection</mat-label><mat-select [(ngModel)]="route(call).connectionId">@for (connection of settings.connections; track connection.id) { <mat-option [value]="connection.id">{{ connection.name }}</mat-option> }</mat-select></mat-form-field>
         <mat-form-field appearance="outline"><mat-label>Model</mat-label><input matInput [(ngModel)]="route(call).modelId" placeholder="Model ID"></mat-form-field>
+        <p class="notice">{{ capability(call) }}</p>
       </div><mat-expansion-panel>
         <mat-expansion-panel-header><mat-panel-title>Advanced request behavior</mat-panel-title><mat-panel-description>Timeout, output, sampling, and retries</mat-panel-description></mat-expansion-panel-header>
         <div class="form-grid compact">
@@ -44,7 +46,7 @@ import { validateSettings } from '../core/settings-validator';
 export class PipelineSettingsComponent implements OnInit {
   settings: AppSettings = defaultSettings();
   readonly allCalls: GenerationCall[] = ['storyDefinition', 'turn', 'adjudication', 'scenePlan', 'planCritic', 'narration', 'storyBibleAnalysis', 'plannedEventAnalysis', 'conditionSummaryAnalysis', 'stateExtraction', 'proseRevision'];
-  constructor(private readonly db: DbService, private readonly snack: MatSnackBar, private readonly changeDetector: ChangeDetectorRef) {}
+  constructor(private readonly db: DbService, private readonly llm: LlmService, private readonly snack: MatSnackBar, private readonly changeDetector: ChangeDetectorRef) {}
   async ngOnInit(): Promise<void> { this.settings = await this.db.settings(); this.changeDetector.markForCheck(); }
   get selectedCalls(): GenerationCall[] { return this.allCalls.filter(call => call === 'storyDefinition' || this.callsForPipeline().includes(call)); }
   route(call: GenerationCall): GenerationCallRoute {
@@ -57,7 +59,24 @@ export class PipelineSettingsComponent implements OnInit {
     };
   }
   label(call: GenerationCall): string { return call.replace(/([A-Z])/g, ' $1').replace(/^./, char => char.toUpperCase()); }
-  async save(): Promise<void> { const errors = Object.values(validateSettings(this.settings)); if (errors.length) { this.snack.open(errors[0], 'Dismiss', { duration: 5000 }); return; } await this.db.saveSettings(this.settings); this.snack.open('Pipeline calls saved.', 'Dismiss', { duration: 2500 }); }
+  capability(call: GenerationCall): string {
+    const route = this.route(call); const connection = this.settings.connections.find(item => item.id === route.connectionId);
+    const value = connection?.modelCapabilities?.[route.modelId];
+    return value ? `Model capability: ${value.structuredOutputTier} (tested ${new Date(value.testedAtUtc).toLocaleString()})` : 'Model capability: untested — it will be tested when you save.';
+  }
+  async save(): Promise<void> {
+    const errors = Object.values(validateSettings(this.settings)); if (errors.length) { this.snack.open(errors[0], 'Dismiss', { duration: 5000 }); return; }
+    const unique = new Map<string, { connectionId: string; modelId: string }>();
+    for (const call of this.selectedCalls) { const route = this.route(call); if (route.connectionId && route.modelId) unique.set(`${route.connectionId}:${route.modelId}`, route); }
+    for (const route of unique.values()) {
+      const connection = this.settings.connections.find(item => item.id === route.connectionId)!;
+      if (connection.modelCapabilities?.[route.modelId]) continue;
+      const result = await this.llm.test({ ...this.settings, baseUrl: connection.baseUrl, apiKey: connection.apiKey, modelId: route.modelId });
+      connection.modelCapabilities ??= {};
+      connection.modelCapabilities[route.modelId] = { structuredOutputTier: result.tier, outputTokenParameter: result.outputTokenParameter, instructionMessageRole: result.instructionMessageRole, testedAtUtc: new Date().toISOString() };
+    }
+    await this.db.saveSettings(this.settings); this.snack.open('Pipeline calls saved and selected models tested.', 'Dismiss', { duration: 2500 });
+  }
   private callsForPipeline(): GenerationCall[] {
     const calls: GenerationCall[] = ['turn'];
     if (!['oneCall'].includes(this.settings.turnPipeline)) calls.push('stateExtraction');

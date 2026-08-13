@@ -105,6 +105,10 @@ public enum GenerationCall { StoryDefinition, Turn, Adjudication, ScenePlan, Pla
 public sealed record ApiConnectionProfile(Guid Id, string Name, Uri? BaseUrl)
 {
     public ConnectionCapabilities Capabilities { get; init; } = new(false, StructuredOutputTier.Untested, null, null);
+    // Structured-output support varies by model, even when models share an endpoint. The legacy
+    // Capabilities value is retained for settings-file compatibility and endpoint-wide discovery.
+    public IReadOnlyDictionary<string, ConnectionCapabilities> ModelCapabilities { get; init; } =
+        new Dictionary<string, ConnectionCapabilities>(StringComparer.Ordinal);
 }
 
 // A call can choose its connection, model, and HTTP request settings independently. Null values
