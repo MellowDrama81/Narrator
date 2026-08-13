@@ -21,7 +21,9 @@ public sealed class NarratorWorkspace(
     public Task<StoryDefinition> GenerateDefinitionAsync(StoryPromptDraft draft, bool overwrite, Guid targetId) => application.GenerateDefinitionAsync(draft, overwrite, targetId);
     public Task SaveDefinitionAsync(StoryDefinition definition) => definitions.SaveAsync(definition);
     public Task DeleteDefinitionAsync(Guid id) => definitions.MoveToTrashAsync(id);
+    public Task SwapDefinitionOrderAsync(Guid firstId, Guid secondId) => definitions.SwapSortOrderAsync(firstId, secondId);
     public Task DeleteStoryAsync(Guid id) => stories.MoveToTrashAsync(id);
+    public Task SwapStoryOrderAsync(Guid firstId, Guid secondId) => stories.SwapSortOrderAsync(firstId, secondId);
     public Task<StoryState> CopyStoryAsync(Guid id) => stories.CopyAsync(id);
     public Task SaveStoryAsync(StoryState state) => stories.SaveAsync(state);
     public Task UpdateStoryLabelAsync(Guid id, string label) => stories.UpdateLabelAsync(id, label);
