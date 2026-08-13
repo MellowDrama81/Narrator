@@ -17,7 +17,22 @@ public sealed record PromptTemplateSettings(
     string CorrectiveRetryInstruction,
     string PromptedJsonInstruction,
     string OpeningSceneInstruction,
-    string ContinueStoryInstruction);
+    string ContinueStoryInstruction)
+{
+    public string TurnAdjudicationInstruction => GeneratedPromptTemplates.TurnAdjudicationInstruction;
+    public string NarrationOnlyInstruction => GeneratedPromptTemplates.NarrationOnlyInstruction;
+    public string ScenePlanInstruction => GeneratedPromptTemplates.ScenePlanInstruction;
+    public string NarrationFromAdjudicationInstruction => GeneratedPromptTemplates.NarrationFromAdjudicationInstruction;
+    public string NarrationFromPlanInstruction => GeneratedPromptTemplates.NarrationFromPlanInstruction;
+    public string NarrationFromCritiqueInstruction => GeneratedPromptTemplates.NarrationFromCritiqueInstruction;
+    public string PlanCriticInstruction => GeneratedPromptTemplates.PlanCriticInstruction;
+    public string StoryBibleAnalysisInstruction => GeneratedPromptTemplates.StoryBibleAnalysisInstruction;
+    public string PlannedEventAnalysisInstruction => GeneratedPromptTemplates.PlannedEventAnalysisInstruction;
+    public string ConditionSummaryAnalysisInstruction => GeneratedPromptTemplates.ConditionSummaryAnalysisInstruction;
+    public string StateExtractionInstruction => GeneratedPromptTemplates.StateExtractionInstruction;
+    public string StateExtractionFromAnalysesInstruction => GeneratedPromptTemplates.StateExtractionFromAnalysesInstruction;
+    public string ProseRevisionInstruction => GeneratedPromptTemplates.ProseRevisionInstruction;
+}
 
 public static class PromptTemplateDefaults
 {
