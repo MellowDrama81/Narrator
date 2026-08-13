@@ -104,7 +104,7 @@ public sealed class PipelineSettingsPage : ContentPage
             var profile = editor.Connection.SelectedItem as ApiConnectionProfile ?? throw new NarratorException("Select a connection before loading models.");
             var models = await _app.DiscoverModelsAsync(profile.Id);
             if (models.Count == 0) throw new NarratorException("This connection returned no models. Enter a model ID manually.");
-            editor.Model.SetOptions(models);
+            editor.Model.SetModels(models);
             if (!models.Contains(editor.Model.Text)) editor.Model.Text = models[0];
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
@@ -127,7 +127,7 @@ public sealed class PipelineSettingsPage : ContentPage
     private sealed class RouteEditor
     {
         public Picker Connection { get; } = new() { Title = "Connection" };
-        public EditableModelComboBox Model { get; } = new();
+        public ModelSelector Model { get; } = new();
         public Entry Timeout { get; } = Numeric();
         public Entry MaxOutputTokens { get; } = Numeric();
         public Entry Temperature { get; } = Numeric();
@@ -141,11 +141,11 @@ public sealed class PipelineSettingsPage : ContentPage
         private static Entry Numeric() => new() { Keyboard = Keyboard.Numeric };
     }
 
-    // MAUI has no built-in editable picker, so this keeps manual model IDs and loaded choices in one control.
-    private sealed class EditableModelComboBox : VerticalStackLayout
+    // MAUI has no cross-platform editable picker. Keep typing in-place and show choices in a modal picker.
+    private sealed class ModelSelector : Grid
     {
         private readonly Entry _entry = new() { Placeholder = "Model ID" };
-        private readonly VerticalStackLayout _options = new() { IsVisible = false, Spacing = 0 };
+        private IReadOnlyList<string> _models = [];
 
         public string? Text
         {
@@ -153,36 +153,78 @@ public sealed class PipelineSettingsPage : ContentPage
             set => _entry.Text = value;
         }
 
-        public EditableModelComboBox()
+        public ModelSelector()
         {
-            var toggle = Ui.SecondaryButton("v", (_, _) => _options.IsVisible = !_options.IsVisible);
-            toggle.WidthRequest = 44;
-            toggle.HorizontalOptions = LayoutOptions.End;
-            var inputRow = new Grid
+            ColumnDefinitions = [new ColumnDefinition(GridLength.Star), new ColumnDefinition(GridLength.Auto)];
+            ColumnSpacing = 4;
+            var choose = Ui.SecondaryButton("Choose", async (_, _) =>
             {
-                ColumnDefinitions = [new ColumnDefinition(GridLength.Star), new ColumnDefinition(GridLength.Auto)],
-                ColumnSpacing = 4
-            };
-            inputRow.Add(_entry);
-            inputRow.Add(toggle, 1);
-            Children.Add(inputRow);
-            Children.Add(_options);
+                if (_models.Count == 0)
+                {
+                    await Application.Current!.Windows[0].Page!.DisplayAlertAsync("No models loaded", "Load available models first, or type a model ID manually.", "OK");
+                    return;
+                }
+                var picker = new ModelPickerPage(_models, Text);
+                await Application.Current!.Windows[0].Page!.Navigation.PushModalAsync(new NavigationPage(picker));
+                var selected = await picker.Selection;
+                if (selected is not null) Text = selected;
+            });
+            choose.WidthRequest = 82;
+            Children.Add(_entry);
+            Children.Add(choose);
+            Grid.SetColumn(choose, 1);
         }
 
-        public void SetOptions(IEnumerable<string> models)
+        public void SetModels(IEnumerable<string> models)
+        {
+            _models = models.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(model => model).ToArray();
+        }
+    }
+
+    private sealed class ModelPickerPage : ContentPage
+    {
+        private readonly TaskCompletionSource<string?> _selection = new();
+        private readonly VerticalStackLayout _options = new() { Spacing = 2 };
+        private readonly IReadOnlyList<string> _models;
+        public Task<string?> Selection => _selection.Task;
+
+        public ModelPickerPage(IReadOnlyList<string> models, string? currentModel)
+        {
+            _models = models;
+            Title = "Choose Model";
+            var search = new SearchBar { Placeholder = "Search loaded models", Text = currentModel };
+            search.TextChanged += (_, _) => ShowMatches(search.Text);
+            Content = new VerticalStackLayout
+            {
+                Padding = 16,
+                Spacing = 10,
+                Children =
+                {
+                    search,
+                    new ScrollView { Content = _options, VerticalOptions = LayoutOptions.Fill },
+                    Ui.SecondaryButton("Cancel", async (_, _) => await CloseAsync(null))
+                }
+            };
+            ShowMatches(search.Text);
+        }
+
+        protected override void OnDisappearing()
+        {
+            base.OnDisappearing();
+            _selection.TrySetResult(null);
+        }
+
+        private void ShowMatches(string? query)
         {
             _options.Children.Clear();
-            foreach (var model in models.Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                var option = Ui.SecondaryButton(model, (_, _) =>
-                {
-                    Text = model;
-                    _options.IsVisible = false;
-                });
-                option.HorizontalOptions = LayoutOptions.Fill;
-                _options.Children.Add(option);
-            }
-            _options.IsVisible = _options.Children.Count > 0;
+            foreach (var model in _models.Where(model => string.IsNullOrWhiteSpace(query) || model.Contains(query, StringComparison.OrdinalIgnoreCase)))
+                _options.Children.Add(Ui.SecondaryButton(model, async (_, _) => await CloseAsync(model)));
+        }
+
+        private async Task CloseAsync(string? model)
+        {
+            _selection.TrySetResult(model);
+            await Navigation.PopModalAsync();
         }
     }
 }
