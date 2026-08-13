@@ -24,6 +24,8 @@ public sealed class PipelineSettingsPage : ContentPage
             _editors.Add(call, editor);
             content.Children.Add(new Label { Text = CallName(call), FontAttributes = FontAttributes.Bold, Margin = new Thickness(0, 8, 0, 0) });
             content.Children.Add(editor.Connection);
+            content.Children.Add(Ui.SecondaryButton("Load available models", async (_, _) => await LoadModelsAsync(editor)));
+            content.Children.Add(editor.AvailableModels);
             content.Children.Add(editor.Model);
         }
         content.Children.Add(Ui.Button("Save all pipeline calls", Save));
@@ -63,11 +65,33 @@ public sealed class PipelineSettingsPage : ContentPage
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
 
+    private async Task LoadModelsAsync(RouteEditor editor)
+    {
+        try
+        {
+            var profile = editor.Connection.SelectedItem as ApiConnectionProfile ?? throw new NarratorException("Select a connection before loading models.");
+            var models = await _app.DiscoverModelsAsync(profile.Id);
+            editor.AvailableModels.ItemsSource = models.ToArray();
+            if (models.Count == 0) throw new NarratorException("This connection returned no models. Enter a model ID manually.");
+            if (!models.Contains(editor.Model.Text)) editor.AvailableModels.SelectedItem = models[0];
+        }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
     private static string CallName(GenerationCall call) => string.Concat(call.ToString().Select((character, index) => index > 0 && char.IsUpper(character) ? " " + character : character.ToString()));
 
     private sealed class RouteEditor
     {
         public Picker Connection { get; } = new() { Title = "Connection" };
+        public Picker AvailableModels { get; } = new() { Title = "Available models" };
         public Entry Model { get; } = new() { Placeholder = "Model ID" };
+
+        public RouteEditor()
+        {
+            AvailableModels.SelectedIndexChanged += (_, _) =>
+            {
+                if (AvailableModels.SelectedItem is string model) Model.Text = model;
+            };
+        }
     }
 }

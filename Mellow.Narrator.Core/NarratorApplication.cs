@@ -167,6 +167,25 @@ public sealed class NarratorApplication(
         return models;
     }
 
+    public Task<IReadOnlyList<string>> DiscoverModelsAsync(Guid connectionId, CancellationToken cancellationToken = default) =>
+        connectionCoordinator.RunExclusiveAsync(async () =>
+        {
+            var current = await settingsStore.LoadAsync(cancellationToken);
+            var profile = current.Connections.FirstOrDefault(candidate => candidate.Id == connectionId)
+                ?? throw new NarratorException("The selected API connection no longer exists.");
+            var credential = await secureStorage.GetAsync(SecureStorageKeys.ApiCredentialForConnection(connectionId), cancellationToken)
+                ?? await secureStorage.GetAsync(SecureStorageKeys.ApiCredential, cancellationToken);
+            var settings = current with { BaseUrl = profile.BaseUrl, Capabilities = profile.Capabilities };
+            var models = await provider.DiscoverModelsAsync(settings, credential, cancellationToken);
+            var updated = current with
+            {
+                Connections = current.Connections.Select(connection => connection.Id == connectionId
+                    ? connection with { Capabilities = connection.Capabilities with { SupportsModelDiscovery = true } } : connection).ToArray()
+            };
+            await settingsStore.SaveAsync(updated, cancellationToken);
+            return models;
+        }, cancellationToken);
+
     public async Task<BibleLimitImpact> GetBibleLimitImpactAsync(
         StoryGenerationSettings proposed,
         CancellationToken cancellationToken = default)
