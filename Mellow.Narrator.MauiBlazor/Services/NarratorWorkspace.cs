@@ -24,6 +24,7 @@ public sealed class NarratorWorkspace(
     public Task DeleteStoryAsync(Guid id) => stories.MoveToTrashAsync(id);
     public Task<StoryState> CopyStoryAsync(Guid id) => stories.CopyAsync(id);
     public Task SaveStoryAsync(StoryState state) => stories.SaveAsync(state);
+    public Task UpdateStoryLabelAsync(Guid id, string label) => stories.UpdateLabelAsync(id, label);
     public Task<StoryDefinition> SaveDefinitionBibleAsync(Guid id, StoryBible bible) => application.UpdateInitialStoryBibleAsync(id, bible);
     public Task<StoryDefinition> SaveDefinitionEventsAsync(Guid id, PlannedEvents events) => application.UpdateInitialPlannedEventsAsync(id, events);
     public Task<StoryDefinition> SaveDefinitionVictoryConditionsAsync(Guid id, StoryConditions conditions) => application.UpdateInitialVictoryConditionsAsync(id, conditions);
