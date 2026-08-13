@@ -125,15 +125,6 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
 
         var content = new VerticalStackLayout { Padding = 16, Spacing = 8 };
         content.Children.Add(Ui.Heading("Settings"));
-        content.Children.Add(Ui.Heading("API Connection"));
-        content.Children.Add(Field("Base URL", _baseUrl));
-        content.Children.Add(Field("Model ID", _model));
-        content.Children.Add(_discoveredModels);
-        content.Children.Add(new Label { Text = "Changing the model applies to every subsequent LLM request, including existing stories.", FontSize = 12 });
-        content.Children.Add(Field("API key", _apiKey));
-        content.Children.Add(new Label { Text = "A masked value means an API key is saved securely. Focus the field to replace it.", FontSize = 12 });
-        content.Children.Add(clear);
-
         content.Children.Add(Ui.Heading("Generation"));
         content.Children.Add(Field("Timeout seconds (default 120; range 10–900)", _timeout));
         content.Children.Add(Field("Maximum output tokens (default 4096; range 256–131072)", _maxOutput));
@@ -207,8 +198,6 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
 
         content.Children.Add(Ui.Buttons(
             Ui.Button("Save", Save),
-            Ui.SecondaryButton("Load Models", DiscoverModels),
-            Ui.SecondaryButton("Test Connection", Test),
             Ui.SecondaryButton("Reset defaults", Reset)));
         content.Children.Add(Ui.SecondaryButton("Manage Trash", async (_, _) => await Navigation.PushModalAsync(new NavigationPage(new TrashPage(_trash)))));
         content.Children.Add(_status);
@@ -367,8 +356,10 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         var modelId = string.IsNullOrWhiteSpace(_model.Text) ? null : _model.Text.Trim();
         return current with
         {
-            BaseUrl = baseUrl,
-            ModelId = modelId,
+            // Connection profiles and their models are configured on dedicated pages. Retain the
+            // legacy values solely as a migration fallback for existing workspaces.
+            BaseUrl = current.BaseUrl,
+            ModelId = current.ModelId,
             RequestTimeout = TimeSpan.FromSeconds(Parse(_timeout, "timeout")),
             MaxOutputTokens = (int)Parse(_maxOutput, "maximum output tokens"),
             Parameters = new(
@@ -415,11 +406,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
             // Compare parsed Uri objects, not strings: current.BaseUrl.ToString() is normalized (trailing
             // slash, casing, escaping) while the entered text isn't, so a string comparison would treat
             // an unchanged URL as "changed" and reset Capabilities to Untested for no reason.
-            Capabilities = !Equals(current.BaseUrl, baseUrl)
-                ? new(false, StructuredOutputTier.Untested, null, null)
-                : current.ModelId != modelId
-                    ? new(current.Capabilities.SupportsModelDiscovery, StructuredOutputTier.Untested, null, null)
-                    : current.Capabilities
+            Capabilities = current.Capabilities
         };
     }
 
