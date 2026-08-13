@@ -184,7 +184,7 @@ public sealed class OpenAiCompatibleProvider(
         ]).ToArray();
         var extracted = await CompleteWithCorrectionAsync(
             settings, credential, extractionMessages, TurnSchema(settings),
-            node => ParseStoryResponse(node, settings, context, opening), cancellationToken);
+            node => ParseStoryResponse(node, settings, context, opening), cancellationToken, GenerationCall.StateExtraction);
         return extracted with { Narration = draft.Narration, SuggestedActions = draft.SuggestedActions };
     }
 
@@ -262,7 +262,7 @@ public sealed class OpenAiCompatibleProvider(
         var extracted = await CompleteWithCorrectionAsync(settings, credential, baseMessages.Concat([
             Message("system", Templates.StateExtractionFromAnalysesInstruction.Replace("{analyses}", "")),
             Message("user", JsonSerializer.Serialize(new { artifacts, bibleAnalysis, eventAnalysis, outcomeAnalysis }, Json))
-        ]).ToArray(), TurnSchema(settings), node => ParseStoryResponse(node, settings, context, opening), cancellationToken);
+        ]).ToArray(), TurnSchema(settings), node => ParseStoryResponse(node, settings, context, opening), cancellationToken, GenerationCall.StateExtraction);
         return extracted with { Narration = draft.Narration, SuggestedActions = draft.SuggestedActions };
     }
 
@@ -286,7 +286,7 @@ public sealed class OpenAiCompatibleProvider(
         var extracted = await CompleteWithCorrectionAsync(settings, credential, baseMessages.Concat([
             Message("system", Templates.StateExtractionInstruction.Replace("{artifacts}", "")),
             Message("user", JsonSerializer.Serialize(artifacts, Json))
-        ]).ToArray(), TurnSchema(settings), node => ParseStoryResponse(node, settings, context, opening), cancellationToken);
+        ]).ToArray(), TurnSchema(settings), node => ParseStoryResponse(node, settings, context, opening), cancellationToken, GenerationCall.StateExtraction);
         return extracted with { Narration = draft.Narration, SuggestedActions = draft.SuggestedActions };
     }
 
