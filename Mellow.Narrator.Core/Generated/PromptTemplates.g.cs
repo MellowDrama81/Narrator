@@ -374,21 +374,21 @@ internal static class GeneratedPromptTemplates
         """;
 
     public const string NarrationFromAdjudicationInstruction = """
-        You are the narrator. Write only player-facing narration and suggested actions from this adjudication. Return JSON only with exactly narration and suggestedActions. Do not make new rule, condition, or state decisions.
+        You are the narrator. Write only player-facing narration and suggested actions from this adjudication. Return JSON only with exactly narration and suggestedActions. Return this exact JSON shape: {"narration":"player-facing scene text","suggestedActions":["first action","second action"]}. Do not make new rule, condition, or state decisions.
 
         ADJUDICATION:
         {adjudication}
         """;
 
     public const string NarrationFromPlanInstruction = """
-        You are the narrator. Write only the player-facing narration and suggested actions from this approved scene plan. Return JSON only with exactly narration and suggestedActions. Do not make new rule, condition, or state decisions.
+        You are the narrator. Write only the player-facing narration and suggested actions from this approved scene plan. Return JSON only with exactly narration and suggestedActions. Return this exact JSON shape: {"narration":"player-facing scene text","suggestedActions":["first action","second action"]}. Do not make new rule, condition, or state decisions.
 
         SCENE PLAN:
         {scenePlan}
         """;
 
     public const string NarrationFromCritiqueInstruction = """
-        You are the narrator. Write only player-facing narration and suggested actions from this approved scene plan and binding critique. Return JSON only with exactly narration and suggestedActions. Do not make new rule, condition, or state decisions.
+        You are the narrator. Write only player-facing narration and suggested actions from this approved scene plan and binding critique. Return JSON only with exactly narration and suggestedActions. Return this exact JSON shape: {"narration":"player-facing scene text","suggestedActions":["first action","second action"]}. Do not make new rule, condition, or state decisions.
 
         SCENE PLAN:
         {scenePlan}
@@ -398,7 +398,7 @@ internal static class GeneratedPromptTemplates
         """;
 
     public const string NarrationOnlyInstruction = """
-        You are the narrator. Resolve the current turn and write only player-facing narration and suggested actions. Return JSON only with exactly narration and suggestedActions. Do not return state updates.
+        You are the narrator. Resolve the current turn and write only player-facing narration and suggested actions. Return JSON only with exactly narration and suggestedActions. Return this exact JSON shape: {"narration":"player-facing scene text","suggestedActions":["first action","second action"]}. Do not return state updates.
         """;
 
     public const string StoryBibleAnalysisInstruction = """
@@ -437,7 +437,7 @@ internal static class GeneratedPromptTemplates
         """;
 
     public const string ProseRevisionInstruction = """
-        You are a player-facing prose editor. Rewrite the supplied narration and suggested actions for clarity and vivid pacing while preserving every fact, outcome, condition status, and decision exactly. Do not add events or state changes.
+        You are a player-facing prose editor. Rewrite the supplied narration and suggested actions for clarity and vivid pacing while preserving every fact, outcome, condition status, and decision exactly. Return this exact JSON shape: {"narration":"player-facing scene text","suggestedActions":["first action","second action"]}. Do not add events or state changes.
 
         APPROVED TURN:
         {turn}

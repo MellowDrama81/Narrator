@@ -1406,10 +1406,12 @@ public sealed class ProviderTests
     public async Task GenerateTurn_FourCallPipelineSuppliesInvalidNarrationDraftToCorrection()
     {
         var requests = 0;
+        string? initialNarrationRequest = null;
         string? correctionRequest = null;
         var handler = new StubHandler(async request =>
         {
             requests++;
+            if (requests == 3) initialNarrationRequest = await request.Content!.ReadAsStringAsync();
             if (requests == 4) correctionRequest = await request.Content!.ReadAsStringAsync();
             var content = requests switch
             {
@@ -1432,6 +1434,7 @@ public sealed class ProviderTests
 
         Assert.Equal(5, requests);
         Assert.Equal("The door gives beneath your hand. Cold air rises from the stairwell beyond.", result.Narration);
+        Assert.Contains("Return this exact JSON shape", initialNarrationRequest);
         Assert.NotNull(correctionRequest);
         Assert.Contains("The doorway stands open.", correctionRequest);
     }
