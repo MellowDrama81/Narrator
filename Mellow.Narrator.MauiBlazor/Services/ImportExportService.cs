@@ -26,6 +26,28 @@ public sealed class ImportExportService(IStoryDefinitionRepository definitions, 
         var turns = await stories.GetTurnsAsync(state.Id);
         await ShareAsync($"{Safe(state.Label)}-story.json", new StoryStateExport(ImportExportProcessor.CurrentFormatVersion, DateTimeOffset.UtcNow, state, turns));
     }
+    public async Task ExportNarrationHistoryAsync(StoryState state)
+    {
+        var turns = await stories.GetTurnsAsync(state.Id);
+        var text = string.Join(Environment.NewLine + Environment.NewLine, turns.OrderBy(x => x.SequenceNumber).Select(turn => turn.PlayerAction is null ? turn.Narration : $"> {turn.PlayerAction}{Environment.NewLine}{Environment.NewLine}{turn.Narration}"));
+        await ShareTextAsync($"{Safe(state.Label)}-history.txt", text);
+    }
+    public async Task ExportBibleHistoryAsync(StoryState state)
+    {
+        var turns = await stories.GetTurnsAsync(state.Id);
+        var groups = state.StoryBibleMaintenanceHistory.Select(item => (item.CompletedAtUtc, item.Reason.ToString(), (IReadOnlyList<AppliedStoryBibleChange>)item.Changes))
+            .Concat(turns.Where(turn => turn.StoryBibleChanges.Count > 0).Select(turn => (turn.CompletedAtUtc, $"Turn {turn.SequenceNumber}", turn.StoryBibleChanges)));
+        var text = string.Join(Environment.NewLine + Environment.NewLine, groups.OrderByDescending(x => x.CompletedAtUtc).Select(group => $"{group.Item2} — {group.CompletedAtUtc.ToLocalTime():g}{Environment.NewLine}" + string.Join(Environment.NewLine, group.Item3.Select(change => $"{change.Operation}: {change.Before?.Name ?? change.After?.Name} ({change.Source})"))));
+        await ShareTextAsync($"{Safe(state.Label)}-bible-history.txt", text);
+    }
+    public async Task ExportPlannedEventHistoryAsync(StoryState state)
+    {
+        var turns = await stories.GetTurnsAsync(state.Id);
+        var groups = state.PlannedEventMaintenanceHistory.Select(item => (item.CompletedAtUtc, item.Reason.ToString(), (IReadOnlyList<AppliedPlannedEventChange>)item.Changes))
+            .Concat(turns.Where(turn => turn.PlannedEventChanges.Count > 0).Select(turn => (turn.CompletedAtUtc, $"Turn {turn.SequenceNumber}", turn.PlannedEventChanges)));
+        var text = string.Join(Environment.NewLine + Environment.NewLine, groups.OrderByDescending(x => x.CompletedAtUtc).Select(group => $"{group.Item2} — {group.CompletedAtUtc.ToLocalTime():g}{Environment.NewLine}" + string.Join(Environment.NewLine, group.Item3.Select(change => $"{change.Operation}: {change.Before?.Description ?? change.After?.Description} ({change.Source}{(change.Outcome is null ? "" : $", {change.Outcome}")})"))));
+        await ShareTextAsync($"{Safe(state.Label)}-planned-events-history.txt", text);
+    }
     public async Task<StoryDefinition?> ImportDefinitionAsync()
     {
         var file = await FilePicker.Default.PickAsync(new() { PickerTitle = "Import Story Definition JSON", FileTypes = JsonFileType });
@@ -52,6 +74,12 @@ public sealed class ImportExportService(IStoryDefinitionRepository definitions, 
     {
         var path = Path.Combine(FileSystem.CacheDirectory, name);
         await using (var stream = File.Create(path)) await JsonSerializer.SerializeAsync(stream, value, Json);
+        await Share.Default.RequestAsync(new ShareFileRequest("Export Mellow Narrator", new ShareFile(path)));
+    }
+    private static async Task ShareTextAsync(string name, string value)
+    {
+        var path = Path.Combine(FileSystem.CacheDirectory, name);
+        await File.WriteAllTextAsync(path, value);
         await Share.Default.RequestAsync(new ShareFileRequest("Export Mellow Narrator", new ShareFile(path)));
     }
     private static void CheckVersion(int version) { if (version is < 0 or > ImportExportProcessor.CurrentFormatVersion) throw new NotSupportedException($"Export format {version} is not supported."); }
