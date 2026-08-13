@@ -6,7 +6,7 @@
 <header><p class="eyebrow">Interactive story</p><h1>@_story?.Label</h1>@if (_story is not null) { <div class="actions"><button class="button" @onclick="Export">Export story</button><button class="button" @onclick="ExportNarration">Export narration history</button><button class="button" @onclick="ExportBibleHistory">Export Bible history</button><button class="button" @onclick="ExportEventHistory">Export event history</button></div> }</header>
 @if (_turns is null || _story is null) { <p>Loading story…</p> }
 else {
-@if (_settings is not null) { <section class="editor-card"><h2>Safety and maintenance</h2><p class="hint">Story Bible: @LimitStatus(StoryBibleProcessor.IsWithinLimits(_story.CurrentStoryBible, _settings.StoryGeneration)); Planned events: @LimitStatus(PlannedEventProcessor.IsWithinLimits(_story.CurrentPlannedEvents, _settings.StoryGeneration)).</p>@if (NeedsCull) { <p class="error">This live story exceeds the configured memory limits. Cull it before continuing, or increase the limits in settings.</p><button class="button danger" @onclick="Cull">Cull to configured limits</button> }</section> }
+@if (_settings is not null) { <section class="editor-card"><h2>Safety and maintenance</h2><p class="hint">Story Bible: @LimitStatus(StoryBibleProcessor.IsWithinLimits(_story.CurrentStoryBible, _settings.StoryGeneration)); Planned events: @LimitStatus(PlannedEventProcessor.IsWithinLimits(_story.CurrentPlannedEvents, _settings.StoryGeneration)).</p>@if (NeedsCull) { <p class="error">Continuing is paused until the memory fits the configured limits.</p><div class="actions"><button class="button danger" @onclick="Cull">Cull to configured limits</button><a class="button" href="settings">Increase limits</a></div> }</section> }
 <details class="editor-card"><summary>Story state editor</summary>
   <label>Story label<input @bind="_label" /></label><button class="button" @onclick="SaveLabel">Save label</button>
   <label>Story summary<textarea @bind="_summary"></textarea></label><button class="button" @onclick="SaveSummary">Save summary</button>
@@ -20,7 +20,7 @@ else {
   @if (_status is not null) { <p class="status">@_status</p> }
 </details>
 <section class="transcript">@foreach (var turn in _turns) { <article class="turn"><p>@turn.Narration</p>@if (turn.SuggestedActions.Count > 0) { <div class="chips">@foreach (var action in turn.SuggestedActions) { <button @onclick="() => _action = action">@action</button> }</div>}</article> }</section>
-<form @onsubmit="Play" @onsubmit:preventDefault="true"><textarea @bind="_action" @bind:after="SaveActionDraft" placeholder="What do you do next?"></textarea><button class="button primary" disabled="@_busy">@(_busy ? "Writing…" : "Continue")</button></form>
+<form @onsubmit="Play" @onsubmit:preventDefault="true"><textarea @bind="_action" @bind:after="SaveActionDraft" placeholder="What do you do next?"></textarea><button class="button primary" disabled="@(_busy || NeedsCull)">@(_busy ? "Writing…" : "Continue")</button></form>
 }
 @code {
  [Parameter] public Guid Id { get; set; } private StoryState? _story; private ApiConnectionSettings? _settings; private IReadOnlyList<StoryTurn>? _turns; private string _action="", _summary="", _label=""; private string? _status; private bool _busy; private readonly Dictionary<Guid, BibleEdit> _bibleEdits=[]; private readonly Dictionary<Guid, EventEdit> _eventEdits=[]; private BibleEdit _newBible=new(); private EventEdit _newEvent=new();
