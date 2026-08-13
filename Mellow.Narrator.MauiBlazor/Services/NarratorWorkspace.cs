@@ -38,6 +38,7 @@ public sealed class NarratorWorkspace(
     public Task<StoryState> SaveStorySummaryAsync(Guid id, string summary) => application.UpdateStorySummaryAsync(id, summary);
     public Task<IReadOnlyList<string>> DiscoverModelsAsync(Guid connectionId) => application.DiscoverModelsAsync(connectionId);
     public Task<ConnectionTestResult> TestConnectionAsync(Guid connectionId) => application.TestConnectionAsync(connectionId);
+    public Task<ConnectionTestResult> TestModelAsync(Guid connectionId, string modelId) => application.TestConnectionAsync(connectionId, modelId);
     public Task SaveSettingsAsync(ApiConnectionSettings settings) => application.SaveSettingsAsync(settings, null);
     public Task SaveConnectionCredentialAsync(Guid connectionId, string? credential) => application.SaveConnectionCredentialAsync(connectionId, credential);
     public Task<string?> ConnectionCredentialAsync(Guid connectionId) => application.GetConnectionCredentialAsync(connectionId);
