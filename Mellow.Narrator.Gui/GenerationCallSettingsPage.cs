@@ -25,6 +25,7 @@ public sealed class PipelineSettingsPage : ContentPage
             content.Children.Add(new Label { Text = CallName(call), FontAttributes = FontAttributes.Bold, Margin = new Thickness(0, 8, 0, 0) });
             content.Children.Add(editor.Connection);
             content.Children.Add(Ui.SecondaryButton("Load available models", async (_, _) => await LoadModelsAsync(editor)));
+            content.Children.Add(editor.AvailableModels);
             content.Children.Add(editor.Model);
             var advanced = CollapsibleSection(content, "Advanced Request Behavior");
             advanced.Children.Add(Field("Timeout seconds", editor.Timeout));
@@ -103,9 +104,9 @@ public sealed class PipelineSettingsPage : ContentPage
         {
             var profile = editor.Connection.SelectedItem as ApiConnectionProfile ?? throw new NarratorException("Select a connection before loading models.");
             var models = await _app.DiscoverModelsAsync(profile.Id);
+            editor.AvailableModels.ItemsSource = models.ToArray();
             if (models.Count == 0) throw new NarratorException("This connection returned no models. Enter a model ID manually.");
-            editor.Model.SetOptions(models);
-            if (!models.Contains(editor.Model.Text)) editor.Model.Text = models[0];
+            if (!models.Contains(editor.Model.Text)) editor.AvailableModels.SelectedItem = models[0];
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
     }
@@ -127,7 +128,8 @@ public sealed class PipelineSettingsPage : ContentPage
     private sealed class RouteEditor
     {
         public Picker Connection { get; } = new() { Title = "Connection" };
-        public EditableModelComboBox Model { get; } = new();
+        public Picker AvailableModels { get; } = new() { Title = "Loaded models" };
+        public Entry Model { get; } = new() { Placeholder = "Model ID (or select above)" };
         public Entry Timeout { get; } = Numeric();
         public Entry MaxOutputTokens { get; } = Numeric();
         public Entry Temperature { get; } = Numeric();
@@ -138,51 +140,14 @@ public sealed class PipelineSettingsPage : ContentPage
         public Entry MaxRetryDelay { get; } = Numeric();
         public Entry MaxRetryAfter { get; } = Numeric();
 
-        private static Entry Numeric() => new() { Keyboard = Keyboard.Numeric };
-    }
-
-    // MAUI has no built-in editable picker, so this keeps manual model IDs and loaded choices in one control.
-    private sealed class EditableModelComboBox : VerticalStackLayout
-    {
-        private readonly Entry _entry = new() { Placeholder = "Model ID" };
-        private readonly VerticalStackLayout _options = new() { IsVisible = false, Spacing = 0 };
-
-        public string? Text
+        public RouteEditor()
         {
-            get => _entry.Text;
-            set => _entry.Text = value;
-        }
-
-        public EditableModelComboBox()
-        {
-            var toggle = Ui.SecondaryButton("v", (_, _) => _options.IsVisible = !_options.IsVisible);
-            toggle.WidthRequest = 44;
-            toggle.HorizontalOptions = LayoutOptions.End;
-            var inputRow = new Grid
+            AvailableModels.SelectedIndexChanged += (_, _) =>
             {
-                ColumnDefinitions = [new ColumnDefinition(GridLength.Star), new ColumnDefinition(GridLength.Auto)],
-                ColumnSpacing = 4
+                if (AvailableModels.SelectedItem is string model) Model.Text = model;
             };
-            inputRow.Add(_entry);
-            inputRow.Add(toggle, 1);
-            Children.Add(inputRow);
-            Children.Add(_options);
         }
 
-        public void SetOptions(IEnumerable<string> models)
-        {
-            _options.Children.Clear();
-            foreach (var model in models.Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                var option = Ui.SecondaryButton(model, (_, _) =>
-                {
-                    Text = model;
-                    _options.IsVisible = false;
-                });
-                option.HorizontalOptions = LayoutOptions.Fill;
-                _options.Children.Add(option);
-            }
-            _options.IsVisible = _options.Children.Count > 0;
-        }
+        private static Entry Numeric() => new() { Keyboard = Keyboard.Numeric };
     }
 }
