@@ -1403,6 +1403,26 @@ public sealed class ProviderTests
     }
 
     [Fact]
+    public async Task GenerateTurn_FourCallPipelineAcceptsNarrationDraftWithTransportMetadataInStrictMode()
+    {
+        var requests = 0;
+        var handler = new StubHandler(_ => Task.FromResult(Response(++requests switch
+        {
+            1 => """{"result":"The action succeeds."}""",
+            2 => """{"result":"The door opens."}""",
+            3 => """{"narration":"The door gives beneath your hand.","suggestedActions":["Descend","Listen"]}""",
+            _ => """{"turnNumber":1,"acknowledgedPlayerAction":"Open the door","narration":"Placeholder","suggestedActions":["Placeholder","Wait"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[],"storySummary":"The door has opened."}"""
+        })));
+        var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
+        var context = new GenerationContext(new("Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty), StoryBible.Empty, PlannedEvents.Empty, new(StoryConditions.Empty, [], []), new(StoryConditions.Empty, [], []), "", [], "Open the door", 1);
+
+        var result = await provider.GenerateTurnAsync(Settings() with { TurnPipeline = TurnPipelineMode.FourCalls, Capabilities = Settings().Capabilities with { StructuredOutputTier = StructuredOutputTier.StrictJsonSchema } }, null, context);
+
+        Assert.Equal(4, requests);
+        Assert.Equal("The door gives beneath your hand.", result.Narration);
+    }
+
+    [Fact]
     public async Task GenerateTurn_FourCallPipelineSuppliesInvalidNarrationDraftToCorrection()
     {
         var requests = 0;

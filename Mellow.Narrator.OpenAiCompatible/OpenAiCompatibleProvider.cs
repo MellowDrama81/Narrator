@@ -1191,7 +1191,12 @@ public sealed class OpenAiCompatibleProvider(
 
     private static void RequireProperties(JsonObject value, ApiConnectionSettings settings, params string[] expected)
     {
-        var actual = value.Select(x => x.Key).ToHashSet(StringComparer.Ordinal);
+        // `_transport` is local metadata added after reading the provider's JSON (response ID and
+        // token counts). It is not a provider response property and must never participate in the
+        // strict-schema shape check.
+        var actual = value.Where(x => !string.Equals(x.Key, "_transport", StringComparison.Ordinal))
+            .Select(x => x.Key)
+            .ToHashSet(StringComparer.Ordinal);
         // PromptedJson has no schema enforcing "no additional properties" like the strict tiers do, so a
         // model that adds one harmless extra property shouldn't fail the whole response and burn the one
         // corrective retry over it - only missing required properties matter for that tier.
