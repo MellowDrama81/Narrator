@@ -92,9 +92,15 @@ public sealed record ApiConnectionProfile(Guid Id, string Name, Uri? BaseUrl)
     public ConnectionCapabilities Capabilities { get; init; } = new(false, StructuredOutputTier.Untested, null, null);
 }
 
-// A call can choose both a connection and a model independently. A null connection/model inherits
-// the legacy/default connection/model, which makes old settings documents safe to migrate.
-public sealed record GenerationCallRoute(Guid? ConnectionId, string? ModelId);
+// A call can choose its connection, model, and HTTP request settings independently. Null values
+// inherit the legacy/default values so existing settings documents remain compatible.
+public sealed record GenerationCallRoute(Guid? ConnectionId, string? ModelId)
+{
+    public TimeSpan? RequestTimeout { get; init; }
+    public int? MaxOutputTokens { get; init; }
+    public ModelParameters? Parameters { get; init; }
+    public RetrySettings? Retry { get; init; }
+}
 
 public sealed record ConnectionCapabilities(
     bool SupportsModelDiscovery,
@@ -203,6 +209,24 @@ public static class SettingsValidator
         var connectionIds = value.Connections.Select(connection => connection.Id).ToHashSet();
         if (value.GenerationCallRoutes.Values.Any(route => route.ConnectionId is { } id && !connectionIds.Contains(id)))
             errors[nameof(value.GenerationCallRoutes)] = "A call is assigned to a connection that no longer exists.";
+        foreach (var route in value.GenerationCallRoutes.Values)
+        {
+            if (route.RequestTimeout is { } timeout) Range(errors, "CallTimeout", timeout.TotalSeconds, 10, 900);
+            if (route.MaxOutputTokens is { } tokens) Range(errors, "CallMaxOutputTokens", tokens, 256, 131072);
+            if (route.Parameters is { } parameters)
+            {
+                OptionalRange(errors, "CallTemperature", parameters.Temperature, 0, 2);
+                OptionalRange(errors, "CallTopP", parameters.TopP, 0, 1);
+            }
+            if (route.Retry is { } retry)
+            {
+                Range(errors, "CallMaxAutomaticRetries", retry.MaxAutomaticRetries, 0, 5);
+                Range(errors, "CallInitialDelay", retry.InitialDelay.TotalSeconds, .25, 30);
+                Range(errors, "CallMaxDelay", retry.MaxDelay.TotalSeconds, 1, 120);
+                Range(errors, "CallMaxRetryAfter", retry.MaxRetryAfter.TotalSeconds, 1, 600);
+                if (retry.MaxDelay < retry.InitialDelay) errors["CallMaxDelay"] = "Must be at least the initial retry delay.";
+            }
+        }
         Range(errors, nameof(value.RequestTimeout), value.RequestTimeout.TotalSeconds, 10, 900);
         Range(errors, nameof(value.MaxOutputTokens), value.MaxOutputTokens, 256, 131072);
         OptionalRange(errors, "Temperature", value.Parameters.Temperature, 0, 2);

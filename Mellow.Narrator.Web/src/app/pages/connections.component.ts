@@ -11,14 +11,14 @@ import { RouterLink } from '@angular/router';
 import { DbService } from '../core/db.service';
 import { defaultSettings } from '../core/defaults';
 import { LlmService } from '../core/llm.service';
-import { AppSettings, GenerationCall } from '../core/models';
+import { AppSettings } from '../core/models';
 import { validateSettings } from '../core/settings-validator';
 
 @Component({
   imports: [CommonModule, FormsModule, RouterLink, MatButtonModule, MatCardModule, MatFormFieldModule, MatInputModule, MatSelectModule],
   template: `
     <header class="page-header"><div><a class="back-link" routerLink="/settings">← Settings</a><p class="eyebrow">Providers</p><h1>API connections</h1></div></header>
-    <p class="lead">Named connections and the model used by each generation call. API keys are stored only in this browser.</p>
+    <p class="lead">Named connections. API keys are stored only in this browser.</p>
     @for (connection of settings.connections; track connection.id; let index = $index) {
       <mat-card class="feature-card"><mat-card-content><div class="form-grid compact">
         <mat-form-field appearance="outline"><mat-label>Name</mat-label><input matInput [(ngModel)]="connection.name"></mat-form-field>
@@ -27,25 +27,19 @@ import { validateSettings } from '../core/settings-validator';
       </div><button mat-stroked-button (click)="test(connection)">Test connection</button><button mat-button color="warn" (click)="remove(index)" [disabled]="settings.connections.length === 1">Remove</button></mat-card-content></mat-card>
     }
     <div class="actions"><button mat-stroked-button (click)="add()">Add connection</button><button mat-flat-button (click)="save()">Save connections</button></div>
-    <h2>Per-call routing</h2>
-    @for (call of generationCalls; track call) {
-      <mat-card class="row-card"><mat-card-content><div class="form-grid compact"><strong>{{ label(call) }}</strong>
-        <mat-form-field appearance="outline"><mat-label>Connection</mat-label><mat-select [(ngModel)]="route(call).connectionId">@for (connection of settings.connections; track connection.id) { <mat-option [value]="connection.id">{{ connection.name }}</mat-option> }</mat-select></mat-form-field>
-        <mat-form-field appearance="outline"><mat-label>Model</mat-label><input matInput [(ngModel)]="route(call).modelId" placeholder="Model ID"></mat-form-field>
-      </div></mat-card-content></mat-card>
-    }
-    <div class="actions end"><button mat-flat-button (click)="save()">Save routing</button></div>
   `,
 })
 export class ConnectionsComponent implements OnInit {
   settings: AppSettings = defaultSettings();
-  readonly generationCalls: GenerationCall[] = ['storyDefinition', 'turn', 'adjudication', 'scenePlan', 'planCritic', 'narration', 'storyBibleAnalysis', 'plannedEventAnalysis', 'conditionSummaryAnalysis', 'stateExtraction', 'proseRevision'];
   constructor(private readonly db: DbService, private readonly llm: LlmService, private readonly snack: MatSnackBar, private readonly changeDetector: ChangeDetectorRef) {}
   async ngOnInit(): Promise<void> { this.settings = await this.db.settings(); this.changeDetector.markForCheck(); }
   add(): void { this.settings.connections.push({ id: crypto.randomUUID(), name: `Connection ${this.settings.connections.length + 1}`, baseUrl: '', apiKey: '' }); }
-  remove(index: number): void { const [removed] = this.settings.connections.splice(index, 1); for (const call of this.generationCalls) if (this.route(call).connectionId === removed.id) this.route(call).connectionId = this.settings.connections[0].id; }
-  route(call: GenerationCall): { connectionId: string; modelId: string } { return this.settings.generationCallRoutes[call] ??= { connectionId: this.settings.connections[0]?.id ?? '', modelId: this.settings.modelId }; }
-  label(call: GenerationCall): string { return call.replace(/([A-Z])/g, ' $1').replace(/^./, char => char.toUpperCase()); }
+  remove(index: number): void {
+    const [removed] = this.settings.connections.splice(index, 1);
+    const replacement = this.settings.connections[0]?.id ?? '';
+    for (const route of Object.values(this.settings.generationCallRoutes))
+      if (route?.connectionId === removed.id) route.connectionId = replacement;
+  }
   async test(connection: AppSettings['connections'][number]): Promise<void> {
     const route = Object.values(this.settings.generationCallRoutes).find(candidate => candidate?.connectionId === connection.id);
     const modelId = route?.modelId || this.settings.modelId;
@@ -55,5 +49,5 @@ export class ConnectionsComponent implements OnInit {
       this.snack.open(`${connection.name}: ${message}`, 'Dismiss', { duration: 4000 });
     } catch (error) { this.snack.open(error instanceof Error ? error.message : 'Connection test failed.', 'Dismiss', { duration: 6000 }); }
   }
-  async save(): Promise<void> { const errors = Object.values(validateSettings(this.settings)); if (errors.length) { this.snack.open(errors[0], 'Dismiss', { duration: 5000 }); return; } await this.db.saveSettings(this.settings); this.snack.open('Connections and routing saved.', 'Dismiss', { duration: 2500 }); }
+  async save(): Promise<void> { const errors = Object.values(validateSettings(this.settings)); if (errors.length) { this.snack.open(errors[0], 'Dismiss', { duration: 5000 }); return; } await this.db.saveSettings(this.settings); this.snack.open('Connections saved.', 'Dismiss', { duration: 2500 }); }
 }

@@ -26,6 +26,15 @@ public sealed class PipelineSettingsPage : ContentPage
             content.Children.Add(editor.Connection);
             content.Children.Add(Ui.SecondaryButton("Load available models", async (_, _) => await LoadModelsAsync(editor)));
             content.Children.Add(editor.Model);
+            content.Children.Add(Field("Timeout seconds", editor.Timeout));
+            content.Children.Add(Field("Maximum output tokens", editor.MaxOutputTokens));
+            content.Children.Add(Field("Temperature (blank = provider default)", editor.Temperature));
+            content.Children.Add(Field("Top-p (blank = provider default)", editor.TopP));
+            content.Children.Add(Field("Reasoning effort (blank = provider default)", editor.ReasoningEffort));
+            content.Children.Add(Field("Automatic retries", editor.MaxAutomaticRetries));
+            content.Children.Add(Field("Initial retry delay seconds", editor.InitialRetryDelay));
+            content.Children.Add(Field("Maximum retry delay seconds", editor.MaxRetryDelay));
+            content.Children.Add(Field("Maximum Retry-After seconds", editor.MaxRetryAfter));
         }
         content.Children.Add(Ui.Button("Save all pipeline calls", Save));
         Content = new ScrollView { Content = content };
@@ -43,6 +52,16 @@ public sealed class PipelineSettingsPage : ContentPage
             var route = settings.GenerationCallRoutes.TryGetValue(call, out var configured) ? configured : null;
             editor.Connection.SelectedItem = settings.Connections.FirstOrDefault(profile => profile.Id == route?.ConnectionId) ?? settings.Connections.FirstOrDefault();
             editor.Model.Text = route?.ModelId ?? settings.ModelId;
+            editor.Timeout.Text = (route?.RequestTimeout ?? settings.RequestTimeout).TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            editor.MaxOutputTokens.Text = (route?.MaxOutputTokens ?? settings.MaxOutputTokens).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            editor.Temperature.Text = (route?.Parameters?.Temperature ?? settings.Parameters.Temperature)?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "";
+            editor.TopP.Text = (route?.Parameters?.TopP ?? settings.Parameters.TopP)?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "";
+            editor.ReasoningEffort.Text = route?.Parameters?.ReasoningEffort ?? settings.Parameters.ReasoningEffort ?? "";
+            var retry = route?.Retry ?? settings.Retry;
+            editor.MaxAutomaticRetries.Text = retry.MaxAutomaticRetries.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            editor.InitialRetryDelay.Text = retry.InitialDelay.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            editor.MaxRetryDelay.Text = retry.MaxDelay.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            editor.MaxRetryAfter.Text = retry.MaxRetryAfter.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
         _loaded = true;
     }
@@ -56,7 +75,20 @@ public sealed class PipelineSettingsPage : ContentPage
             foreach (var (call, editor) in _editors)
             {
                 var profile = editor.Connection.SelectedItem as ApiConnectionProfile ?? throw new NarratorException($"Select a connection for {CallName(call)}.");
-                routes[call] = new(profile.Id, string.IsNullOrWhiteSpace(editor.Model.Text) ? null : editor.Model.Text.Trim());
+                routes[call] = new(profile.Id, string.IsNullOrWhiteSpace(editor.Model.Text) ? null : editor.Model.Text.Trim())
+                {
+                    RequestTimeout = TimeSpan.FromSeconds(Parse(editor.Timeout, $"{CallName(call)} timeout")),
+                    MaxOutputTokens = (int)Parse(editor.MaxOutputTokens, $"{CallName(call)} maximum output tokens"),
+                    Parameters = new(
+                        Optional(editor.Temperature, $"{CallName(call)} temperature"),
+                        Optional(editor.TopP, $"{CallName(call)} top-p"),
+                        string.IsNullOrWhiteSpace(editor.ReasoningEffort.Text) ? null : editor.ReasoningEffort.Text.Trim()),
+                    Retry = new(
+                        (int)Parse(editor.MaxAutomaticRetries, $"{CallName(call)} automatic retries"),
+                        TimeSpan.FromSeconds(Parse(editor.InitialRetryDelay, $"{CallName(call)} initial retry delay")),
+                        TimeSpan.FromSeconds(Parse(editor.MaxRetryDelay, $"{CallName(call)} maximum retry delay")),
+                        TimeSpan.FromSeconds(Parse(editor.MaxRetryAfter, $"{CallName(call)} maximum Retry-After")))
+                };
             }
             await _app.SaveSettingsAsync(settings with { GenerationCallRoutes = routes }, null);
             await DisplayAlertAsync("Saved", "All selected pipeline call routes have been saved.", "OK");
@@ -78,11 +110,26 @@ public sealed class PipelineSettingsPage : ContentPage
     }
 
     private static string CallName(GenerationCall call) => string.Concat(call.ToString().Select((character, index) => index > 0 && char.IsUpper(character) ? " " + character : character.ToString()));
+    private static double Parse(Entry entry, string name) =>
+        double.TryParse(entry.Text, System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : throw new NarratorException($"Enter a valid {name}.");
+    private static double? Optional(Entry entry, string name) => string.IsNullOrWhiteSpace(entry.Text) ? null : Parse(entry, name);
+    private static VerticalStackLayout Field(string label, View control) => new() { Spacing = 2, Children = { new Label { Text = label }, control } };
 
     private sealed class RouteEditor
     {
         public Picker Connection { get; } = new() { Title = "Connection" };
         public EditableModelComboBox Model { get; } = new();
+        public Entry Timeout { get; } = Numeric();
+        public Entry MaxOutputTokens { get; } = Numeric();
+        public Entry Temperature { get; } = Numeric();
+        public Entry TopP { get; } = Numeric();
+        public Entry ReasoningEffort { get; } = new();
+        public Entry MaxAutomaticRetries { get; } = Numeric();
+        public Entry InitialRetryDelay { get; } = Numeric();
+        public Entry MaxRetryDelay { get; } = Numeric();
+        public Entry MaxRetryAfter { get; } = Numeric();
+
+        private static Entry Numeric() => new() { Keyboard = Keyboard.Numeric };
     }
 
     // MAUI has no built-in editable picker, so this keeps manual model IDs and loaded choices in one control.

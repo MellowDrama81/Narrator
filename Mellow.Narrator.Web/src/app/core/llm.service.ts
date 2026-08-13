@@ -429,7 +429,21 @@ export class LlmService {
     const route = settings.generationCallRoutes?.[call];
     const connection = settings.connections?.find(candidate => candidate.id === route?.connectionId) ?? settings.connections?.[0];
     if (!connection) return settings;
-    return { ...settings, baseUrl: connection.baseUrl, apiKey: connection.apiKey, modelId: route?.modelId || settings.modelId };
+    return {
+      ...settings,
+      baseUrl: connection.baseUrl,
+      apiKey: connection.apiKey,
+      modelId: route?.modelId || settings.modelId,
+      requestTimeoutSeconds: route?.requestTimeoutSeconds ?? settings.requestTimeoutSeconds,
+      maxOutputTokens: route?.maxOutputTokens ?? settings.maxOutputTokens,
+      temperature: route?.temperature ?? settings.temperature,
+      topP: route?.topP ?? settings.topP,
+      reasoningEffort: route?.reasoningEffort ?? settings.reasoningEffort,
+      maxAutomaticRetries: route?.maxAutomaticRetries ?? settings.maxAutomaticRetries,
+      retryInitialDelaySeconds: route?.retryInitialDelaySeconds ?? settings.retryInitialDelaySeconds,
+      retryMaxDelaySeconds: route?.retryMaxDelaySeconds ?? settings.retryMaxDelaySeconds,
+      retryMaxRetryAfterSeconds: route?.retryMaxRetryAfterSeconds ?? settings.retryMaxRetryAfterSeconds,
+    };
   }
 
   private async generateStage(settings: AppSettings, baseMessages: Message[], instruction: string, call: GenerationCall = 'turn'): Promise<string> {

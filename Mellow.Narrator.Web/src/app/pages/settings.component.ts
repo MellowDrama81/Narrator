@@ -23,7 +23,7 @@ import { validateSettings } from '../core/settings-validator';
   template: `
     <header class="page-header">
       <div><p class="eyebrow">Generation</p><h1>Settings</h1></div>
-      <div><a mat-button routerLink="/connections">API connections</a><a mat-button routerLink="/trash">Manage trash</a></div>
+      <div><a mat-button routerLink="/connections">API connections</a><a mat-button routerLink="/pipeline">Pipeline calls</a><a mat-button routerLink="/trash">Manage trash</a></div>
     </header>
     @if (busy) { <mat-progress-bar mode="indeterminate"></mat-progress-bar> }
     @if (storageError) {
@@ -37,11 +37,6 @@ import { validateSettings } from '../core/settings-validator';
           <mat-panel-description>Context and model parameters</mat-panel-description>
         </mat-expansion-panel-header>
         <div class="form-grid compact">
-          <mat-form-field appearance="outline"><mat-label>Timeout · seconds</mat-label><input matInput type="number" [(ngModel)]="settings.requestTimeoutSeconds"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Maximum output tokens</mat-label><input matInput type="number" [(ngModel)]="settings.maxOutputTokens"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Temperature</mat-label><input matInput type="number" step=".1" [(ngModel)]="settings.temperature"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Top P</mat-label><input matInput type="number" step=".1" [(ngModel)]="settings.topP"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Reasoning effort</mat-label><input matInput [(ngModel)]="settings.reasoningEffort" placeholder="low, medium, high"></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Recent turns in context</mat-label><input matInput type="number" [(ngModel)]="settings.recentTurnCount"></mat-form-field>
         </div>
         <mat-form-field appearance="outline">
@@ -118,18 +113,6 @@ import { validateSettings } from '../core/settings-validator';
           <mat-form-field appearance="outline"><mat-label>Maximum conditions</mat-label><input matInput type="number" [(ngModel)]="settings.maxConditions"></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Maximum condition characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxConditionDescriptionCharacters"></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Story summary characters</mat-label><input matInput type="number" [(ngModel)]="settings.maxStorySummaryCharacters"></mat-form-field>
-        </div>
-      </mat-expansion-panel>
-      <mat-expansion-panel>
-        <mat-expansion-panel-header>
-          <mat-panel-title>Retry</mat-panel-title>
-          <mat-panel-description>Behavior when a request fails</mat-panel-description>
-        </mat-expansion-panel-header>
-        <div class="form-grid compact">
-          <mat-form-field appearance="outline"><mat-label>Maximum automatic retries</mat-label><input matInput type="number" [(ngModel)]="settings.maxAutomaticRetries"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Initial delay Â· seconds</mat-label><input matInput type="number" step=".25" [(ngModel)]="settings.retryInitialDelaySeconds"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Maximum delay Â· seconds</mat-label><input matInput type="number" [(ngModel)]="settings.retryMaxDelaySeconds"></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Maximum Retry-After Â· seconds</mat-label><input matInput type="number" [(ngModel)]="settings.retryMaxRetryAfterSeconds"></mat-form-field>
         </div>
       </mat-expansion-panel>
     </mat-accordion>

@@ -359,6 +359,10 @@ public sealed class OpenAiCompatibleProvider(
         {
             BaseUrl = connection.BaseUrl,
             ModelId = string.IsNullOrWhiteSpace(route.ModelId) ? settings.ModelId : route.ModelId,
+            RequestTimeout = route.RequestTimeout ?? settings.RequestTimeout,
+            MaxOutputTokens = route.MaxOutputTokens ?? settings.MaxOutputTokens,
+            Parameters = route.Parameters ?? settings.Parameters,
+            Retry = route.Retry ?? settings.Retry,
             Capabilities = connection.Capabilities
         }, credential);
     }

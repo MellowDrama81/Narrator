@@ -1,0 +1,66 @@
+import { CommonModule } from '@angular/common';
+import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { MatButtonModule } from '@angular/material/button';
+import { MatCardModule } from '@angular/material/card';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatInputModule } from '@angular/material/input';
+import { MatSelectModule } from '@angular/material/select';
+import { MatSnackBar } from '@angular/material/snack-bar';
+import { RouterLink } from '@angular/router';
+import { DbService } from '../core/db.service';
+import { defaultSettings } from '../core/defaults';
+import { AppSettings, GenerationCall, GenerationCallRoute } from '../core/models';
+import { validateSettings } from '../core/settings-validator';
+
+@Component({
+  imports: [CommonModule, FormsModule, RouterLink, MatButtonModule, MatCardModule, MatFormFieldModule, MatInputModule, MatSelectModule],
+  template: `
+    <header class="page-header"><div><a class="back-link" routerLink="/settings">← Settings</a><p class="eyebrow">Generation</p><h1>Pipeline calls</h1></div></header>
+    <p class="lead">Choose the connection, model, and HTTP request behavior for every call in the selected pipeline.</p>
+    @for (call of selectedCalls; track call) {
+      <mat-card class="feature-card"><mat-card-content><h2>{{ label(call) }}</h2><div class="form-grid compact">
+        <mat-form-field appearance="outline"><mat-label>Connection</mat-label><mat-select [(ngModel)]="route(call).connectionId">@for (connection of settings.connections; track connection.id) { <mat-option [value]="connection.id">{{ connection.name }}</mat-option> }</mat-select></mat-form-field>
+        <mat-form-field appearance="outline"><mat-label>Model</mat-label><input matInput [(ngModel)]="route(call).modelId" placeholder="Model ID"></mat-form-field>
+        <mat-form-field appearance="outline"><mat-label>Timeout · seconds</mat-label><input matInput type="number" [(ngModel)]="route(call).requestTimeoutSeconds"></mat-form-field>
+        <mat-form-field appearance="outline"><mat-label>Maximum output tokens</mat-label><input matInput type="number" [(ngModel)]="route(call).maxOutputTokens"></mat-form-field>
+        <mat-form-field appearance="outline"><mat-label>Temperature</mat-label><input matInput type="number" step=".1" [(ngModel)]="route(call).temperature"></mat-form-field>
+        <mat-form-field appearance="outline"><mat-label>Top P</mat-label><input matInput type="number" step=".1" [(ngModel)]="route(call).topP"></mat-form-field>
+        <mat-form-field appearance="outline"><mat-label>Reasoning effort</mat-label><input matInput [(ngModel)]="route(call).reasoningEffort" placeholder="low, medium, high"></mat-form-field>
+        <mat-form-field appearance="outline"><mat-label>Maximum automatic retries</mat-label><input matInput type="number" [(ngModel)]="route(call).maxAutomaticRetries"></mat-form-field>
+        <mat-form-field appearance="outline"><mat-label>Initial retry delay · seconds</mat-label><input matInput type="number" step=".25" [(ngModel)]="route(call).retryInitialDelaySeconds"></mat-form-field>
+        <mat-form-field appearance="outline"><mat-label>Maximum retry delay · seconds</mat-label><input matInput type="number" [(ngModel)]="route(call).retryMaxDelaySeconds"></mat-form-field>
+        <mat-form-field appearance="outline"><mat-label>Maximum Retry-After · seconds</mat-label><input matInput type="number" [(ngModel)]="route(call).retryMaxRetryAfterSeconds"></mat-form-field>
+      </div></mat-card-content></mat-card>
+    }
+    <div class="actions end"><button mat-flat-button (click)="save()">Save pipeline calls</button></div>
+  `,
+})
+export class PipelineSettingsComponent implements OnInit {
+  settings: AppSettings = defaultSettings();
+  readonly allCalls: GenerationCall[] = ['storyDefinition', 'turn', 'adjudication', 'scenePlan', 'planCritic', 'narration', 'storyBibleAnalysis', 'plannedEventAnalysis', 'conditionSummaryAnalysis', 'stateExtraction', 'proseRevision'];
+  constructor(private readonly db: DbService, private readonly snack: MatSnackBar, private readonly changeDetector: ChangeDetectorRef) {}
+  async ngOnInit(): Promise<void> { this.settings = await this.db.settings(); this.changeDetector.markForCheck(); }
+  get selectedCalls(): GenerationCall[] { return this.allCalls.filter(call => call === 'storyDefinition' || this.callsForPipeline().includes(call)); }
+  route(call: GenerationCall): GenerationCallRoute {
+    return this.settings.generationCallRoutes[call] ??= {
+      connectionId: this.settings.connections[0]?.id ?? '', modelId: this.settings.modelId,
+      requestTimeoutSeconds: this.settings.requestTimeoutSeconds, maxOutputTokens: this.settings.maxOutputTokens,
+      temperature: this.settings.temperature, topP: this.settings.topP, reasoningEffort: this.settings.reasoningEffort,
+      maxAutomaticRetries: this.settings.maxAutomaticRetries, retryInitialDelaySeconds: this.settings.retryInitialDelaySeconds,
+      retryMaxDelaySeconds: this.settings.retryMaxDelaySeconds, retryMaxRetryAfterSeconds: this.settings.retryMaxRetryAfterSeconds,
+    };
+  }
+  label(call: GenerationCall): string { return call.replace(/([A-Z])/g, ' $1').replace(/^./, char => char.toUpperCase()); }
+  async save(): Promise<void> { const errors = Object.values(validateSettings(this.settings)); if (errors.length) { this.snack.open(errors[0], 'Dismiss', { duration: 5000 }); return; } await this.db.saveSettings(this.settings); this.snack.open('Pipeline calls saved.', 'Dismiss', { duration: 2500 }); }
+  private callsForPipeline(): GenerationCall[] {
+    const calls: GenerationCall[] = ['turn'];
+    if (!['oneCall'].includes(this.settings.turnPipeline)) calls.push('stateExtraction');
+    if (!['oneCall', 'twoCalls'].includes(this.settings.turnPipeline)) calls.push('adjudication');
+    if (!['oneCall', 'twoCalls', 'threeCalls'].includes(this.settings.turnPipeline)) calls.push('scenePlan', 'narration');
+    if (['fiveCalls', 'sevenCalls', 'sevenCallsParallel', 'eightCalls'].includes(this.settings.turnPipeline)) calls.push('planCritic');
+    if (['sevenCalls', 'sevenCallsParallel', 'eightCalls'].includes(this.settings.turnPipeline)) calls.push('storyBibleAnalysis', 'plannedEventAnalysis', 'conditionSummaryAnalysis');
+    if (this.settings.turnPipeline === 'eightCalls') calls.push('proseRevision');
+    return calls;
+  }
+}

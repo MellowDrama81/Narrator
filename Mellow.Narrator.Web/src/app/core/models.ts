@@ -145,7 +145,19 @@ export type InstructionMessageRole = 'system' | 'developer';
 export type TurnPipelineMode = 'oneCall' | 'twoCalls' | 'threeCalls' | 'fourCalls' | 'fiveCalls' | 'sevenCalls' | 'sevenCallsParallel' | 'eightCalls';
 export type GenerationCall = 'storyDefinition' | 'turn' | 'adjudication' | 'scenePlan' | 'planCritic' | 'narration' | 'storyBibleAnalysis' | 'plannedEventAnalysis' | 'conditionSummaryAnalysis' | 'stateExtraction' | 'proseRevision';
 export interface ApiConnectionProfile { id: string; name: string; baseUrl: string; apiKey: string; }
-export interface GenerationCallRoute { connectionId: string; modelId: string; }
+export interface GenerationCallRoute {
+  connectionId: string;
+  modelId: string;
+  requestTimeoutSeconds?: number;
+  maxOutputTokens?: number;
+  temperature?: number | null;
+  topP?: number | null;
+  reasoningEffort?: string;
+  maxAutomaticRetries?: number;
+  retryInitialDelaySeconds?: number;
+  retryMaxDelaySeconds?: number;
+  retryMaxRetryAfterSeconds?: number;
+}
 
 export interface AppSettings {
   key: 'app';

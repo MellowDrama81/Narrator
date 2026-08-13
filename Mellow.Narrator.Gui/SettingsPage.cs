@@ -48,14 +48,9 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
     private readonly Entry _model = new() { Placeholder = "Model ID" };
     private readonly Picker _discoveredModels = new() { Title = "Discovered models" };
     private readonly Entry _apiKey = new() { Placeholder = "API key (optional)", IsPassword = true };
-    private readonly Entry _timeout = Numeric();
-    private readonly Entry _maxOutput = Numeric();
     private readonly Entry _recentTurns = Numeric();
     private readonly Entry _maxEntries = Numeric();
     private readonly Entry _maxPlannedEvents = Numeric();
-    private readonly Entry _temperature = Numeric();
-    private readonly Entry _topP = Numeric();
-    private readonly Entry _reasoning = new();
     private readonly Picker _turnPipeline = new()
     {
         Title = "Turn generation pipeline",
@@ -126,11 +121,6 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         var content = new VerticalStackLayout { Padding = 16, Spacing = 8 };
         content.Children.Add(Ui.Heading("Settings"));
         content.Children.Add(Ui.Heading("Generation"));
-        content.Children.Add(Field("Timeout seconds (default 120; range 10–900)", _timeout));
-        content.Children.Add(Field("Maximum output tokens (default 4096; range 256–131072)", _maxOutput));
-        content.Children.Add(Field("Temperature (blank; range 0–2)", _temperature));
-        content.Children.Add(Field("Top-p (blank; range 0–1)", _topP));
-        content.Children.Add(Field("Reasoning effort (blank = provider default)", _reasoning));
         content.Children.Add(Field("Recent turns (default 8; range 0–100)", _recentTurns));
         content.Children.Add(Field("Maximum Story Bible entries (default 200; range 1–2000)", _maxEntries));
         content.Children.Add(Field("Maximum Planned Events (default 50; range 1–500)", _maxPlannedEvents));
@@ -159,10 +149,6 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         Add(bibleAndRetries, "Bible entry character limit", "bibleEntry");
         Add(bibleAndRetries, "Bible total character limit", "bibleTotal");
         Add(bibleAndRetries, "Bible warning percent", "bibleWarning");
-        Add(bibleAndRetries, "Automatic retries", "retries");
-        Add(bibleAndRetries, "Initial retry delay seconds", "retryInitial");
-        Add(bibleAndRetries, "Maximum retry delay seconds", "retryMax");
-        Add(bibleAndRetries, "Maximum Retry-After seconds", "retryAfter");
 
         var plannedEvents = Section(content, "Planned Events", expanded: false);
         Add(plannedEvents, "Planned Event entry character limit", "plannedEventEntry");
@@ -357,12 +343,9 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
             // legacy values solely as a migration fallback for existing workspaces.
             BaseUrl = current.BaseUrl,
             ModelId = current.ModelId,
-            RequestTimeout = TimeSpan.FromSeconds(Parse(_timeout, "timeout")),
-            MaxOutputTokens = (int)Parse(_maxOutput, "maximum output tokens"),
-            Parameters = new(
-                Optional(_temperature, "temperature"),
-                Optional(_topP, "top-p"),
-                string.IsNullOrWhiteSpace(_reasoning.Text) ? null : _reasoning.Text),
+            RequestTimeout = current.RequestTimeout,
+            MaxOutputTokens = current.MaxOutputTokens,
+            Parameters = current.Parameters,
             TurnPipeline = _turnPipeline.SelectedIndex switch
             {
                 0 => TurnPipelineMode.OneCall,
@@ -385,7 +368,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
                 Int("plannedEventEntry"),
                 Int("plannedEventTotal"),
                 Int("plannedEventWarning")),
-            Retry = new(Int("retries"), Seconds("retryInitial"), Seconds("retryMax"), Seconds("retryAfter")),
+            Retry = current.Retry,
             ContentLimits = new(Int("title"), Int("label"), Int("prompt"), Int("action"), Int("narration"),
                 Int("suggestedCount"), Int("suggestedLength"),
                 Int("category"), Int("name"), Int("updates"),
@@ -429,11 +412,6 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
     {
         _baseUrl.Text = settings.BaseUrl?.ToString() ?? "";
         _model.Text = settings.ModelId ?? "";
-        _timeout.Text = settings.RequestTimeout.TotalSeconds.ToString(CultureInfo.InvariantCulture);
-        _maxOutput.Text = settings.MaxOutputTokens.ToString(CultureInfo.InvariantCulture);
-        _temperature.Text = settings.Parameters.Temperature?.ToString(CultureInfo.InvariantCulture) ?? "";
-        _topP.Text = settings.Parameters.TopP?.ToString(CultureInfo.InvariantCulture) ?? "";
-        _reasoning.Text = settings.Parameters.ReasoningEffort ?? "";
         _turnPipeline.SelectedIndex = settings.TurnPipeline switch
         {
             TurnPipelineMode.OneCall => 0,
@@ -456,10 +434,6 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         Set("plannedEventEntry", settings.StoryGeneration.MaxPlannedEventCharacters);
         Set("plannedEventTotal", settings.StoryGeneration.MaxPlannedEventsCharacters);
         Set("plannedEventWarning", settings.StoryGeneration.PlannedEventsWarningPercent);
-        Set("retries", settings.Retry.MaxAutomaticRetries);
-        Set("retryInitial", settings.Retry.InitialDelay.TotalSeconds);
-        Set("retryMax", settings.Retry.MaxDelay.TotalSeconds);
-        Set("retryAfter", settings.Retry.MaxRetryAfter.TotalSeconds);
         var c = settings.ContentLimits;
         Set("title", c.MaxStoryTitleCharacters);
         Set("label", c.MaxStoryLabelCharacters);
