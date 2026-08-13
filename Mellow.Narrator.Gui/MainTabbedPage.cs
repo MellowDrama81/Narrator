@@ -64,7 +64,7 @@ public sealed class MainTabbedPage : TabbedPage
         }
         foreach (var requestPage in related.Select(x => x.RootPage).OfType<IInFlightRequestPage>())
             await requestPage.CancelInFlightRequestAsync();
-        foreach (var page in related) Children.Remove(page);
+        foreach (var page in related) await RemoveTabAsync(page);
         await SaveWorkspaceAsync();
         return true;
     }
@@ -77,7 +77,7 @@ public sealed class MainTabbedPage : TabbedPage
             return false;
         if (page.RootPage is IInFlightRequestPage requestPage)
             await requestPage.CancelInFlightRequestAsync();
-        Children.Remove(page);
+        await RemoveTabAsync(page);
         await SaveWorkspaceAsync();
         return true;
     }
@@ -158,23 +158,23 @@ public sealed class MainTabbedPage : TabbedPage
     {
         if (CurrentPage is not NarratorNavigationPage page || page.IsFixed) return;
         if (page.RootPage is ICloseGuardPage guard && !await guard.CanCloseAsync()) return;
-        Children.Remove(page);
+        await RemoveTabAsync(page);
         await SaveWorkspaceAsync();
     }
 
     public async Task ReplaceCurrentWithDefinitionAsync(Guid id)
     {
         var previous = CurrentPage;
-        if (previous is NarratorNavigationPage page && !page.IsFixed) Children.Remove(previous);
         OpenDefinition(id);
+        if (previous is NarratorNavigationPage page && !page.IsFixed) await RemoveTabAsync(page);
         await SaveWorkspaceAsync();
     }
 
     public async Task ReplaceCurrentWithPlayAsync(Guid id)
     {
         var previous = CurrentPage;
-        if (previous is NarratorNavigationPage page && !page.IsFixed) Children.Remove(previous);
         OpenPlay(id);
+        if (previous is NarratorNavigationPage page && !page.IsFixed) await RemoveTabAsync(page);
         await SaveWorkspaceAsync();
     }
 
@@ -233,6 +233,21 @@ public sealed class MainTabbedPage : TabbedPage
 
     private NarratorNavigationPage? Find(TabType type, Guid? id) =>
         Children.OfType<NarratorNavigationPage>().FirstOrDefault(x => x.TabType == type && x.RecordId == id);
+
+    // WinUI's NavigationView cannot navigate away from a tab after that tab has been removed from its
+    // source collection. Select a surviving tab and let the native selection change complete first.
+    private async Task RemoveTabAsync(NarratorNavigationPage page)
+    {
+        if (!Children.Contains(page)) return;
+        if (CurrentPage == page)
+        {
+            var replacement = Children.OfType<NarratorNavigationPage>().FirstOrDefault(candidate => candidate != page)
+                ?? throw new InvalidOperationException("Cannot remove the last tab.");
+            CurrentPage = replacement;
+            await Task.Yield();
+        }
+        Children.Remove(page);
+    }
 
     private async Task RestoreAsync()
     {
