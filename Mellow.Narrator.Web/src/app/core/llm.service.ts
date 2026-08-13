@@ -484,6 +484,11 @@ export class LlmService {
   ): Promise<{ narration: string; suggestedActions: string[] }> {
     return this.completeWithCorrection(this.connectionSettings(settings, call), [...baseMessages, { role: 'system', content: instruction }],
       this.narrationDraftSchema(settings), value => {
+        const stageResult = value['result'];
+        if (typeof stageResult === 'string' && stageResult.trim() && stageResult.length <= settings.maxNarrationCharacters) {
+          const defaults = ['Look around', 'Continue the story', 'Proceed cautiously'];
+          return { narration: stageResult, suggestedActions: Array.from({ length: settings.minSuggestedActions }, (_, index) => defaults[index % defaults.length]).slice(0, settings.maxSuggestedActions) };
+        }
         const narration = value['narration'];
         const suggestedActions = value['suggestedActions'];
         if (typeof narration !== 'string' || !narration.trim() || narration.length > settings.maxNarrationCharacters)

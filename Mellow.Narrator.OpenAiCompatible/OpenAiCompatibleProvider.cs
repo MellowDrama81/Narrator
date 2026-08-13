@@ -1076,6 +1076,15 @@ public sealed class OpenAiCompatibleProvider(
 
     private static NarrationDraft ParseNarrationDraft(JsonObject node, ApiConnectionSettings settings)
     {
+        // A few OpenAI-compatible models persist in returning the pipeline-stage envelope despite
+        // receiving both a schema and a concrete narration example. Do not make the whole story
+        // unplayable in that case: the stage's text is still usable player-facing prose.
+        if (node["result"] is not null)
+        {
+            var stageNarration = RequiredString(node, "result");
+            if (!string.IsNullOrWhiteSpace(stageNarration) && stageNarration.Length <= settings.ContentLimits.MaxNarrationCharacters)
+                return new(stageNarration, DefaultSuggestedActions(settings));
+        }
         RequireProperties(node, settings, "narration", "suggestedActions");
         var narration = RequiredString(node, "narration");
         if (string.IsNullOrWhiteSpace(narration) || narration.Length > settings.ContentLimits.MaxNarrationCharacters)
@@ -1087,6 +1096,15 @@ public sealed class OpenAiCompatibleProvider(
             actions.Any(action => string.IsNullOrWhiteSpace(action) || action.Length > settings.ContentLimits.MaxSuggestedActionCharacters))
             throw new JsonException("Suggested actions do not meet the configured limits.");
         return new(narration, actions);
+    }
+
+    private static IReadOnlyList<string> DefaultSuggestedActions(ApiConnectionSettings settings)
+    {
+        var defaults = new[] { "Look around", "Continue the story", "Proceed cautiously" };
+        return Enumerable.Range(0, settings.ContentLimits.MinSuggestedActions)
+            .Select(index => defaults[index % defaults.Length])
+            .Take(settings.ContentLimits.MaxSuggestedActions)
+            .ToArray();
     }
 
     private sealed record NarrationDraft(string Narration, IReadOnlyList<string> SuggestedActions);
