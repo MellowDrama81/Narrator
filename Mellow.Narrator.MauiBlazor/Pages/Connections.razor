@@ -1,13 +1,154 @@
 @page "/connections"
 @inject NarratorWorkspace Workspace
 
-<header><p class="eyebrow">Providers</p><h1>API connections</h1><p class="lead">Each API key stays in secure device storage. Calls can use different saved connections.</p></header>
-@if (_settings is null) { <p>Loading connections…</p> } else { <section class="actions"><button class="button" @onclick="Add">Add connection</button><button class="button primary" @onclick="Save">Save connections</button></section><section class="cards">@foreach (var item in _editors) { <article><label>Name<input @bind="item.Name" /></label><label>Base URL<input @bind="item.BaseUrl" placeholder="https://provider.example/v1" /></label><label>API key<input type="password" @bind="item.ApiKey" placeholder="Leave blank to preserve current key" /></label><label class="check"><input type="checkbox" @bind="item.ClearApiKey" /> Clear stored API key when saved</label><p class="hint">@item.Status</p><div class="actions"><button class="button" @onclick="() => Test(item)">Test connection</button><button class="button danger" @onclick="() => Remove(item)">Remove</button></div></article> }</section>@if (_message is not null) { <p class="status">@_message</p> } }
+<header><p class="eyebrow">Providers</p><h1>API connections</h1><p class="lead">Save a named endpoint and its secure API key. Assign its model on Pipeline Calls.</p></header>
+@if (_settings is null)
+{
+    <p>Loading connections…</p>
+}
+else
+{
+    <section class="actions">
+        <button type="button" class="button" @onclick="AddConnection">Add connection</button>
+        <button type="button" class="button primary" @onclick="SaveConnectionsAsync" disabled="@_saving">@(_saving ? "Saving…" : "Save connections")</button>
+    </section>
+
+    <section class="cards">
+        @foreach (var item in _editors)
+        {
+            <article @key="item.Id">
+                <label>Name<input @bind="item.Name" @bind:event="oninput" /></label>
+                <label>Base URL<input @bind="item.BaseUrl" @bind:event="oninput" placeholder="https://provider.example/v1" /></label>
+                <label>API key<input type="password" @bind="item.ApiKey" @bind:event="oninput" placeholder="Leave blank to preserve current key" /></label>
+                <label class="check"><input type="checkbox" @bind="item.ClearApiKey" /> Clear stored API key when saved</label>
+                <p class="hint">@item.Status</p>
+                <div class="actions">
+                    <button type="button" class="button" @onclick="() => TestConnectionAsync(item)" disabled="@_saving">Test connection</button>
+                    <button type="button" class="button danger" @onclick="() => RemoveConnection(item)" disabled="@(_editors.Count == 1)">Remove</button>
+                </div>
+            </article>
+        }
+    </section>
+
+    @if (_message is not null) { <p class="@(_saveFailed ? "error" : "status")">@_message</p> }
+}
+
 @code {
-    private ApiConnectionSettings? _settings; private readonly List<ConnectionEdit> _editors = []; private string? _message;
-    protected override async Task OnInitializedAsync() { _settings = await Workspace.SettingsAsync(); foreach (var p in _settings.Connections) _editors.Add(new(p, await Workspace.ConnectionCredentialAsync(p.Id))); if (_editors.Count == 0) Add(); }
-    private void Add() => _editors.Add(new(new(Guid.NewGuid(), "New connection", null), null)); private void Remove(ConnectionEdit editor) => _editors.Remove(editor);
-    private async Task<bool> Save() { if (_settings is null || _editors.Count == 0) { _message = "Keep at least one connection."; return false; } try { var profiles = _editors.Select(e => e.ToProfile()).ToArray(); if (profiles.Any(e => e.BaseUrl is null)) { _message = "Each connection needs an absolute http or https base URL."; return false; } var routes = _settings.GenerationCallRoutes.ToDictionary(x => x.Key, x => profiles.Any(p => p.Id == x.Value.ConnectionId) ? x.Value : x.Value with { ConnectionId = profiles[0].Id }); await Workspace.SaveSettingsAsync(_settings with { Connections = profiles, GenerationCallRoutes = routes }); foreach (var e in _editors) if (e.ClearApiKey || !string.IsNullOrWhiteSpace(e.ApiKey)) await Workspace.SaveConnectionCredentialAsync(e.Id, e.ClearApiKey ? null : e.ApiKey); _settings = await Workspace.SettingsAsync(); _message = "Connections saved."; return true; } catch (Exception ex) { _message = ex.Message; return false; } }
-    private async Task Test(ConnectionEdit editor) { if (!await Save()) return; try { var result = await Workspace.TestConnectionAsync(editor.Id); editor.Status = result.Success ? $"Connected — {result.Capabilities.StructuredOutputTier}. {result.Models.Count} model(s) discovered." : result.Error ?? "Connection failed."; } catch (Exception ex) { editor.Status = ex.Message; } }
-    private sealed class ConnectionEdit { public ConnectionEdit(ApiConnectionProfile value, string? apiKey) { Id=value.Id; Name=value.Name; BaseUrl=value.BaseUrl?.ToString() ?? ""; ApiKey=apiKey ?? ""; } public Guid Id { get; } public string Name { get; set; } public string BaseUrl { get; set; } public string ApiKey { get; set; } public bool ClearApiKey { get; set; } public string Status { get; set; } = "Not tested."; public ApiConnectionProfile ToProfile() => new(Id, Name.Trim(), Uri.TryCreate(BaseUrl.Trim(), UriKind.Absolute, out var value) ? value : null); }
+    private ApiConnectionSettings? _settings;
+    private readonly List<ConnectionEdit> _editors = [];
+    private string? _message;
+    private bool _saveFailed;
+    private bool _saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = await Workspace.SettingsAsync();
+        foreach (var profile in _settings.Connections)
+            _editors.Add(new(profile, await Workspace.ConnectionCredentialAsync(profile.Id)));
+        if (_editors.Count == 0) AddConnection();
+    }
+
+    private void AddConnection()
+    {
+        _editors.Add(new(new(Guid.NewGuid(), "New connection", null), null));
+        _message = null;
+        _saveFailed = false;
+    }
+
+    private void RemoveConnection(ConnectionEdit editor)
+    {
+        if (_editors.Count > 1) _editors.Remove(editor);
+    }
+
+    private async Task SaveConnectionsAsync()
+    {
+        await SaveCoreAsync();
+    }
+
+    private async Task<bool> SaveCoreAsync()
+    {
+        if (_settings is null) return false;
+        if (_editors.Count == 0)
+        {
+            ShowError("Keep at least one connection.");
+            return false;
+        }
+
+        var profiles = _editors.Select(editor => editor.ToProfile()).ToArray();
+        if (profiles.Any(profile => string.IsNullOrWhiteSpace(profile.Name) || profile.BaseUrl is null))
+        {
+            ShowError("Each connection needs a name and an absolute http or https base URL.");
+            return false;
+        }
+
+        _saving = true;
+        try
+        {
+            var routes = _settings.GenerationCallRoutes.ToDictionary(
+                pair => pair.Key,
+                pair => profiles.Any(profile => profile.Id == pair.Value.ConnectionId)
+                    ? pair.Value
+                    : pair.Value with { ConnectionId = profiles[0].Id });
+            await Workspace.SaveSettingsAsync(_settings with { Connections = profiles, GenerationCallRoutes = routes });
+            foreach (var editor in _editors)
+                if (editor.ClearApiKey || !string.IsNullOrWhiteSpace(editor.ApiKey))
+                    await Workspace.SaveConnectionCredentialAsync(editor.Id, editor.ClearApiKey ? null : editor.ApiKey);
+            _settings = await Workspace.SettingsAsync();
+            _message = "Connections saved.";
+            _saveFailed = false;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ShowError(ex.Message);
+            return false;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task TestConnectionAsync(ConnectionEdit editor)
+    {
+        if (!await SaveCoreAsync()) return;
+        try
+        {
+            var result = await Workspace.TestConnectionAsync(editor.Id);
+            editor.Status = result.Success
+                ? $"Connected — {result.Capabilities.StructuredOutputTier}. {result.Models.Count} model(s) discovered."
+                : result.Error ?? "Connection failed.";
+            _message = editor.Status;
+            _saveFailed = !result.Success;
+        }
+        catch (Exception ex)
+        {
+            editor.Status = ex.Message;
+            ShowError(ex.Message);
+        }
+    }
+
+    private void ShowError(string message)
+    {
+        _message = message;
+        _saveFailed = true;
+    }
+
+    private sealed class ConnectionEdit
+    {
+        public ConnectionEdit(ApiConnectionProfile value, string? apiKey)
+        {
+            Id = value.Id;
+            Name = value.Name;
+            BaseUrl = value.BaseUrl?.ToString() ?? "";
+            ApiKey = apiKey ?? "";
+        }
+        public Guid Id { get; }
+        public string Name { get; set; }
+        public string BaseUrl { get; set; }
+        public string ApiKey { get; set; }
+        public bool ClearApiKey { get; set; }
+        public string Status { get; set; } = "Not tested.";
+        public ApiConnectionProfile ToProfile() => new(Id, Name.Trim(), Uri.TryCreate(BaseUrl.Trim(), UriKind.Absolute, out var url) && url.Scheme is "http" or "https" ? url : null);
+    }
 }
