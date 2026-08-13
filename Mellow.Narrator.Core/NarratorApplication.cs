@@ -122,6 +122,33 @@ public sealed class NarratorApplication(
         return result;
     }
 
+    public Task<ConnectionTestResult> TestConnectionAsync(Guid connectionId, CancellationToken cancellationToken = default) =>
+        connectionCoordinator.RunExclusiveAsync(async () =>
+        {
+            var current = await settingsStore.LoadAsync(cancellationToken);
+            var profile = current.Connections.FirstOrDefault(candidate => candidate.Id == connectionId)
+                ?? throw new NarratorException("The selected API connection no longer exists.");
+            var model = current.GenerationCallRoutes.Values
+                .FirstOrDefault(route => route.ConnectionId == connectionId && !string.IsNullOrWhiteSpace(route.ModelId))?.ModelId
+                ?? current.ModelId;
+            if (string.IsNullOrWhiteSpace(model))
+                throw new NarratorException("Assign a model to this connection on a call-routing page before testing it.");
+            var credential = await secureStorage.GetAsync(SecureStorageKeys.ApiCredentialForConnection(connectionId), cancellationToken)
+                ?? await secureStorage.GetAsync(SecureStorageKeys.ApiCredential, cancellationToken);
+            var settings = current with { BaseUrl = profile.BaseUrl, ModelId = model, Capabilities = profile.Capabilities };
+            var result = await provider.TestConnectionAsync(settings, credential, cancellationToken);
+            if (result.Success)
+            {
+                var updated = current with
+                {
+                    Connections = current.Connections.Select(connection => connection.Id == connectionId
+                        ? connection with { Capabilities = result.Capabilities } : connection).ToArray()
+                };
+                await settingsStore.SaveAsync(updated, cancellationToken);
+            }
+            return result;
+        }, cancellationToken);
+
     public async Task<IReadOnlyList<string>> DiscoverModelsAsync(CancellationToken cancellationToken = default)
     {
         var (settings, credential) = await DiscoveryConnectionAsync(cancellationToken);

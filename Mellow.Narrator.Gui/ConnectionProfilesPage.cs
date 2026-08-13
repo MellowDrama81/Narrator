@@ -44,6 +44,7 @@ public sealed class ConnectionProfilesPage : ContentPage
         card.Children.Add(new Label { Text = "Name" }); card.Children.Add(editor.Name);
         card.Children.Add(new Label { Text = "Base URL" }); card.Children.Add(editor.BaseUrl);
         card.Children.Add(new Label { Text = "API key" }); card.Children.Add(editor.ApiKey);
+        card.Children.Add(Ui.SecondaryButton("Test connection", async (_, _) => await TestAsync(editor)));
         card.Children.Add(Ui.DestructiveButton("Remove", (_, _) => { _editors.Remove(editor); _list.Children.Remove(card); }));
         _list.Children.Add(card);
     }
@@ -52,16 +53,35 @@ public sealed class ConnectionProfilesPage : ContentPage
     {
         try
         {
-            if (_editors.Count == 0) throw new NarratorException("Keep at least one API connection.");
-            var current = await _app.GetSettingsAsync();
-            var profiles = _editors.Select(editor => new ApiConnectionProfile(editor.Id, editor.Name.Text?.Trim() ?? "", ParseUrl(editor.BaseUrl.Text))).ToArray();
-            var routes = current.GenerationCallRoutes.ToDictionary(x => x.Key, x =>
-                profiles.Any(profile => profile.Id == x.Value.ConnectionId) ? x.Value : x.Value with { ConnectionId = profiles[0].Id });
-            await _app.SaveSettingsAsync(current with { Connections = profiles, GenerationCallRoutes = routes }, null);
-            foreach (var editor in _editors) await _app.SaveConnectionCredentialAsync(editor.Id, editor.ApiKey.Text);
+            await SaveConnectionsAsync();
             _status.Text = "Connections saved.";
         }
         catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private async Task TestAsync(ProfileEditor editor)
+    {
+        try
+        {
+            await SaveConnectionsAsync();
+            _status.Text = "Testing connection...";
+            var result = await _app.TestConnectionAsync(editor.Id);
+            _status.Text = result.Success
+                ? $"{editor.Name.Text}: connected ({result.Capabilities.StructuredOutputTier})."
+                : result.Error ?? $"{editor.Name.Text}: connection failed.";
+        }
+        catch (Exception ex) { await Ui.Error(this, ex); }
+    }
+
+    private async Task SaveConnectionsAsync()
+    {
+        if (_editors.Count == 0) throw new NarratorException("Keep at least one API connection.");
+        var current = await _app.GetSettingsAsync();
+        var profiles = _editors.Select(editor => new ApiConnectionProfile(editor.Id, editor.Name.Text?.Trim() ?? "", ParseUrl(editor.BaseUrl.Text))).ToArray();
+        var routes = current.GenerationCallRoutes.ToDictionary(x => x.Key, x =>
+            profiles.Any(profile => profile.Id == x.Value.ConnectionId) ? x.Value : x.Value with { ConnectionId = profiles[0].Id });
+        await _app.SaveSettingsAsync(current with { Connections = profiles, GenerationCallRoutes = routes }, null);
+        foreach (var editor in _editors) await _app.SaveConnectionCredentialAsync(editor.Id, editor.ApiKey.Text);
     }
 
     private static Uri? ParseUrl(string? value) => Uri.TryCreate(value?.Trim(), UriKind.Absolute, out var url) ? url : null;
