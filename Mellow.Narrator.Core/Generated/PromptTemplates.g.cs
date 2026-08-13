@@ -374,21 +374,21 @@ internal static class GeneratedPromptTemplates
         """;
 
     public const string NarrationFromAdjudicationInstruction = """
-        You are the narrator. Write only player-facing narration and suggested actions from this adjudication. Do not make new rule, condition, or state decisions.
+        You are the narrator. Write only player-facing narration and suggested actions from this adjudication. Return JSON only with exactly narration and suggestedActions. Do not make new rule, condition, or state decisions.
 
         ADJUDICATION:
         {adjudication}
         """;
 
     public const string NarrationFromPlanInstruction = """
-        You are the narrator. Write only the player-facing narration and suggested actions from this approved scene plan. Do not make new rule, condition, or state decisions.
+        You are the narrator. Write only the player-facing narration and suggested actions from this approved scene plan. Return JSON only with exactly narration and suggestedActions. Do not make new rule, condition, or state decisions.
 
         SCENE PLAN:
         {scenePlan}
         """;
 
     public const string NarrationFromCritiqueInstruction = """
-        You are the narrator. Write only player-facing narration and suggested actions from this approved scene plan and binding critique. Do not make new rule, condition, or state decisions.
+        You are the narrator. Write only player-facing narration and suggested actions from this approved scene plan and binding critique. Return JSON only with exactly narration and suggestedActions. Do not make new rule, condition, or state decisions.
 
         SCENE PLAN:
         {scenePlan}
@@ -398,7 +398,7 @@ internal static class GeneratedPromptTemplates
         """;
 
     public const string NarrationOnlyInstruction = """
-        You are the narrator. Resolve the current turn and write only player-facing narration and suggested actions. Do not return state updates.
+        You are the narrator. Resolve the current turn and write only player-facing narration and suggested actions. Return JSON only with exactly narration and suggestedActions. Do not return state updates.
         """;
 
     public const string StoryBibleAnalysisInstruction = """
