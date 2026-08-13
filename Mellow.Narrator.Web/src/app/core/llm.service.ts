@@ -155,7 +155,15 @@ export class LlmService {
   async loadModels(settings: AppSettings): Promise<string[]> {
     const response = await this.fetch(settings, 'models', { method: 'GET' });
     const body = await this.readJson<{ data?: Array<{ id?: string }> }>(settings, response);
-    return (body.data ?? []).map(x => x.id ?? '').filter(Boolean).sort();
+    return (body.data ?? []).map(x => x.id ?? '').filter(id => Boolean(id) && this.isTextGenerationModel(id)).sort();
+  }
+
+  // Providers usually expose only model IDs, so this removes only clearly non-chat families and keeps
+  // unrecognized IDs available for third-party OpenAI-compatible servers.
+  private isTextGenerationModel(modelId: string): boolean {
+    return !['embed', 'embedding', 'moderation', 'whisper', 'transcri', 'tts', 'text-to-speech',
+      'dall-e', 'stable-diffusion', 'image-generation', 'imagegen', 'rerank', 're-rank']
+      .some(marker => modelId.toLocaleLowerCase().includes(marker));
   }
 
   async test(settings: AppSettings): Promise<string> {

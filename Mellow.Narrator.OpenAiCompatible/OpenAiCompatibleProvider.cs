@@ -46,10 +46,19 @@ public sealed class OpenAiCompatibleProvider(
             .Select(x => (x as JsonObject)?["id"] is { } id ? StringValue(id, "A model 'id'") : null)
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Cast<string>()
+            .Where(IsTextGenerationModel)
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToArray();
     }
+
+    // Most OpenAI-compatible endpoints return only an ID, not modality metadata. Exclude only model
+    // families that are unambiguously non-chat; unfamiliar IDs remain available for compatible providers.
+    private static bool IsTextGenerationModel(string modelId) => !new[]
+    {
+        "embed", "embedding", "moderation", "whisper", "transcri", "tts", "text-to-speech",
+        "dall-e", "stable-diffusion", "image-generation", "imagegen", "rerank", "re-rank"
+    }.Any(marker => modelId.Contains(marker, StringComparison.OrdinalIgnoreCase));
 
     public async Task<ConnectionTestResult> TestConnectionAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default)
     {

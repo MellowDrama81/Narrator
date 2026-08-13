@@ -58,7 +58,7 @@ public sealed class ProviderTests
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    """{"data":[{"id":"model-b"},{"id":"model-a"},{"id":"model-b"}]}""",
+                    """{"data":[{"id":"model-b"},{"id":"text-embedding-3-small"},{"id":"model-a"},{"id":"model-b"}]}""",
                     Encoding.UTF8,
                     "application/json")
             });
