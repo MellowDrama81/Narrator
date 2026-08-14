@@ -26,7 +26,6 @@ public static class MauiProgram
         builder.Services.AddSingleton<NarratorWorkspace>();
         builder.Services.AddSingleton<HybridWorkspace>();
         builder.Services.AddSingleton<ImportExportService>();
-        builder.Services.AddSingleton<MainPage>();
         return builder.Build();
     }
 }
