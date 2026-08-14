@@ -14,7 +14,7 @@ public static class MauiProgram
         var builder = MauiApp.CreateBuilder();
         builder.UseMauiApp<App>();
         builder.Services.AddMauiBlazorWebView();
-#if DEBUG
+#if DEBUG && WINDOWS
         builder.Services.AddBlazorWebViewDeveloperTools();
 #endif
         builder.Services
