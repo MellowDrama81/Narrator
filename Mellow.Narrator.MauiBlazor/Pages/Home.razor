@@ -1,7 +1,7 @@
 @page "/"
 @inject NarratorWorkspace Workspace
 
-<header><p class="eyebrow">Your story desk</p><h1>Pick up where imagination left off.</h1><p class="lead">Create a definition, configure a model, and play without leaving the app.</p></header>
+<header><p class="eyebrow">Your story desk</p><h1>Pick up where imagination left off.</h1><p class="lead">Create a definition, configure a model, and play without leaving the app.</p><p class="hint">Hybrid build marker: <strong>2026-08-14-events-v2</strong></p></header>
 <section class="actions"><a class="button primary" href="definitions">New story definition</a><a class="button" href="stories">Continue a story</a></section>
 @if (_loading) { <p>Loading your library…</p> } else { <section class="metrics"><article><strong>@_definitions</strong><span>Story definitions</span></article><article><strong>@_stories</strong><span>Active stories</span></article><article><strong>@_connections</strong><span>Saved connections</span></article></section> }
 
