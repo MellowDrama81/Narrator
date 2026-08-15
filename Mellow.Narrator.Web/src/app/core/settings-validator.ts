@@ -55,7 +55,7 @@ export function validateSettings(settings: AppSettings): Record<string, string> 
   for (const route of Object.values(settings.generationCallRoutes ?? {})) {
     if (!route) continue;
     if (route.requestTimeoutSeconds !== undefined) range(errors, 'call request timeout', route.requestTimeoutSeconds, 10, 900);
-    if (route.maxOutputTokens !== undefined) range(errors, 'call maximum output tokens', route.maxOutputTokens, 256, 131072);
+    if (route.maxOutputTokens != null) range(errors, 'call maximum output tokens', route.maxOutputTokens, 256, 131072);
     if (route.temperature !== undefined) optionalRange(errors, 'call temperature', route.temperature, 0, 2);
     if (route.topP !== undefined) optionalRange(errors, 'call top P', route.topP, 0, 1);
     if (route.maxAutomaticRetries !== undefined) range(errors, 'call automatic retries', route.maxAutomaticRetries, 0, 5);
@@ -68,7 +68,7 @@ export function validateSettings(settings: AppSettings): Record<string, string> 
   }
 
   range(errors, 'requestTimeoutSeconds', settings.requestTimeoutSeconds, 10, 900);
-  range(errors, 'maxOutputTokens', settings.maxOutputTokens, 256, 131072);
+  optionalRange(errors, 'maxOutputTokens', settings.maxOutputTokens, 256, 131072);
   optionalRange(errors, 'temperature', settings.temperature, 0, 2);
   optionalRange(errors, 'topP', settings.topP, 0, 1);
 

@@ -31,7 +31,7 @@ public sealed class PipelineSettingsPage : ContentPage
             content.Children.Add(editor.CapabilityStatus);
             var advanced = CollapsibleSection(content, "Advanced Request Behavior");
             advanced.Children.Add(Field("Timeout seconds", editor.Timeout));
-            advanced.Children.Add(Field("Maximum output tokens", editor.MaxOutputTokens));
+            advanced.Children.Add(Field("Maximum output tokens (blank = no limit)", editor.MaxOutputTokens));
             advanced.Children.Add(Field("Temperature (blank = provider default)", editor.Temperature));
             advanced.Children.Add(Field("Top-p (blank = provider default)", editor.TopP));
             advanced.Children.Add(Field("Reasoning effort (blank = provider default)", editor.ReasoningEffort));
@@ -59,7 +59,7 @@ public sealed class PipelineSettingsPage : ContentPage
             editor.Connection.SelectedItem = settings.Connections.FirstOrDefault(profile => profile.Id == route?.ConnectionId) ?? settings.Connections.FirstOrDefault();
             editor.Model.Text = route?.ModelId ?? settings.ModelId;
             editor.Timeout.Text = (route?.RequestTimeout ?? settings.RequestTimeout).TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            editor.MaxOutputTokens.Text = (route?.MaxOutputTokens ?? settings.MaxOutputTokens).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            editor.MaxOutputTokens.Text = (route is null ? settings.MaxOutputTokens : route.MaxOutputTokens)?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "";
             editor.Temperature.Text = (route?.Parameters?.Temperature ?? settings.Parameters.Temperature)?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "";
             editor.TopP.Text = (route?.Parameters?.TopP ?? settings.Parameters.TopP)?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "";
             editor.ReasoningEffort.Text = route?.Parameters?.ReasoningEffort ?? settings.Parameters.ReasoningEffort ?? "";
@@ -84,7 +84,7 @@ public sealed class PipelineSettingsPage : ContentPage
                 routes[call] = new(profile.Id, string.IsNullOrWhiteSpace(editor.Model.Text) ? null : editor.Model.Text.Trim())
                 {
                     RequestTimeout = TimeSpan.FromSeconds(Parse(editor.Timeout, $"{CallName(call)} timeout")),
-                    MaxOutputTokens = (int)Parse(editor.MaxOutputTokens, $"{CallName(call)} maximum output tokens"),
+                    MaxOutputTokens = OptionalInt(editor.MaxOutputTokens, $"{CallName(call)} maximum output tokens"),
                     Parameters = new(
                         Optional(editor.Temperature, $"{CallName(call)} temperature"),
                         Optional(editor.TopP, $"{CallName(call)} top-p"),
@@ -137,6 +137,11 @@ public sealed class PipelineSettingsPage : ContentPage
     private static double Parse(Entry entry, string name) =>
         double.TryParse(entry.Text, System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : throw new NarratorException($"Enter a valid {name}.");
     private static double? Optional(Entry entry, string name) => string.IsNullOrWhiteSpace(entry.Text) ? null : Parse(entry, name);
+    private static int? OptionalInt(Entry entry, string name) => string.IsNullOrWhiteSpace(entry.Text)
+        ? null
+        : int.TryParse(entry.Text, System.Globalization.CultureInfo.InvariantCulture, out var value)
+            ? value
+            : throw new NarratorException($"Enter a valid {name}.");
     private static VerticalStackLayout Field(string label, View control) => new() { Spacing = 2, Children = { new Label { Text = label }, control } };
     private static VerticalStackLayout CollapsibleSection(Layout parent, string title)
     {

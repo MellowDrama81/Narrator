@@ -9,6 +9,19 @@ describe('generated prompt templates', () => {
       'promptedJsonInstruction',
       'openingSceneInstruction',
       'continueStoryInstruction',
+      'turnAdjudicationInstruction',
+      'scenePlanInstruction',
+      'planCriticInstruction',
+      'narrationFromAdjudicationInstruction',
+      'narrationFromPlanInstruction',
+      'narrationFromCritiqueInstruction',
+      'narrationOnlyInstruction',
+      'storyBibleAnalysisInstruction',
+      'plannedEventAnalysisInstruction',
+      'conditionSummaryAnalysisInstruction',
+      'stateExtractionInstruction',
+      'stateExtractionFromAnalysesInstruction',
+      'proseRevisionInstruction',
     ]);
   });
 

@@ -122,7 +122,7 @@ describe('validateSettings', () => {
   });
 
   it('accepts a null optional temperature/topP', () => {
-    expect(validateSettings(settings({ temperature: null, topP: null }))).toEqual({});
+    expect(validateSettings(settings({ maxOutputTokens: null, temperature: null, topP: null }))).toEqual({});
   });
 
   it('rejects an out-of-range optional temperature', () => {

@@ -1,0 +1,19 @@
+.player-action {
+    margin: 0 0 14px;
+    padding: 9px 12px;
+    border-left: 2px solid #a7b6ff;
+    border-radius: 0 8px 8px 0;
+    background: rgba(129, 148, 255, 0.12);
+    color: #cbd5ff;
+    font-size: 14px;
+    font-style: italic;
+    font-weight: 700;
+}
+
+.player-action::before {
+    content: "YOU · ";
+    color: #8194ff;
+    font-size: 11px;
+    font-style: normal;
+    letter-spacing: 0.1em;
+}

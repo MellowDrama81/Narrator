@@ -192,21 +192,14 @@ public sealed class OpenAiCompatibleProvider(
         ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
     {
         var baseMessages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration, context, opening);
-        var adjudication = await GenerateStageAsync(
-            settings, credential, baseMessages,
-            Templates.TurnAdjudicationInstruction,
-            cancellationToken);
-        var scenePlan = await GenerateStageAsync(
-            settings, credential, baseMessages,
-            Templates.ScenePlanInstruction.Replace("{adjudication}", adjudication),
-            cancellationToken);
+        var adjudication = await GenerateAdjudicationAsync(settings, credential, baseMessages, context, opening, cancellationToken);
+        var scenePlan = await GenerateScenePlanAsync(settings, credential, baseMessages, adjudication, cancellationToken);
         var draft = await GenerateNarrationDraftAsync(
             settings, credential, baseMessages,
-            Templates.NarrationFromPlanInstruction.Replace("{scenePlan}", scenePlan),
-            cancellationToken);
+            Templates.NarrationFromPlanInstruction, cancellationToken, GenerationCall.Narration, new { scenePlan });
         var extractionMessages = PipelineRoleMessages(
             baseMessages,
-            Templates.StateExtractionInstruction.Replace("{artifacts}", "")).Concat([
+            Templates.StateExtractionInstruction).Concat([
             Message("user", JsonSerializer.Serialize(new { adjudication, scenePlan, narration = draft.Narration, suggestedActions = draft.SuggestedActions }, Json))
         ]).ToArray();
         var extracted = await CompleteWithCorrectionAsync(
@@ -228,10 +221,9 @@ public sealed class OpenAiCompatibleProvider(
         ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
     {
         var messages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration, context, opening);
-        var adjudication = await GenerateStageAsync(settings, credential, messages,
-            Templates.TurnAdjudicationInstruction, cancellationToken);
+        var adjudication = await GenerateAdjudicationAsync(settings, credential, messages, context, opening, cancellationToken);
         var draft = await GenerateNarrationDraftAsync(settings, credential, messages,
-            Templates.NarrationFromAdjudicationInstruction.Replace("{adjudication}", adjudication), cancellationToken);
+            Templates.NarrationFromAdjudicationInstruction, cancellationToken, GenerationCall.Narration, new { adjudication });
         return await ExtractStoryAsync(settings, credential, messages, new { adjudication, narration = draft.Narration, suggestedActions = draft.SuggestedActions }, context, opening, cancellationToken, draft);
     }
 
@@ -239,14 +231,12 @@ public sealed class OpenAiCompatibleProvider(
         ApiConnectionSettings settings, string? credential, GenerationContext context, bool opening, CancellationToken cancellationToken)
     {
         var messages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration, context, opening);
-        var adjudication = await GenerateStageAsync(settings, credential, messages,
-            Templates.TurnAdjudicationInstruction, cancellationToken);
-        var scenePlan = await GenerateStageAsync(settings, credential, messages,
-            Templates.ScenePlanInstruction.Replace("{adjudication}", adjudication), cancellationToken);
+        var adjudication = await GenerateAdjudicationAsync(settings, credential, messages, context, opening, cancellationToken);
+        var scenePlan = await GenerateScenePlanAsync(settings, credential, messages, adjudication, cancellationToken);
         var critique = await GenerateStageAsync(settings, credential, messages,
-            Templates.PlanCriticInstruction.Replace("{adjudication}", adjudication).Replace("{scenePlan}", scenePlan), cancellationToken);
+            Templates.PlanCriticInstruction, cancellationToken, GenerationCall.PlanCritic, new { adjudication, scenePlan });
         var draft = await GenerateNarrationDraftAsync(settings, credential, messages,
-            Templates.NarrationFromCritiqueInstruction.Replace("{scenePlan}", scenePlan).Replace("{critique}", critique), cancellationToken);
+            Templates.NarrationFromCritiqueInstruction, cancellationToken, GenerationCall.Narration, new { scenePlan, critique });
         return await ExtractStoryAsync(settings, credential, messages, new { adjudication, scenePlan, critique, narration = draft.Narration, suggestedActions = draft.SuggestedActions }, context, opening, cancellationToken, draft);
     }
 
@@ -255,23 +245,20 @@ public sealed class OpenAiCompatibleProvider(
         bool parallelAnalyses = false)
     {
         var baseMessages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration, context, opening);
-        var adjudication = await GenerateStageAsync(settings, credential, baseMessages,
-            Templates.TurnAdjudicationInstruction, cancellationToken);
-        var scenePlan = await GenerateStageAsync(settings, credential, baseMessages,
-            Templates.ScenePlanInstruction.Replace("{adjudication}", adjudication), cancellationToken);
+        var adjudication = await GenerateAdjudicationAsync(settings, credential, baseMessages, context, opening, cancellationToken);
+        var scenePlan = await GenerateScenePlanAsync(settings, credential, baseMessages, adjudication, cancellationToken);
         var draft = await GenerateNarrationDraftAsync(settings, credential, baseMessages,
-            Templates.NarrationFromPlanInstruction.Replace("{scenePlan}", scenePlan), cancellationToken);
+            Templates.NarrationFromPlanInstruction, cancellationToken, GenerationCall.Narration, new { scenePlan });
         var artifacts = new { adjudication, scenePlan, narration = draft.Narration, suggestedActions = draft.SuggestedActions };
-        var artifactJson = JsonSerializer.Serialize(artifacts, Json);
         string bibleAnalysis, eventAnalysis, outcomeAnalysis;
         if (parallelAnalyses)
         {
             var bibleTask = GenerateStageAsync(settings, credential, baseMessages,
-                Templates.StoryBibleAnalysisInstruction.Replace("{artifacts}", artifactJson), cancellationToken);
+                Templates.StoryBibleAnalysisInstruction, cancellationToken, GenerationCall.StoryBibleAnalysis, artifacts);
             var eventTask = GenerateStageAsync(settings, credential, baseMessages,
-                Templates.PlannedEventAnalysisInstruction.Replace("{artifacts}", artifactJson), cancellationToken);
+                Templates.PlannedEventAnalysisInstruction, cancellationToken, GenerationCall.PlannedEventAnalysis, artifacts);
             var outcomeTask = GenerateStageAsync(settings, credential, baseMessages,
-                Templates.ConditionSummaryAnalysisInstruction.Replace("{artifacts}", artifactJson), cancellationToken);
+                Templates.ConditionSummaryAnalysisInstruction, cancellationToken, GenerationCall.ConditionSummaryAnalysis, artifacts);
             await Task.WhenAll(bibleTask, eventTask, outcomeTask);
             bibleAnalysis = await bibleTask;
             eventAnalysis = await eventTask;
@@ -280,15 +267,15 @@ public sealed class OpenAiCompatibleProvider(
         else
         {
             bibleAnalysis = await GenerateStageAsync(settings, credential, baseMessages,
-                Templates.StoryBibleAnalysisInstruction.Replace("{artifacts}", artifactJson), cancellationToken);
+                Templates.StoryBibleAnalysisInstruction, cancellationToken, GenerationCall.StoryBibleAnalysis, artifacts);
             eventAnalysis = await GenerateStageAsync(settings, credential, baseMessages,
-                Templates.PlannedEventAnalysisInstruction.Replace("{artifacts}", artifactJson), cancellationToken);
+                Templates.PlannedEventAnalysisInstruction, cancellationToken, GenerationCall.PlannedEventAnalysis, artifacts);
             outcomeAnalysis = await GenerateStageAsync(settings, credential, baseMessages,
-                Templates.ConditionSummaryAnalysisInstruction.Replace("{artifacts}", artifactJson), cancellationToken);
+                Templates.ConditionSummaryAnalysisInstruction, cancellationToken, GenerationCall.ConditionSummaryAnalysis, artifacts);
         }
         var extracted = await CompleteWithCorrectionAsync(settings, credential, PipelineRoleMessages(
             baseMessages,
-            Templates.StateExtractionFromAnalysesInstruction.Replace("{analyses}", "")).Concat([
+            Templates.StateExtractionFromAnalysesInstruction).Concat([
             Message("user", JsonSerializer.Serialize(new { artifacts, bibleAnalysis, eventAnalysis, outcomeAnalysis }, Json))
         ]).ToArray(), TurnSchema(settings), node => ParseStoryResponse(node, settings, context, opening), cancellationToken, GenerationCall.StateExtraction);
         return extracted with { Narration = draft.Narration, SuggestedActions = draft.SuggestedActions };
@@ -302,9 +289,8 @@ public sealed class OpenAiCompatibleProvider(
         var extracted = await GenerateStoryWithSevenCallPipelineAsync(settings, credential, context, opening, cancellationToken);
         var messages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration, context, opening);
         var revised = await GenerateNarrationDraftAsync(settings, credential, messages,
-            Templates.ProseRevisionInstruction.Replace("{turn}", "") +
-            JsonSerializer.Serialize(new { extracted.Narration, extracted.SuggestedActions, extracted.StorySummary }, Json), cancellationToken,
-            GenerationCall.ProseRevision);
+            Templates.ProseRevisionInstruction, cancellationToken, GenerationCall.ProseRevision,
+            new { extracted.Narration, extracted.SuggestedActions, extracted.StorySummary });
         return extracted with { Narration = revised.Narration, SuggestedActions = revised.SuggestedActions };
     }
 
@@ -314,7 +300,7 @@ public sealed class OpenAiCompatibleProvider(
     {
         var extracted = await CompleteWithCorrectionAsync(settings, credential, PipelineRoleMessages(
             baseMessages,
-            Templates.StateExtractionInstruction.Replace("{artifacts}", "")).Concat([
+            Templates.StateExtractionInstruction).Concat([
             Message("user", JsonSerializer.Serialize(artifacts, Json))
         ]).ToArray(), TurnSchema(settings), node => ParseStoryResponse(node, settings, context, opening), cancellationToken, GenerationCall.StateExtraction);
         return extracted with { Narration = draft.Narration, SuggestedActions = draft.SuggestedActions };
@@ -322,20 +308,35 @@ public sealed class OpenAiCompatibleProvider(
 
     private async Task<string> GenerateStageAsync(
         ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> baseMessages, string instruction,
-        CancellationToken cancellationToken, GenerationCall generationCall = GenerationCall.Turn)
+        CancellationToken cancellationToken, GenerationCall generationCall, object? artifacts = null)
     {
-        generationCall = generationCall == GenerationCall.Turn ? StageCall(instruction) : generationCall;
-        var messages = PipelineRoleMessages(baseMessages, instruction);
+        var messages = PipelineRoleMessages(baseMessages, instruction, artifacts: artifacts);
         return await CompleteWithCorrectionAsync(
             settings, credential, messages, StageSchema(),
-            node => RequiredString(node, "result"), cancellationToken, generationCall);
+            node => ParseGenericStage(node), cancellationToken, generationCall);
     }
+
+    private async Task<AdjudicationArtifact> GenerateAdjudicationAsync(
+        ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> baseMessages,
+        GenerationContext context, bool opening, CancellationToken cancellationToken) =>
+        await CompleteWithCorrectionAsync(
+            settings, credential,
+            PipelineRoleMessages(baseMessages, Templates.TurnAdjudicationInstruction),
+            AdjudicationSchema(), node => ParseAdjudication(node, context, opening), cancellationToken, GenerationCall.Adjudication);
+
+    private async Task<ScenePlanArtifact> GenerateScenePlanAsync(
+        ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> baseMessages,
+        AdjudicationArtifact adjudication, CancellationToken cancellationToken) =>
+        await CompleteWithCorrectionAsync(
+            settings, credential,
+            PipelineRoleMessages(baseMessages, Templates.ScenePlanInstruction, artifacts: new { adjudication }),
+            ScenePlanSchema(), node => ParseScenePlan(node, adjudication), cancellationToken, GenerationCall.ScenePlan);
 
     private async Task<NarrationDraft> GenerateNarrationDraftAsync(
         ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> baseMessages, string instruction,
-        CancellationToken cancellationToken, GenerationCall generationCall = GenerationCall.Narration)
+        CancellationToken cancellationToken, GenerationCall generationCall = GenerationCall.Narration, object? artifacts = null)
     {
-        var messages = PipelineRoleMessages(baseMessages, instruction, narrator: true);
+        var messages = PipelineRoleMessages(baseMessages, instruction, narrator: true, artifacts: artifacts);
         return await CompleteWithCorrectionAsync(
             settings, credential, messages, NarrationDraftSchema(settings),
             node => ParseNarrationDraft(node, settings), cancellationToken, generationCall);
@@ -344,12 +345,15 @@ public sealed class OpenAiCompatibleProvider(
     private static JsonObject[] PipelineRoleMessages(
         IReadOnlyList<JsonObject> baseMessages,
         string instruction,
-        bool narrator = false)
+        bool narrator = false,
+        object? artifacts = null)
     {
         var sharedPolicy = baseMessages[0]["content"]?.GetValue<string>() ?? "";
+        JsonObject[] messages;
         if (narrator)
-            return [Message("system", sharedPolicy + "\n\n" + instruction), .. baseMessages.Skip(1)];
-        return
+            messages = [Message("system", sharedPolicy + "\n\n" + instruction), .. baseMessages.Skip(1)];
+        else
+            messages =
         [
             Message("system", instruction),
             Message("user", JsonSerializer.Serialize(new
@@ -360,17 +364,9 @@ public sealed class OpenAiCompatibleProvider(
             }, Json)),
             .. baseMessages.Skip(1)
         ];
-    }
-
-    private static GenerationCall StageCall(string instruction)
-    {
-        if (instruction.Contains("turn adjudicator", StringComparison.Ordinal)) return GenerationCall.Adjudication;
-        if (instruction.Contains("scene planner", StringComparison.Ordinal)) return GenerationCall.ScenePlan;
-        if (instruction.Contains("continuity and rule critic", StringComparison.Ordinal)) return GenerationCall.PlanCritic;
-        if (instruction.Contains("Story Bible analyst", StringComparison.Ordinal)) return GenerationCall.StoryBibleAnalysis;
-        if (instruction.Contains("planned-event analyst", StringComparison.Ordinal)) return GenerationCall.PlannedEventAnalysis;
-        if (instruction.Contains("condition and summary analyst", StringComparison.Ordinal)) return GenerationCall.ConditionSummaryAnalysis;
-        return GenerationCall.Turn;
+        return artifacts is null
+            ? messages
+            : [.. messages, Message("user", JsonSerializer.Serialize(new { contextType = "pipelineArtifacts", artifacts }, Json))];
     }
 
     private async Task<T> CompleteWithCorrectionAsync<T>(
@@ -383,7 +379,7 @@ public sealed class OpenAiCompatibleProvider(
         GenerationCall generationCall = GenerationCall.Turn)
     {
         var resolved = await ResolveConnectionAsync(settings, credential, generationCall, cancellationToken);
-        settings = resolved.Settings;
+        settings = ApplyInternalStageOutputLimit(resolved.Settings, generationCall);
         credential = resolved.Credential;
         var tier = settings.Capabilities.StructuredOutputTier;
         if (tier is StructuredOutputTier.Untested or StructuredOutputTier.Unsupported) tier = StructuredOutputTier.PromptedJson;
@@ -428,11 +424,26 @@ public sealed class OpenAiCompatibleProvider(
             BaseUrl = connection.BaseUrl,
             ModelId = modelId,
             RequestTimeout = route.RequestTimeout ?? settings.RequestTimeout,
-            MaxOutputTokens = route.MaxOutputTokens ?? settings.MaxOutputTokens,
+            MaxOutputTokens = route.MaxOutputTokens,
             Parameters = route.Parameters ?? settings.Parameters,
             Retry = route.Retry ?? settings.Retry,
             Capabilities = capabilities
         }, credential);
+    }
+
+    private static ApiConnectionSettings ApplyInternalStageOutputLimit(ApiConnectionSettings settings, GenerationCall generationCall)
+    {
+        var limit = generationCall switch
+        {
+            GenerationCall.Adjudication => 512,
+            GenerationCall.ScenePlan => 1024,
+            GenerationCall.PlanCritic => 768,
+            GenerationCall.StoryBibleAnalysis or GenerationCall.PlannedEventAnalysis or GenerationCall.ConditionSummaryAnalysis => 768,
+            _ => (int?)null
+        };
+        return limit is null
+            ? settings
+            : settings with { MaxOutputTokens = settings.MaxOutputTokens is { } configured ? Math.Min(configured, limit.Value) : limit };
     }
 
     private async Task<JsonObject> CompleteAsync(
@@ -466,9 +477,10 @@ public sealed class OpenAiCompatibleProvider(
             ["messages"] = new JsonArray(serializedMessages.Select(x => (JsonNode)x).ToArray()),
             ["stream"] = false
         };
-        body[requestContract.OutputTokenParameter == OutputTokenParameter.MaxCompletionTokens
-            ? "max_completion_tokens"
-            : "max_tokens"] = settings.MaxOutputTokens;
+        if (settings.MaxOutputTokens is { } maxOutputTokens)
+            body[requestContract.OutputTokenParameter == OutputTokenParameter.MaxCompletionTokens
+                ? "max_completion_tokens"
+                : "max_tokens"] = maxOutputTokens;
         if (settings.Parameters.Temperature is { } temperature) body["temperature"] = temperature;
         if (settings.Parameters.TopP is { } topP) body["top_p"] = topP;
         if (!string.IsNullOrWhiteSpace(settings.Parameters.ReasoningEffort)) body["reasoning_effort"] = settings.Parameters.ReasoningEffort;
@@ -1127,15 +1139,6 @@ public sealed class OpenAiCompatibleProvider(
 
     private static NarrationDraft ParseNarrationDraft(JsonObject node, ApiConnectionSettings settings)
     {
-        // A few OpenAI-compatible models persist in returning the pipeline-stage envelope despite
-        // receiving both a schema and a concrete narration example. Do not make the whole story
-        // unplayable in that case: the stage's text is still usable player-facing prose.
-        if (node["result"] is not null)
-        {
-            var stageNarration = RequiredString(node, "result");
-            if (!string.IsNullOrWhiteSpace(stageNarration) && stageNarration.Length <= settings.ContentLimits.MaxNarrationCharacters)
-                return new(stageNarration, DefaultSuggestedActions(settings));
-        }
         RequireProperties(node, settings, "narration", "suggestedActions");
         var narration = RequiredString(node, "narration");
         if (string.IsNullOrWhiteSpace(narration) || narration.Length > settings.ContentLimits.MaxNarrationCharacters)
@@ -1149,6 +1152,56 @@ public sealed class OpenAiCompatibleProvider(
         return new(narration, actions);
     }
 
+    private static AdjudicationArtifact ParseAdjudication(JsonObject node, GenerationContext context, bool opening)
+    {
+        RequireProperties(node, "actionOutcome", "reason", "consequences", "eligiblePlannedEventIds");
+        var outcome = RequiredString(node, "actionOutcome");
+        var validOutcomes = new[] { "opening", "success", "partialSuccess", "failure", "impossible" };
+        if (!validOutcomes.Contains(outcome, StringComparer.Ordinal) || (opening != string.Equals(outcome, "opening", StringComparison.Ordinal)))
+            throw new JsonException("The adjudication outcome does not match the turn type.");
+        var reason = RequiredString(node, "reason");
+        var consequences = RequiredStringArray(node, "consequences");
+        if (string.IsNullOrWhiteSpace(reason) || reason.Length > 1200 || consequences.Count is < 1 or > 4 ||
+            consequences.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 600) || LooksLikeConstraintEcho(reason))
+            throw new JsonException("The adjudication must contain concise internal reasoning and consequences.");
+        var candidates = context.PlannedEvents.Entries.Select(entry => entry.Id).ToHashSet();
+        var eligible = new List<Guid>();
+        foreach (var value in RequiredArray(node, "eligiblePlannedEventIds"))
+        {
+            var text = StringValue(value, "An eligible planned-event ID");
+            if (!Guid.TryParse(text, out var id) || !candidates.Contains(id) || !eligible.Contains(id))
+                throw new JsonException("The adjudication contains an unknown or duplicate planned-event ID.");
+            eligible.Add(id);
+        }
+        return new(outcome, reason, consequences, eligible);
+    }
+
+    private static ScenePlanArtifact ParseScenePlan(JsonObject node, AdjudicationArtifact adjudication)
+    {
+        RequireProperties(node, "beats", "resultingSituation", "decisionPoint");
+        var beats = RequiredStringArray(node, "beats");
+        var resultingSituation = RequiredString(node, "resultingSituation");
+        var decisionPoint = RequiredString(node, "decisionPoint");
+        var combined = string.Join(' ', beats.Append(resultingSituation).Append(decisionPoint));
+        if (beats.Count is < 2 or > 6 || beats.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 700) ||
+            string.IsNullOrWhiteSpace(resultingSituation) || resultingSituation.Length > 1200 ||
+            string.IsNullOrWhiteSpace(decisionPoint) || decisionPoint.Length > 800 ||
+            LooksLikeConstraintEcho(combined) || string.Equals(combined, adjudication.Reason, StringComparison.OrdinalIgnoreCase))
+            throw new JsonException("The scene plan must contain concise, distinct beats and a meaningful decision point.");
+        return new(beats, resultingSituation, decisionPoint);
+    }
+
+    private static string ParseGenericStage(JsonObject node)
+    {
+        var result = RequiredString(node, "result");
+        if (string.IsNullOrWhiteSpace(result) || result.Length > 4000 || LooksLikeConstraintEcho(result))
+            throw new JsonException("The pipeline stage returned malformed internal analysis.");
+        return result;
+    }
+
+    private static bool LooksLikeConstraintEcho(string value) =>
+        value.Length > 1000 && value.Count(char.IsWhiteSpace) < value.Length / 100;
+
     private static IReadOnlyList<string> DefaultSuggestedActions(ApiConnectionSettings settings)
     {
         var defaults = new[] { "Look around", "Continue the story", "Proceed cautiously" };
@@ -1159,6 +1212,8 @@ public sealed class OpenAiCompatibleProvider(
     }
 
     private sealed record NarrationDraft(string Narration, IReadOnlyList<string> SuggestedActions);
+    private sealed record AdjudicationArtifact(string ActionOutcome, string Reason, IReadOnlyList<string> Consequences, IReadOnlyList<Guid> EligiblePlannedEventIds);
+    private sealed record ScenePlanArtifact(IReadOnlyList<string> Beats, string ResultingSituation, string DecisionPoint);
 
     private static void ValidateProposedEntry(JsonObject entry, ApiConnectionSettings settings)
     {
@@ -1255,6 +1310,15 @@ public sealed class OpenAiCompatibleProvider(
             ? expected.All(actual.Contains)
             : actual.SetEquals(expected);
         if (!ok)
+            throw new JsonException($"Expected properties: {string.Join(", ", expected)}.");
+    }
+
+    private static void RequireProperties(JsonObject value, params string[] expected)
+    {
+        var actual = value.Where(x => !string.Equals(x.Key, "_transport", StringComparison.Ordinal))
+            .Select(x => x.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        if (!actual.SetEquals(expected))
             throw new JsonException($"Expected properties: {string.Join(", ", expected)}.");
     }
 
@@ -1371,9 +1435,24 @@ public sealed class OpenAiCompatibleProvider(
         "relevantPlannedEventIds", "plannedEventUpdates",
         "revealedVictoryConditionIds", "metVictoryConditionIds", "revealedLossConditionIds", "metLossConditionIds", "storySummary"]);
 
+    private static JsonObject AdjudicationSchema() => ObjectSchema(new Dictionary<string, JsonNode?>
+    {
+        ["actionOutcome"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray("opening", "success", "partialSuccess", "failure", "impossible") },
+        ["reason"] = new JsonObject { ["type"] = "string", ["maxLength"] = 1200 },
+        ["consequences"] = new JsonObject { ["type"] = "array", ["minItems"] = 1, ["maxItems"] = 4, ["items"] = new JsonObject { ["type"] = "string", ["maxLength"] = 600 } },
+        ["eligiblePlannedEventIds"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string", ["format"] = "uuid" } }
+    }, ["actionOutcome", "reason", "consequences", "eligiblePlannedEventIds"]);
+
+    private static JsonObject ScenePlanSchema() => ObjectSchema(new Dictionary<string, JsonNode?>
+    {
+        ["beats"] = new JsonObject { ["type"] = "array", ["minItems"] = 2, ["maxItems"] = 6, ["items"] = new JsonObject { ["type"] = "string", ["maxLength"] = 700 } },
+        ["resultingSituation"] = new JsonObject { ["type"] = "string", ["maxLength"] = 1200 },
+        ["decisionPoint"] = new JsonObject { ["type"] = "string", ["maxLength"] = 800 }
+    }, ["beats", "resultingSituation", "decisionPoint"]);
+
     private static JsonObject StageSchema() => ObjectSchema(new Dictionary<string, JsonNode?>
     {
-        ["result"] = new JsonObject { ["type"] = "string", ["maxLength"] = 12000 }
+        ["result"] = new JsonObject { ["type"] = "string", ["maxLength"] = 4000 }
     }, ["result"]);
 
     private static JsonObject NarrationDraftSchema(ApiConnectionSettings settings) => ObjectSchema(new Dictionary<string, JsonNode?>

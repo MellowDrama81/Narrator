@@ -17,6 +17,19 @@ interface ConditionsContext {
   metIds: string[];
 }
 
+interface AdjudicationArtifact {
+  actionOutcome: 'opening' | 'success' | 'partialSuccess' | 'failure' | 'impossible';
+  reason: string;
+  consequences: string[];
+  eligiblePlannedEventIds: string[];
+}
+
+interface ScenePlanArtifact {
+  beats: string[];
+  resultingSituation: string;
+  decisionPoint: string;
+}
+
 type JsonSchema = Record<string, unknown>;
 type Message = { role: string; content: string };
 interface RequestContract {
@@ -331,22 +344,19 @@ export class LlmService {
   }
 
   private async generateTurnWithThreeCallPipeline(settings: AppSettings, baseMessages: Message[], next: number, action: string | null, turns: StoryState['turns'], victory: ConditionsContext, loss: ConditionsContext): Promise<TurnGeneration> {
-    const adjudication = await this.generateStage(settings, baseMessages,
-      promptTemplates.turnAdjudicationInstruction);
+    const adjudication = await this.generateAdjudication(settings, baseMessages, action);
     const draft = await this.generateNarrationDraft(settings, baseMessages,
-      promptTemplates.narrationFromAdjudicationInstruction.replace('{adjudication}', adjudication));
+      promptTemplates.narrationFromAdjudicationInstruction, 'narration', { adjudication });
     return this.extractTurn(settings, baseMessages, { adjudication, narration: draft.narration, suggestedActions: draft.suggestedActions }, next, action, turns, victory, loss, draft);
   }
 
   private async generateTurnWithFiveCallPipeline(settings: AppSettings, baseMessages: Message[], next: number, action: string | null, turns: StoryState['turns'], victory: ConditionsContext, loss: ConditionsContext): Promise<TurnGeneration> {
-    const adjudication = await this.generateStage(settings, baseMessages,
-      promptTemplates.turnAdjudicationInstruction);
-    const scenePlan = await this.generateStage(settings, baseMessages,
-      promptTemplates.scenePlanInstruction.replace('{adjudication}', adjudication));
+    const adjudication = await this.generateAdjudication(settings, baseMessages, action);
+    const scenePlan = await this.generateScenePlan(settings, baseMessages, adjudication);
     const critique = await this.generateStage(settings, baseMessages,
-      promptTemplates.planCriticInstruction.replace('{adjudication}', adjudication).replace('{scenePlan}', scenePlan));
+      promptTemplates.planCriticInstruction, 'planCritic', { adjudication, scenePlan });
     const draft = await this.generateNarrationDraft(settings, baseMessages,
-      promptTemplates.narrationFromCritiqueInstruction.replace('{scenePlan}', scenePlan).replace('{critique}', critique));
+      promptTemplates.narrationFromCritiqueInstruction, 'narration', { scenePlan, critique });
     return this.extractTurn(settings, baseMessages, { adjudication, scenePlan, critique, narration: draft.narration, suggestedActions: draft.suggestedActions }, next, action, turns, victory, loss, draft);
   }
 
@@ -361,14 +371,12 @@ export class LlmService {
     victory: ConditionsContext,
     loss: ConditionsContext,
   ): Promise<TurnGeneration> {
-    const adjudication = await this.generateStage(settings, baseMessages,
-      promptTemplates.turnAdjudicationInstruction);
-    const scenePlan = await this.generateStage(settings, baseMessages,
-      promptTemplates.scenePlanInstruction.replace('{adjudication}', adjudication));
+    const adjudication = await this.generateAdjudication(settings, baseMessages, action);
+    const scenePlan = await this.generateScenePlan(settings, baseMessages, adjudication);
     const draft = await this.generateNarrationDraft(settings, baseMessages,
-      promptTemplates.narrationFromPlanInstruction.replace('{scenePlan}', scenePlan));
+      promptTemplates.narrationFromPlanInstruction, 'narration', { scenePlan });
     const extracted = await this.completeWithCorrection(this.connectionSettings(settings, 'stateExtraction'), [
-      ...this.pipelineRoleMessages(baseMessages, promptTemplates.stateExtractionInstruction.replace('{artifacts}', '')),
+      ...this.pipelineRoleMessages(baseMessages, promptTemplates.stateExtractionInstruction),
       { role: 'user', content: JSON.stringify({ adjudication, scenePlan, narration: draft.narration, suggestedActions: draft.suggestedActions }) },
     ], this.turnSchema(settings), value => this.parseTurn(value, settings, next, action, turns, victory, loss));
     return { ...extracted, narration: draft.narration, suggestedActions: draft.suggestedActions };
@@ -384,30 +392,24 @@ export class LlmService {
     loss: ConditionsContext,
     parallelAnalyses = false,
   ): Promise<TurnGeneration> {
-    const adjudication = await this.generateStage(settings, baseMessages,
-      promptTemplates.turnAdjudicationInstruction);
-    const scenePlan = await this.generateStage(settings, baseMessages,
-      promptTemplates.scenePlanInstruction.replace('{adjudication}', adjudication));
+    const adjudication = await this.generateAdjudication(settings, baseMessages, action);
+    const scenePlan = await this.generateScenePlan(settings, baseMessages, adjudication);
     const draft = await this.generateNarrationDraft(settings, baseMessages,
-      promptTemplates.narrationFromPlanInstruction.replace('{scenePlan}', scenePlan));
+      promptTemplates.narrationFromPlanInstruction, 'narration', { scenePlan });
     const artifacts = { adjudication, scenePlan, narration: draft.narration, suggestedActions: draft.suggestedActions };
-    const artifactJson = JSON.stringify(artifacts);
-    const bibleInstruction = promptTemplates.storyBibleAnalysisInstruction.replace('{artifacts}', artifactJson);
-    const eventInstruction = promptTemplates.plannedEventAnalysisInstruction.replace('{artifacts}', artifactJson);
-    const outcomeInstruction = promptTemplates.conditionSummaryAnalysisInstruction.replace('{artifacts}', artifactJson);
     const [bibleAnalysis, eventAnalysis, outcomeAnalysis] = parallelAnalyses
       ? await Promise.all([
-          this.generateStage(settings, baseMessages, bibleInstruction),
-          this.generateStage(settings, baseMessages, eventInstruction),
-          this.generateStage(settings, baseMessages, outcomeInstruction),
+          this.generateStage(settings, baseMessages, promptTemplates.storyBibleAnalysisInstruction, 'storyBibleAnalysis', artifacts),
+          this.generateStage(settings, baseMessages, promptTemplates.plannedEventAnalysisInstruction, 'plannedEventAnalysis', artifacts),
+          this.generateStage(settings, baseMessages, promptTemplates.conditionSummaryAnalysisInstruction, 'conditionSummaryAnalysis', artifacts),
         ])
       : [
-          await this.generateStage(settings, baseMessages, bibleInstruction),
-          await this.generateStage(settings, baseMessages, eventInstruction),
-          await this.generateStage(settings, baseMessages, outcomeInstruction),
+          await this.generateStage(settings, baseMessages, promptTemplates.storyBibleAnalysisInstruction, 'storyBibleAnalysis', artifacts),
+          await this.generateStage(settings, baseMessages, promptTemplates.plannedEventAnalysisInstruction, 'plannedEventAnalysis', artifacts),
+          await this.generateStage(settings, baseMessages, promptTemplates.conditionSummaryAnalysisInstruction, 'conditionSummaryAnalysis', artifacts),
         ];
     const extracted = await this.completeWithCorrection(this.connectionSettings(settings, 'stateExtraction'), [
-      ...this.pipelineRoleMessages(baseMessages, promptTemplates.stateExtractionFromAnalysesInstruction.replace('{analyses}', '')),
+      ...this.pipelineRoleMessages(baseMessages, promptTemplates.stateExtractionFromAnalysesInstruction),
       { role: 'user', content: JSON.stringify({ artifacts, bibleAnalysis, eventAnalysis, outcomeAnalysis }) },
     ], this.turnSchema(settings), value => this.parseTurn(value, settings, next, action, turns, victory, loss));
     return { ...extracted, narration: draft.narration, suggestedActions: draft.suggestedActions };
@@ -417,14 +419,14 @@ export class LlmService {
     // The final prose-only call runs after state extraction and cannot change persistent state.
     const extracted = await this.generateTurnWithSevenCallPipeline(settings, baseMessages, next, action, turns, victory, loss);
     const revised = await this.generateNarrationDraft(settings, baseMessages,
-      promptTemplates.proseRevisionInstruction.replace('{turn}', '') +
-      JSON.stringify({ narration: extracted.narration, suggestedActions: extracted.suggestedActions, storySummary: extracted.storySummary }), 'proseRevision');
+      promptTemplates.proseRevisionInstruction, 'proseRevision',
+      { narration: extracted.narration, suggestedActions: extracted.suggestedActions, storySummary: extracted.storySummary });
     return { ...extracted, narration: revised.narration, suggestedActions: revised.suggestedActions };
   }
 
   private async extractTurn(settings: AppSettings, baseMessages: Message[], artifacts: object, next: number, action: string | null, turns: StoryState['turns'], victory: ConditionsContext, loss: ConditionsContext, draft: { narration: string; suggestedActions: string[] }): Promise<TurnGeneration> {
     const extracted = await this.completeWithCorrection(this.connectionSettings(settings, 'stateExtraction'), [
-      ...this.pipelineRoleMessages(baseMessages, promptTemplates.stateExtractionInstruction.replace('{artifacts}', '')),
+      ...this.pipelineRoleMessages(baseMessages, promptTemplates.stateExtractionInstruction),
       { role: 'user', content: JSON.stringify(artifacts) },
     ], this.turnSchema(settings), value => this.parseTurn(value, settings, next, action, turns, victory, loss));
     return { ...extracted, narration: draft.narration, suggestedActions: draft.suggestedActions };
@@ -436,6 +438,8 @@ export class LlmService {
     if (!connection) return settings;
     const modelId = route?.modelId || settings.modelId;
     const capability = connection.modelCapabilities?.[modelId];
+    const configuredMaxOutputTokens = route && route.maxOutputTokens !== undefined ? route.maxOutputTokens : settings.maxOutputTokens;
+    const internalStageLimit = this.internalStageOutputLimit(call);
     return {
       ...settings,
       baseUrl: connection.baseUrl,
@@ -445,7 +449,9 @@ export class LlmService {
       outputTokenParameter: capability?.outputTokenParameter ?? 'maxCompletionTokens',
       instructionMessageRole: capability?.instructionMessageRole ?? 'developer',
       requestTimeoutSeconds: route?.requestTimeoutSeconds ?? settings.requestTimeoutSeconds,
-      maxOutputTokens: route?.maxOutputTokens ?? settings.maxOutputTokens,
+      maxOutputTokens: internalStageLimit === null
+        ? configuredMaxOutputTokens
+        : configuredMaxOutputTokens === null ? internalStageLimit : Math.min(configuredMaxOutputTokens, internalStageLimit),
       temperature: route?.temperature ?? settings.temperature,
       topP: route?.topP ?? settings.topP,
       reasoningEffort: route?.reasoningEffort ?? settings.reasoningEffort,
@@ -456,36 +462,70 @@ export class LlmService {
     };
   }
 
-  private async generateStage(settings: AppSettings, baseMessages: Message[], instruction: string, call: GenerationCall = 'turn'): Promise<string> {
-    const routedCall = call === 'turn' ? this.stageCall(instruction) : call;
-    return this.completeWithCorrection(this.connectionSettings(settings, routedCall), this.pipelineRoleMessages(baseMessages, instruction),
+  private internalStageOutputLimit(call: GenerationCall): number | null {
+    switch (call) {
+      case 'adjudication': return 512;
+      case 'scenePlan': return 1024;
+      case 'planCritic': return 768;
+      case 'storyBibleAnalysis':
+      case 'plannedEventAnalysis':
+      case 'conditionSummaryAnalysis': return 768;
+      default: return null;
+    }
+  }
+
+  private async generateStage(settings: AppSettings, baseMessages: Message[], instruction: string, call: GenerationCall, artifacts?: object): Promise<string> {
+    return this.completeWithCorrection(this.connectionSettings(settings, call), this.pipelineRoleMessages(baseMessages, instruction, false, artifacts),
       this.stageSchema(), value => {
         const result = value['result'];
-        if (typeof result !== 'string' || !result.trim()) throw new Error('The pipeline stage returned no result.');
+        if (typeof result !== 'string' || !result.trim() || result.length > 4000 || this.looksLikeConstraintEcho(result))
+          throw new Error('The pipeline stage returned malformed internal analysis.');
         return result;
       });
   }
 
-  private stageCall(instruction: string): GenerationCall {
-    if (instruction.includes('turn adjudicator')) return 'adjudication';
-    if (instruction.includes('scene planner')) return 'scenePlan';
-    if (instruction.includes('continuity and rule critic')) return 'planCritic';
-    if (instruction.includes('Story Bible analyst')) return 'storyBibleAnalysis';
-    if (instruction.includes('planned-event analyst')) return 'plannedEventAnalysis';
-    if (instruction.includes('condition and summary analyst')) return 'conditionSummaryAnalysis';
-    return 'turn';
+  private async generateAdjudication(settings: AppSettings, baseMessages: Message[], action: string | null): Promise<AdjudicationArtifact> {
+    return this.completeWithCorrection(this.connectionSettings(settings, 'adjudication'),
+      this.pipelineRoleMessages(baseMessages, promptTemplates.turnAdjudicationInstruction), this.adjudicationSchema(), value => {
+        const actionOutcome = value['actionOutcome'];
+        const reason = value['reason'];
+        const consequences = value['consequences'];
+        const eligiblePlannedEventIds = value['eligiblePlannedEventIds'];
+        const outcomes = ['opening', 'success', 'partialSuccess', 'failure', 'impossible'];
+        if (typeof actionOutcome !== 'string' || !outcomes.includes(actionOutcome) || (action === null) !== (actionOutcome === 'opening'))
+          throw new Error('The adjudication outcome does not match the turn type.');
+        if (typeof reason !== 'string' || !reason.trim() || reason.length > 1200 || this.looksLikeConstraintEcho(reason) ||
+            !Array.isArray(consequences) || consequences.length < 1 || consequences.length > 4 ||
+            consequences.some(item => typeof item !== 'string' || !item.trim() || item.length > 600) ||
+            !Array.isArray(eligiblePlannedEventIds) || eligiblePlannedEventIds.some(item => typeof item !== 'string') ||
+            new Set(eligiblePlannedEventIds).size !== eligiblePlannedEventIds.length)
+          throw new Error('The adjudication must contain concise internal reasoning and consequences.');
+        return { actionOutcome: actionOutcome as AdjudicationArtifact['actionOutcome'], reason, consequences: consequences as string[], eligiblePlannedEventIds: eligiblePlannedEventIds as string[] };
+      });
+  }
+
+  private async generateScenePlan(settings: AppSettings, baseMessages: Message[], adjudication: AdjudicationArtifact): Promise<ScenePlanArtifact> {
+    return this.completeWithCorrection(this.connectionSettings(settings, 'scenePlan'),
+      this.pipelineRoleMessages(baseMessages, promptTemplates.scenePlanInstruction, false, { adjudication }), this.scenePlanSchema(), value => {
+        const beats = value['beats'];
+        const resultingSituation = value['resultingSituation'];
+        const decisionPoint = value['decisionPoint'];
+        const combined = Array.isArray(beats) ? [...beats, resultingSituation, decisionPoint].join(' ') : '';
+        if (!Array.isArray(beats) || beats.length < 2 || beats.length > 6 ||
+            beats.some(item => typeof item !== 'string' || !item.trim() || item.length > 700) ||
+            typeof resultingSituation !== 'string' || !resultingSituation.trim() || resultingSituation.length > 1200 ||
+            typeof decisionPoint !== 'string' || !decisionPoint.trim() || decisionPoint.length > 800 ||
+            this.looksLikeConstraintEcho(combined) || combined.toLocaleLowerCase() === adjudication.reason.toLocaleLowerCase())
+          throw new Error('The scene plan must contain concise, distinct beats and a meaningful decision point.');
+        return { beats: beats as string[], resultingSituation, decisionPoint };
+      });
   }
 
   private async generateNarrationDraft(
-    settings: AppSettings, baseMessages: Message[], instruction: string, call: GenerationCall = 'narration',
+    settings: AppSettings, baseMessages: Message[], instruction: string, call: GenerationCall = 'narration', artifacts?: object,
   ): Promise<{ narration: string; suggestedActions: string[] }> {
-    return this.completeWithCorrection(this.connectionSettings(settings, call), this.pipelineRoleMessages(baseMessages, instruction, true),
+    return this.completeWithCorrection(this.connectionSettings(settings, call), this.pipelineRoleMessages(baseMessages, instruction, true, artifacts),
       this.narrationDraftSchema(settings), value => {
-        const stageResult = value['result'];
-        if (typeof stageResult === 'string' && stageResult.trim() && stageResult.length <= settings.maxNarrationCharacters) {
-          const defaults = ['Look around', 'Continue the story', 'Proceed cautiously'];
-          return { narration: stageResult, suggestedActions: Array.from({ length: settings.minSuggestedActions }, (_, index) => defaults[index % defaults.length]).slice(0, settings.maxSuggestedActions) };
-        }
         const narration = value['narration'];
         const suggestedActions = value['suggestedActions'];
         if (typeof narration !== 'string' || !narration.trim() || narration.length > settings.maxNarrationCharacters)
@@ -498,11 +538,11 @@ export class LlmService {
       });
   }
 
-  private pipelineRoleMessages(baseMessages: Message[], instruction: string, narrator = false): Message[] {
+  private pipelineRoleMessages(baseMessages: Message[], instruction: string, narrator = false, artifacts?: object): Message[] {
     const sharedPolicy = baseMessages[0]?.content ?? '';
-    if (narrator)
-      return [{ role: 'system', content: `${sharedPolicy}\n\n${instruction}` }, ...baseMessages.slice(1)];
-    return [
+    const messages = narrator
+      ? [{ role: 'system', content: `${sharedPolicy}\n\n${instruction}` }, ...baseMessages.slice(1)]
+      : [
       { role: 'system', content: instruction },
       {
         role: 'user',
@@ -514,6 +554,13 @@ export class LlmService {
       },
       ...baseMessages.slice(1),
     ];
+    return artifacts === undefined
+      ? messages
+      : [...messages, { role: 'user', content: JSON.stringify({ contextType: 'pipelineArtifacts', artifacts }) }];
+  }
+
+  private looksLikeConstraintEcho(value: string): boolean {
+    return value.length > 1000 && [...value].filter(char => /\s/.test(char)).length < value.length / 100;
   }
 
   private parseTurn(
@@ -708,7 +755,8 @@ export class LlmService {
       messages: serializedMessages,
       stream: false,
     };
-    body[contract.outputTokenParameter === 'maxCompletionTokens' ? 'max_completion_tokens' : 'max_tokens'] = settings.maxOutputTokens;
+    if (settings.maxOutputTokens !== null)
+      body[contract.outputTokenParameter === 'maxCompletionTokens' ? 'max_completion_tokens' : 'max_tokens'] = settings.maxOutputTokens;
     if (settings.temperature !== null) body['temperature'] = settings.temperature;
     if (settings.topP !== null) body['top_p'] = settings.topP;
     if (settings.reasoningEffort) body['reasoning_effort'] = settings.reasoningEffort;
@@ -812,8 +860,25 @@ export class LlmService {
     });
   }
 
+  private adjudicationSchema(): JsonSchema {
+    return this.objectSchema({
+      actionOutcome: { type: 'string', enum: ['opening', 'success', 'partialSuccess', 'failure', 'impossible'] },
+      reason: { type: 'string', maxLength: 1200 },
+      consequences: { type: 'array', minItems: 1, maxItems: 4, items: { type: 'string', maxLength: 600 } },
+      eligiblePlannedEventIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
+    });
+  }
+
+  private scenePlanSchema(): JsonSchema {
+    return this.objectSchema({
+      beats: { type: 'array', minItems: 2, maxItems: 6, items: { type: 'string', maxLength: 700 } },
+      resultingSituation: { type: 'string', maxLength: 1200 },
+      decisionPoint: { type: 'string', maxLength: 800 },
+    });
+  }
+
   private stageSchema(): JsonSchema {
-    return this.objectSchema({ result: { type: 'string', maxLength: 12000 } });
+    return this.objectSchema({ result: { type: 'string', maxLength: 4000 } });
   }
 
   private narrationDraftSchema(settings: AppSettings): JsonSchema {

@@ -782,7 +782,7 @@ public sealed class NarratorApplication(
                 BaseUrl = connection.BaseUrl,
                 ModelId = modelId,
                 RequestTimeout = route.RequestTimeout ?? settings.RequestTimeout,
-                MaxOutputTokens = route.MaxOutputTokens ?? settings.MaxOutputTokens,
+                MaxOutputTokens = route.MaxOutputTokens,
                 Parameters = route.Parameters ?? settings.Parameters,
                 Retry = route.Retry ?? settings.Retry,
                 Capabilities = capabilities

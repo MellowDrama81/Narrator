@@ -29,7 +29,7 @@ import { validateSettings } from '../core/settings-validator';
         <mat-expansion-panel-header><mat-panel-title>Advanced request behavior</mat-panel-title><mat-panel-description>Timeout, output, sampling, and retries</mat-panel-description></mat-expansion-panel-header>
         <div class="form-grid compact">
         <mat-form-field appearance="outline"><mat-label>Timeout · seconds</mat-label><input matInput type="number" [(ngModel)]="route(call).requestTimeoutSeconds"></mat-form-field>
-        <mat-form-field appearance="outline"><mat-label>Maximum output tokens</mat-label><input matInput type="number" [(ngModel)]="route(call).maxOutputTokens"></mat-form-field>
+        <mat-form-field appearance="outline"><mat-label>Maximum output tokens (blank = no limit)</mat-label><input matInput type="number" [(ngModel)]="route(call).maxOutputTokens"></mat-form-field>
         <mat-form-field appearance="outline"><mat-label>Temperature</mat-label><input matInput type="number" step=".1" [(ngModel)]="route(call).temperature"></mat-form-field>
         <mat-form-field appearance="outline"><mat-label>Top P</mat-label><input matInput type="number" step=".1" [(ngModel)]="route(call).topP"></mat-form-field>
         <mat-form-field appearance="outline"><mat-label>Reasoning effort</mat-label><input matInput [(ngModel)]="route(call).reasoningEffort" placeholder="low, medium, high"></mat-form-field>

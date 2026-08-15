@@ -150,7 +150,7 @@ public sealed record ApiConnectionSettings(
     Uri? BaseUrl,
     string? ModelId,
     TimeSpan RequestTimeout,
-    int MaxOutputTokens,
+    int? MaxOutputTokens,
     ModelParameters Parameters,
     StoryGenerationSettings StoryGeneration,
     RetrySettings Retry,
@@ -262,7 +262,7 @@ public static class SettingsValidator
             }
         }
         Range(errors, nameof(value.RequestTimeout), value.RequestTimeout.TotalSeconds, 10, 900);
-        Range(errors, nameof(value.MaxOutputTokens), value.MaxOutputTokens, 256, 131072);
+        OptionalRange(errors, nameof(value.MaxOutputTokens), value.MaxOutputTokens, 256, 131072);
         OptionalRange(errors, "Temperature", value.Parameters.Temperature, 0, 2);
         OptionalRange(errors, "TopP", value.Parameters.TopP, 0, 1);
         Range(errors, "RecentTurnCount", value.StoryGeneration.RecentTurnCount, 0, 100);

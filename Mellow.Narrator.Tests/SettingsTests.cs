@@ -82,6 +82,14 @@ public sealed class SettingsTests
     }
 
     [Fact]
+    public void Validator_AcceptsNoMaximumOutputTokenLimit()
+    {
+        var settings = NarratorDefaults.Create() with { MaxOutputTokens = null };
+
+        Assert.Empty(SettingsValidator.Validate(settings));
+    }
+
+    [Fact]
     public void Validator_AcceptsEveryInclusiveLowerBoundary()
     {
         var value = NarratorDefaults.Create() with

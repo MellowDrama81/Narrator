@@ -38,17 +38,17 @@
       "placeholders": []
     },
     { "key": "turnAdjudicationInstruction", "file": "turn-adjudication.md", "placeholders": [] },
-    { "key": "scenePlanInstruction", "file": "scene-plan.md", "placeholders": ["adjudication"] },
-    { "key": "planCriticInstruction", "file": "plan-critic.md", "placeholders": ["adjudication", "scenePlan"] },
-    { "key": "narrationFromAdjudicationInstruction", "file": "narration-from-adjudication.md", "placeholders": ["adjudication"] },
-    { "key": "narrationFromPlanInstruction", "file": "narration-from-plan.md", "placeholders": ["scenePlan"] },
-    { "key": "narrationFromCritiqueInstruction", "file": "narration-from-critique.md", "placeholders": ["scenePlan", "critique"] },
+    { "key": "scenePlanInstruction", "file": "scene-plan.md", "placeholders": [] },
+    { "key": "planCriticInstruction", "file": "plan-critic.md", "placeholders": [] },
+    { "key": "narrationFromAdjudicationInstruction", "file": "narration-from-adjudication.md", "placeholders": [] },
+    { "key": "narrationFromPlanInstruction", "file": "narration-from-plan.md", "placeholders": [] },
+    { "key": "narrationFromCritiqueInstruction", "file": "narration-from-critique.md", "placeholders": [] },
     { "key": "narrationOnlyInstruction", "file": "narration-only.md", "placeholders": [] },
-    { "key": "storyBibleAnalysisInstruction", "file": "story-bible-analysis.md", "placeholders": ["artifacts"] },
-    { "key": "plannedEventAnalysisInstruction", "file": "planned-event-analysis.md", "placeholders": ["artifacts"] },
-    { "key": "conditionSummaryAnalysisInstruction", "file": "condition-summary-analysis.md", "placeholders": ["artifacts"] },
-    { "key": "stateExtractionInstruction", "file": "state-extraction.md", "placeholders": ["artifacts"] },
-    { "key": "stateExtractionFromAnalysesInstruction", "file": "state-extraction-from-analyses.md", "placeholders": ["analyses"] },
-    { "key": "proseRevisionInstruction", "file": "prose-revision.md", "placeholders": ["turn"] }
+    { "key": "storyBibleAnalysisInstruction", "file": "story-bible-analysis.md", "placeholders": [] },
+    { "key": "plannedEventAnalysisInstruction", "file": "planned-event-analysis.md", "placeholders": [] },
+    { "key": "conditionSummaryAnalysisInstruction", "file": "condition-summary-analysis.md", "placeholders": [] },
+    { "key": "stateExtractionInstruction", "file": "state-extraction.md", "placeholders": [] },
+    { "key": "stateExtractionFromAnalysesInstruction", "file": "state-extraction-from-analyses.md", "placeholders": [] },
+    { "key": "proseRevisionInstruction", "file": "prose-revision.md", "placeholders": [] }
   ]
 }

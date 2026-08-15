@@ -155,7 +155,7 @@ export interface GenerationCallRoute {
   connectionId: string;
   modelId: string;
   requestTimeoutSeconds?: number;
-  maxOutputTokens?: number;
+  maxOutputTokens?: number | null;
   temperature?: number | null;
   topP?: number | null;
   reasoningEffort?: string;
@@ -171,7 +171,7 @@ export interface AppSettings {
   modelId: string;
   apiKey: string;
   requestTimeoutSeconds: number;
-  maxOutputTokens: number;
+  maxOutputTokens: number | null;
   temperature: number | null;
   topP: number | null;
   reasoningEffort: string;

@@ -83,6 +83,19 @@ function turnResponse(fields: Record<string, unknown>): Response {
 const completion = (suggestedActions = ['Search the desk', 'Climb the stairs', 'Check the generator']): Response =>
   turnResponse({ suggestedActions });
 
+const adjudication = () => ({
+  actionOutcome: 'success',
+  reason: 'The search is careful and plausible in the abandoned observatory.',
+  consequences: ['A lantern is found beneath the desk.'],
+  eligiblePlannedEventIds: [],
+});
+
+const scenePlan = () => ({
+  beats: ['Search the desk.', 'Find the lantern beneath a folded map.'],
+  resultingSituation: 'The player has a working lantern in the observatory.',
+  decisionPoint: 'Choose whether to inspect the desk further or climb the stairs.',
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -94,8 +107,8 @@ describe('LlmService', () => {
     vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       requests.push(JSON.parse(String(init?.body)));
       call++;
-      const content = call === 1 ? { result: 'The planned event is not yet eligible.' }
-        : call === 2 ? { result: 'Resolve the lantern search and end with a decision.' }
+      const content = call === 1 ? adjudication()
+        : call === 2 ? scenePlan()
         : call === 3 ? { narration: 'You find a lantern beneath the desk.', suggestedActions: ['Search the desk', 'Climb the stairs'] }
         : {
             turnNumber: 1,
@@ -125,7 +138,9 @@ describe('LlmService', () => {
     let call = 0;
     vi.stubGlobal('fetch', vi.fn(async () => {
       call++;
-      const content = call === 3 ? { narration: 'You find a lantern beneath the desk.', suggestedActions: ['Search the desk', 'Climb the stairs'] }
+      const content = call === 1 ? adjudication()
+        : call === 2 ? scenePlan()
+        : call === 3 ? { narration: 'You find a lantern beneath the desk.', suggestedActions: ['Search the desk', 'Climb the stairs'] }
         : call === 7 ? {
             turnNumber: 1, acknowledgedPlayerAction: 'Search for a light', narration: 'Placeholder.', suggestedActions: ['Placeholder'],
             relevantStoryBibleEntryIds: [], storyBibleUpdates: [], relevantPlannedEventIds: [], plannedEventUpdates: [],
@@ -144,6 +159,31 @@ describe('LlmService', () => {
     expect(result.suggestedActions).toEqual(['Search the desk', 'Climb the stairs']);
   });
 
+  it('retries a malformed adjudication before allowing the four-call pipeline to plan', async () => {
+    let call = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      call++;
+      const content = call === 1
+        ? { result: 'failureWithConsequenceInternalOnly'.repeat(40) }
+        : call === 2 ? adjudication()
+        : call === 3 ? scenePlan()
+        : call === 4 ? { narration: 'You find a lantern beneath the desk.', suggestedActions: ['Search the desk', 'Climb the stairs'] }
+        : {
+            turnNumber: 1, acknowledgedPlayerAction: 'Search for a light', narration: 'Placeholder.', suggestedActions: ['Placeholder'],
+            relevantStoryBibleEntryIds: [], storyBibleUpdates: [], relevantPlannedEventIds: [], plannedEventUpdates: [],
+            revealedVictoryConditionIds: [], metVictoryConditionIds: [], revealedLossConditionIds: [], metLossConditionIds: [],
+            storySummary: 'You found a lantern in the observatory.',
+          };
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }), { status: 200 });
+    }));
+
+    const result = await new LlmService(fakeDb()).turn(
+      { ...settings(), turnPipeline: 'fourCalls' }, story(), 'Search for a light');
+
+    expect(call).toBe(5);
+    expect(result.narration).toBe('You find a lantern beneath the desk.');
+  });
+
   it.each([
     ['twoCalls', 2, [1]],
     ['threeCalls', 3, [2]],
@@ -156,7 +196,9 @@ describe('LlmService', () => {
       call++;
       const isRevision = call === 8;
       const finalCall = mode === 'eightCalls' ? 7 : expectedCalls;
-      const content = call === finalCall ? {
+      const content = (mode !== 'twoCalls' && call === 1) ? adjudication()
+        : (mode !== 'twoCalls' && mode !== 'threeCalls' && call === 2) ? scenePlan()
+        : call === finalCall ? {
             turnNumber: 1, acknowledgedPlayerAction: 'Search for a light', narration: 'Placeholder.', suggestedActions: ['Placeholder'],
             relevantStoryBibleEntryIds: [], storyBibleUpdates: [], relevantPlannedEventIds: [], plannedEventUpdates: [],
             revealedVictoryConditionIds: [], metVictoryConditionIds: [], revealedLossConditionIds: [], metLossConditionIds: [],
@@ -212,6 +254,19 @@ describe('LlmService', () => {
     expect(messages[0].content).toContain('the player controls only their own character');
     expect(messages[0].content).toContain('the guard gives me the key');
     expect(requests[0]['max_completion_tokens']).toBe(settings().maxOutputTokens);
+  });
+
+  it('omits the output token parameter when no limit is configured', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)));
+      return completion();
+    }));
+
+    await new LlmService(fakeDb()).turn({ ...settings(), maxOutputTokens: null }, story(), 'Search for a light');
+
+    expect(requests[0]).not.toHaveProperty('max_completion_tokens');
+    expect(requests[0]).not.toHaveProperty('max_tokens');
   });
 
   it('falls back from strict JSON schema through JSON mode to PromptedJson, and persists the working tier', async () => {
