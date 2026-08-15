@@ -1369,9 +1369,11 @@ public sealed class ProviderTests
     public async Task GenerateTurn_UsesFourCallPipelineAndReturnsNarrationDraft()
     {
         var requests = 0;
-        var handler = new StubHandler(_ =>
+        string? adjudicationRequest = null;
+        var handler = new StubHandler(async request =>
         {
             requests++;
+            if (requests == 1) adjudicationRequest = await request.Content!.ReadAsStringAsync();
             var content = requests switch
             {
                 1 => """{"result":"The action succeeds; conditional events remain blocked."}""",
@@ -1380,7 +1382,7 @@ public sealed class ProviderTests
                 4 => """{"turnNumber":1,"acknowledgedPlayerAction":"Open the door","narration":"This must be replaced by the narration draft.","suggestedActions":["This must be replaced","This must also be replaced"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[],"storySummary":"The door has opened."}""",
                 _ => throw new InvalidOperationException("The pipeline made an unexpected extra request.")
             };
-            return Task.FromResult(Response(content));
+            return Response(content);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var context = new GenerationContext(
@@ -1400,6 +1402,11 @@ public sealed class ProviderTests
         Assert.Equal("The door gives beneath your hand. Cold air rises from the stairwell beyond.", result.Narration);
         Assert.Equal(["Descend the stairs", "Listen at the threshold"], result.SuggestedActions);
         Assert.Equal("The door has opened.", result.StorySummary);
+        using var request = JsonDocument.Parse(adjudicationRequest!);
+        var messages = request.RootElement.GetProperty("messages");
+        Assert.Contains("You are the turn adjudicator", messages[0].GetProperty("content").GetString());
+        Assert.DoesNotContain("You narrate an interactive story", messages[0].GetProperty("content").GetString());
+        Assert.Equal("sharedStoryPolicy", JsonDocument.Parse(messages[1].GetProperty("content").GetString()!).RootElement.GetProperty("contextType").GetString());
     }
 
     [Fact]

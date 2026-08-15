@@ -90,7 +90,9 @@ afterEach(() => {
 describe('LlmService', () => {
   it('uses four calls when the multi-call turn pipeline is enabled', async () => {
     let call = 0;
-    vi.stubGlobal('fetch', vi.fn(async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)));
       call++;
       const content = call === 1 ? { result: 'The planned event is not yet eligible.' }
         : call === 2 ? { result: 'Resolve the lantern search and end with a decision.' }
@@ -113,6 +115,10 @@ describe('LlmService', () => {
     expect(call).toBe(4);
     expect(result.narration).toBe('You find a lantern beneath the desk.');
     expect(result.suggestedActions).toEqual(['Search the desk', 'Climb the stairs']);
+    const messages = requests[0]['messages'] as Array<{ role: string; content: string }>;
+    expect(messages[0].content).toContain('You are the turn adjudicator');
+    expect(messages[0].content).not.toContain('You narrate an interactive story');
+    expect(JSON.parse(messages[1].content)).toMatchObject({ contextType: 'sharedStoryPolicy' });
   });
 
   it('uses seven calls when the full multi-call pipeline is enabled', async () => {

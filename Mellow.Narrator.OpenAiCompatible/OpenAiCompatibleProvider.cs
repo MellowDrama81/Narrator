@@ -204,8 +204,9 @@ public sealed class OpenAiCompatibleProvider(
             settings, credential, baseMessages,
             Templates.NarrationFromPlanInstruction.Replace("{scenePlan}", scenePlan),
             cancellationToken);
-        var extractionMessages = baseMessages.Concat([
-            Message("system", Templates.StateExtractionInstruction.Replace("{artifacts}", "")),
+        var extractionMessages = PipelineRoleMessages(
+            baseMessages,
+            Templates.StateExtractionInstruction.Replace("{artifacts}", "")).Concat([
             Message("user", JsonSerializer.Serialize(new { adjudication, scenePlan, narration = draft.Narration, suggestedActions = draft.SuggestedActions }, Json))
         ]).ToArray();
         var extracted = await CompleteWithCorrectionAsync(
@@ -285,8 +286,9 @@ public sealed class OpenAiCompatibleProvider(
             outcomeAnalysis = await GenerateStageAsync(settings, credential, baseMessages,
                 Templates.ConditionSummaryAnalysisInstruction.Replace("{artifacts}", artifactJson), cancellationToken);
         }
-        var extracted = await CompleteWithCorrectionAsync(settings, credential, baseMessages.Concat([
-            Message("system", Templates.StateExtractionFromAnalysesInstruction.Replace("{analyses}", "")),
+        var extracted = await CompleteWithCorrectionAsync(settings, credential, PipelineRoleMessages(
+            baseMessages,
+            Templates.StateExtractionFromAnalysesInstruction.Replace("{analyses}", "")).Concat([
             Message("user", JsonSerializer.Serialize(new { artifacts, bibleAnalysis, eventAnalysis, outcomeAnalysis }, Json))
         ]).ToArray(), TurnSchema(settings), node => ParseStoryResponse(node, settings, context, opening), cancellationToken, GenerationCall.StateExtraction);
         return extracted with { Narration = draft.Narration, SuggestedActions = draft.SuggestedActions };
@@ -310,8 +312,9 @@ public sealed class OpenAiCompatibleProvider(
         ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> baseMessages, object artifacts,
         GenerationContext context, bool opening, CancellationToken cancellationToken, NarrationDraft draft)
     {
-        var extracted = await CompleteWithCorrectionAsync(settings, credential, baseMessages.Concat([
-            Message("system", Templates.StateExtractionInstruction.Replace("{artifacts}", "")),
+        var extracted = await CompleteWithCorrectionAsync(settings, credential, PipelineRoleMessages(
+            baseMessages,
+            Templates.StateExtractionInstruction.Replace("{artifacts}", "")).Concat([
             Message("user", JsonSerializer.Serialize(artifacts, Json))
         ]).ToArray(), TurnSchema(settings), node => ParseStoryResponse(node, settings, context, opening), cancellationToken, GenerationCall.StateExtraction);
         return extracted with { Narration = draft.Narration, SuggestedActions = draft.SuggestedActions };
@@ -322,7 +325,7 @@ public sealed class OpenAiCompatibleProvider(
         CancellationToken cancellationToken, GenerationCall generationCall = GenerationCall.Turn)
     {
         generationCall = generationCall == GenerationCall.Turn ? StageCall(instruction) : generationCall;
-        var messages = baseMessages.Concat([Message("system", instruction)]).ToArray();
+        var messages = PipelineRoleMessages(baseMessages, instruction);
         return await CompleteWithCorrectionAsync(
             settings, credential, messages, StageSchema(),
             node => RequiredString(node, "result"), cancellationToken, generationCall);
@@ -332,10 +335,31 @@ public sealed class OpenAiCompatibleProvider(
         ApiConnectionSettings settings, string? credential, IReadOnlyList<JsonObject> baseMessages, string instruction,
         CancellationToken cancellationToken, GenerationCall generationCall = GenerationCall.Narration)
     {
-        var messages = baseMessages.Concat([Message("system", instruction)]).ToArray();
+        var messages = PipelineRoleMessages(baseMessages, instruction, narrator: true);
         return await CompleteWithCorrectionAsync(
             settings, credential, messages, NarrationDraftSchema(settings),
             node => ParseNarrationDraft(node, settings), cancellationToken, generationCall);
+    }
+
+    private static JsonObject[] PipelineRoleMessages(
+        IReadOnlyList<JsonObject> baseMessages,
+        string instruction,
+        bool narrator = false)
+    {
+        var sharedPolicy = baseMessages[0]["content"]?.GetValue<string>() ?? "";
+        if (narrator)
+            return [Message("system", sharedPolicy + "\n\n" + instruction), .. baseMessages.Skip(1)];
+        return
+        [
+            Message("system", instruction),
+            Message("user", JsonSerializer.Serialize(new
+            {
+                contextType = "sharedStoryPolicy",
+                instruction = "Apply this as story policy only. Keep the role and output contract from the system message; do not adopt the narrator role described in this policy.",
+                content = sharedPolicy
+            }, Json)),
+            .. baseMessages.Skip(1)
+        ];
     }
 
     private static GenerationCall StageCall(string instruction)

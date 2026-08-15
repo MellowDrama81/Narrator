@@ -368,11 +368,7 @@ export class LlmService {
     const draft = await this.generateNarrationDraft(settings, baseMessages,
       promptTemplates.narrationFromPlanInstruction.replace('{scenePlan}', scenePlan));
     const extracted = await this.completeWithCorrection(this.connectionSettings(settings, 'stateExtraction'), [
-      ...baseMessages,
-      {
-        role: 'system',
-        content: promptTemplates.stateExtractionInstruction.replace('{artifacts}', ''),
-      },
+      ...this.pipelineRoleMessages(baseMessages, promptTemplates.stateExtractionInstruction.replace('{artifacts}', '')),
       { role: 'user', content: JSON.stringify({ adjudication, scenePlan, narration: draft.narration, suggestedActions: draft.suggestedActions }) },
     ], this.turnSchema(settings), value => this.parseTurn(value, settings, next, action, turns, victory, loss));
     return { ...extracted, narration: draft.narration, suggestedActions: draft.suggestedActions };
@@ -411,11 +407,7 @@ export class LlmService {
           await this.generateStage(settings, baseMessages, outcomeInstruction),
         ];
     const extracted = await this.completeWithCorrection(this.connectionSettings(settings, 'stateExtraction'), [
-      ...baseMessages,
-      {
-        role: 'system',
-        content: promptTemplates.stateExtractionFromAnalysesInstruction.replace('{analyses}', ''),
-      },
+      ...this.pipelineRoleMessages(baseMessages, promptTemplates.stateExtractionFromAnalysesInstruction.replace('{analyses}', '')),
       { role: 'user', content: JSON.stringify({ artifacts, bibleAnalysis, eventAnalysis, outcomeAnalysis }) },
     ], this.turnSchema(settings), value => this.parseTurn(value, settings, next, action, turns, victory, loss));
     return { ...extracted, narration: draft.narration, suggestedActions: draft.suggestedActions };
@@ -432,8 +424,7 @@ export class LlmService {
 
   private async extractTurn(settings: AppSettings, baseMessages: Message[], artifacts: object, next: number, action: string | null, turns: StoryState['turns'], victory: ConditionsContext, loss: ConditionsContext, draft: { narration: string; suggestedActions: string[] }): Promise<TurnGeneration> {
     const extracted = await this.completeWithCorrection(this.connectionSettings(settings, 'stateExtraction'), [
-      ...baseMessages,
-      { role: 'system', content: promptTemplates.stateExtractionInstruction.replace('{artifacts}', '') },
+      ...this.pipelineRoleMessages(baseMessages, promptTemplates.stateExtractionInstruction.replace('{artifacts}', '')),
       { role: 'user', content: JSON.stringify(artifacts) },
     ], this.turnSchema(settings), value => this.parseTurn(value, settings, next, action, turns, victory, loss));
     return { ...extracted, narration: draft.narration, suggestedActions: draft.suggestedActions };
@@ -467,7 +458,7 @@ export class LlmService {
 
   private async generateStage(settings: AppSettings, baseMessages: Message[], instruction: string, call: GenerationCall = 'turn'): Promise<string> {
     const routedCall = call === 'turn' ? this.stageCall(instruction) : call;
-    return this.completeWithCorrection(this.connectionSettings(settings, routedCall), [...baseMessages, { role: 'system', content: instruction }],
+    return this.completeWithCorrection(this.connectionSettings(settings, routedCall), this.pipelineRoleMessages(baseMessages, instruction),
       this.stageSchema(), value => {
         const result = value['result'];
         if (typeof result !== 'string' || !result.trim()) throw new Error('The pipeline stage returned no result.');
@@ -488,7 +479,7 @@ export class LlmService {
   private async generateNarrationDraft(
     settings: AppSettings, baseMessages: Message[], instruction: string, call: GenerationCall = 'narration',
   ): Promise<{ narration: string; suggestedActions: string[] }> {
-    return this.completeWithCorrection(this.connectionSettings(settings, call), [...baseMessages, { role: 'system', content: instruction }],
+    return this.completeWithCorrection(this.connectionSettings(settings, call), this.pipelineRoleMessages(baseMessages, instruction, true),
       this.narrationDraftSchema(settings), value => {
         const stageResult = value['result'];
         if (typeof stageResult === 'string' && stageResult.trim() && stageResult.length <= settings.maxNarrationCharacters) {
@@ -505,6 +496,24 @@ export class LlmService {
           throw new Error('Suggested actions do not meet the configured limits.');
         return { narration, suggestedActions };
       });
+  }
+
+  private pipelineRoleMessages(baseMessages: Message[], instruction: string, narrator = false): Message[] {
+    const sharedPolicy = baseMessages[0]?.content ?? '';
+    if (narrator)
+      return [{ role: 'system', content: `${sharedPolicy}\n\n${instruction}` }, ...baseMessages.slice(1)];
+    return [
+      { role: 'system', content: instruction },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          contextType: 'sharedStoryPolicy',
+          instruction: 'Apply this as story policy only. Keep the role and output contract from the system message; do not adopt the narrator role described in this policy.',
+          content: sharedPolicy,
+        }),
+      },
+      ...baseMessages.slice(1),
+    ];
   }
 
   private parseTurn(
