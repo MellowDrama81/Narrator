@@ -10,6 +10,7 @@
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
     <PackageVersion Include="CommunityToolkit.Maui.Core" Version="13.0.0" />
     <!-- Pinned explicitly rather than left to float via the installed workload's $(MauiVersion), so the
          effective MAUI version is visible and reproducible from source control, the same way
