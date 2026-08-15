@@ -43,11 +43,12 @@ export class ConnectionsComponent implements OnInit {
   async test(connection: AppSettings['connections'][number]): Promise<void> {
     const route = Object.values(this.settings.generationCallRoutes).find(candidate => candidate?.connectionId === connection.id);
     const modelId = route?.modelId || this.settings.modelId;
-    if (!modelId) { this.snack.open('Assign a model to this connection before testing it.', 'Dismiss', { duration: 5000 }); return; }
     try {
       const result = await this.llm.test({ ...this.settings, baseUrl: connection.baseUrl, apiKey: connection.apiKey, modelId });
-      connection.modelCapabilities ??= {};
-      connection.modelCapabilities[modelId] = { structuredOutputTier: result.tier, outputTokenParameter: result.outputTokenParameter, instructionMessageRole: result.instructionMessageRole, testedAtUtc: new Date().toISOString() };
+      if (modelId) {
+        connection.modelCapabilities ??= {};
+        connection.modelCapabilities[modelId] = { structuredOutputTier: result.tier, outputTokenParameter: result.outputTokenParameter, instructionMessageRole: result.instructionMessageRole, testedAtUtc: new Date().toISOString() };
+      }
       await this.db.saveSettings(this.settings);
       this.snack.open(`${connection.name}: ${result.message}`, 'Dismiss', { duration: 4000 });
     } catch (error) { this.snack.open(error instanceof Error ? error.message : 'Connection test failed.', 'Dismiss', { duration: 6000 }); }

@@ -67,7 +67,9 @@ public sealed class ConnectionProfilesPage : ContentPage
             _status.Text = "Testing connection...";
             var result = await _app.TestConnectionAsync(editor.Id);
             _status.Text = result.Success
-                ? $"{editor.Name.Text}: connected ({result.Capabilities.StructuredOutputTier})."
+                ? result.Capabilities.StructuredOutputTier == StructuredOutputTier.Untested
+                    ? $"{editor.Name.Text}: connected. {result.Models.Count} model(s) discovered."
+                    : $"{editor.Name.Text}: connected ({result.Capabilities.StructuredOutputTier})."
                 : result.Error ?? $"{editor.Name.Text}: connection failed.";
         }
         catch (Exception ex) { await Ui.Error(this, ex); }

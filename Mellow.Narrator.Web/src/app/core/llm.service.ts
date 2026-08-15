@@ -166,15 +166,21 @@ export class LlmService {
       .some(marker => modelId.toLocaleLowerCase().includes(marker));
   }
 
-  async test(settings: AppSettings): Promise<{ message: string; tier: StructuredOutputTier; outputTokenParameter: OutputTokenParameter; instructionMessageRole: InstructionMessageRole }> {
+  // Models are assigned per call route, not per connection, so a connection can be tested before any
+  // model is chosen for it. Without a model, this falls back to model discovery (GET /models) as the
+  // connectivity/auth check instead of requiring a chat-completion probe.
+  async test(settings: AppSettings): Promise<{ message: string; tier: StructuredOutputTier; outputTokenParameter: OutputTokenParameter; instructionMessageRole: InstructionMessageRole; models: string[] }> {
     if (!settings.baseUrl) throw new Error('Configure an API base URL first.');
-    if (!settings.modelId) throw new Error('Choose or enter a model first.');
+    if (!settings.modelId) {
+      const models = await this.loadModels(settings);
+      return { message: `Connected — ${models.length} model(s) discovered.`, tier: 'untested', outputTokenParameter: settings.outputTokenParameter, instructionMessageRole: settings.instructionMessageRole, models };
+    }
     const { value, tier } = await this.completeStructured(settings, [
       { role: 'system', content: 'Return a JSON object with exactly one boolean property named ok.' },
       { role: 'user', content: 'Return ok as true.' },
     ], this.objectSchema({ ok: { type: 'boolean' } }));
     if (value['ok'] !== true) throw new Error('The model could not produce a valid structured response.');
-    return { message: `Connected to ${settings.modelId} (${tier}).`, tier, outputTokenParameter: settings.outputTokenParameter, instructionMessageRole: settings.instructionMessageRole };
+    return { message: `Connected to ${settings.modelId} (${tier}).`, tier, outputTokenParameter: settings.outputTokenParameter, instructionMessageRole: settings.instructionMessageRole, models: [] };
   }
 
   async generateDefinition(settings: AppSettings, storyDefinitionPrompt: string): Promise<DefinitionGeneration> {

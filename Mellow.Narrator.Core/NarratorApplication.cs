@@ -131,14 +131,16 @@ public sealed class NarratorApplication(
             var current = await settingsStore.LoadAsync(cancellationToken);
             var profile = current.Connections.FirstOrDefault(candidate => candidate.Id == connectionId)
                 ?? throw new NarratorException("The selected API connection no longer exists.");
+            // A model isn't required to test a connection: models are assigned per call route, not per
+            // connection, so a freshly-added connection has none yet. When no model is available either
+            // way, the provider falls back to model discovery (GET /models) to validate the base URL and
+            // credential instead of a chat-completion probe.
             var model = requestedModelId ?? current.GenerationCallRoutes.Values
                 .FirstOrDefault(route => route.ConnectionId == connectionId && !string.IsNullOrWhiteSpace(route.ModelId))?.ModelId
                 ?? current.ModelId;
-            if (string.IsNullOrWhiteSpace(model))
-                throw new NarratorException("Assign a model to this connection on a call-routing page before testing it.");
             var credential = await secureStorage.GetAsync(SecureStorageKeys.ApiCredentialForConnection(connectionId), cancellationToken)
                 ?? await secureStorage.GetAsync(SecureStorageKeys.ApiCredential, cancellationToken);
-            var capabilities = profile.ModelCapabilities.TryGetValue(model, out var tested)
+            var capabilities = !string.IsNullOrWhiteSpace(model) && profile.ModelCapabilities.TryGetValue(model, out var tested)
                 ? tested : profile.Capabilities with { StructuredOutputTier = StructuredOutputTier.Untested, TestedModelId = null, TestedAtUtc = null };
             var settings = current with { BaseUrl = profile.BaseUrl, ModelId = model, Capabilities = capabilities };
             var result = await provider.TestConnectionAsync(settings, credential, cancellationToken);
@@ -146,12 +148,15 @@ public sealed class NarratorApplication(
             {
                 var updated = current with
                 {
-                    Connections = current.Connections.Select(connection => connection.Id == connectionId
-                        ? connection with { ModelCapabilities = connection.ModelCapabilities
-                            .Concat(new[] { new KeyValuePair<string, ConnectionCapabilities>(model, result.Capabilities) })
-                            .GroupBy(pair => pair.Key, StringComparer.Ordinal)
-                            .ToDictionary(group => group.Key, group => group.Last().Value, StringComparer.Ordinal) }
-                        : connection).ToArray()
+                    Connections = current.Connections.Select(connection => connection.Id != connectionId
+                        ? connection
+                        : string.IsNullOrWhiteSpace(model)
+                            ? connection with { Capabilities = result.Capabilities }
+                            : connection with { ModelCapabilities = connection.ModelCapabilities
+                                .Concat(new[] { new KeyValuePair<string, ConnectionCapabilities>(model, result.Capabilities) })
+                                .GroupBy(pair => pair.Key, StringComparer.Ordinal)
+                                .ToDictionary(group => group.Key, group => group.Last().Value, StringComparer.Ordinal) })
+                        .ToArray()
                 };
                 await settingsStore.SaveAsync(updated, cancellationToken);
             }

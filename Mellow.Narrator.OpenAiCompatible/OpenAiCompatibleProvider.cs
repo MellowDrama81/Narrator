@@ -62,9 +62,35 @@ public sealed class OpenAiCompatibleProvider(
 
     public async Task<ConnectionTestResult> TestConnectionAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default)
     {
+        RequireBaseUrl(settings);
+
+        // Model discovery only needs a base URL and credential, so it doubles as the connectivity/auth
+        // check for a connection that doesn't have a model assigned yet (models are chosen per call
+        // route, not per connection). When a model is assigned, its result is folded into the fuller
+        // structured-output probe below rather than replacing it.
+        IReadOnlyList<string> models = [];
+        var supportsModelDiscovery = settings.Capabilities.SupportsModelDiscovery;
+        Exception? discoveryError = null;
         try
         {
-            RequireConnection(settings);
+            models = await DiscoverModelsAsync(settings, credential, cancellationToken);
+            supportsModelDiscovery = true;
+        }
+        catch (Exception ex) when (ex is ProviderException or JsonException or HttpRequestException or TaskCanceledException)
+        {
+            discoveryError = ex;
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.ModelId))
+        {
+            var capabilities = new ConnectionCapabilities(supportsModelDiscovery, StructuredOutputTier.Untested, null, timeProvider.GetUtcNow());
+            return discoveryError is null
+                ? new(true, models, capabilities, null)
+                : new(false, [], capabilities, SafeMessage(discoveryError));
+        }
+
+        try
+        {
             var tier = StructuredOutputTier.Unsupported;
             ProviderRequestContract? supportedContract = null;
             foreach (var contract in RequestContractCandidates())
@@ -88,7 +114,7 @@ public sealed class OpenAiCompatibleProvider(
                 if (supportedContract is not null) break;
             }
             var capabilities = new ConnectionCapabilities(
-                settings.Capabilities.SupportsModelDiscovery,
+                supportsModelDiscovery,
                 tier,
                 settings.ModelId,
                 timeProvider.GetUtcNow())
@@ -97,12 +123,12 @@ public sealed class OpenAiCompatibleProvider(
                 InstructionMessageRole = supportedContract?.InstructionMessageRole ?? InstructionMessageRole.Developer
             };
             return tier == StructuredOutputTier.Unsupported
-                ? new(false, [], capabilities, "The model could not produce a valid structured response.")
-                : new(true, [], capabilities, null);
+                ? new(false, models, capabilities, "The model could not produce a valid structured response.")
+                : new(true, models, capabilities, null);
         }
         catch (Exception ex) when (ex is ProviderException or JsonException or HttpRequestException or TaskCanceledException)
         {
-            return new(false, [], new(false, StructuredOutputTier.Unsupported, settings.ModelId, timeProvider.GetUtcNow()), SafeMessage(ex));
+            return new(false, models, new(supportsModelDiscovery, StructuredOutputTier.Unsupported, settings.ModelId, timeProvider.GetUtcNow()), SafeMessage(ex));
         }
     }
 

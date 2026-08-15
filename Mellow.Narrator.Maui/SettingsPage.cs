@@ -280,14 +280,14 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         {
             _request = new();
             var settings = await BuildAsync();
-            if (string.IsNullOrWhiteSpace(settings.ModelId))
-                throw new NarratorException("Load models and select one, or enter a model ID before testing the connection.");
             if (!await TrySaveSettingsAsync(settings, _request.Token)) return;
             _pendingOperation = new(Guid.NewGuid(), PendingOperationType.TestApiConnection, null, null, DateTimeOffset.UtcNow);
             await _tabs.SaveWorkspaceNowAsync();
             var result = await _app.TestConnectionAsync(_request.Token);
             _status.Text = result.Success
-                ? $"Connected. Structured output: {result.Capabilities.StructuredOutputTier}."
+                ? string.IsNullOrWhiteSpace(settings.ModelId)
+                    ? $"Connected. {result.Models.Count} model(s) discovered."
+                    : $"Connected. Structured output: {result.Capabilities.StructuredOutputTier}."
                 : result.Error;
         }
         catch (OperationCanceledException) { _status.Text = "Connection test cancelled."; }
