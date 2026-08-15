@@ -100,6 +100,21 @@ public enum InstructionMessageRole { Developer, System }
 public enum TurnPipelineMode { OneCall, TwoCalls, ThreeCalls, FourCalls, FiveCalls, SevenCalls, SevenCallsParallel, EightCalls }
 public enum GenerationCall { StoryDefinition, Turn, Adjudication, ScenePlan, PlanCritic, Narration, StoryBibleAnalysis, PlannedEventAnalysis, ConditionSummaryAnalysis, StateExtraction, ProseRevision }
 
+public static class TurnPipelineCalls
+{
+    public static IReadOnlyList<GenerationCall> For(TurnPipelineMode pipeline) => pipeline switch
+    {
+        TurnPipelineMode.OneCall => [GenerationCall.StoryDefinition, GenerationCall.Turn],
+        TurnPipelineMode.TwoCalls => [GenerationCall.StoryDefinition, GenerationCall.Narration, GenerationCall.StateExtraction],
+        TurnPipelineMode.ThreeCalls => [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.Narration, GenerationCall.StateExtraction],
+        TurnPipelineMode.FourCalls => [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.Narration, GenerationCall.StateExtraction],
+        TurnPipelineMode.FiveCalls => [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.PlanCritic, GenerationCall.Narration, GenerationCall.StateExtraction],
+        TurnPipelineMode.SevenCalls or TurnPipelineMode.SevenCallsParallel => [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.Narration, GenerationCall.StoryBibleAnalysis, GenerationCall.PlannedEventAnalysis, GenerationCall.ConditionSummaryAnalysis, GenerationCall.StateExtraction],
+        TurnPipelineMode.EightCalls => [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.Narration, GenerationCall.StoryBibleAnalysis, GenerationCall.PlannedEventAnalysis, GenerationCall.ConditionSummaryAnalysis, GenerationCall.StateExtraction, GenerationCall.ProseRevision],
+        _ => throw new ArgumentOutOfRangeException(nameof(pipeline), pipeline, "Unknown turn pipeline mode.")
+    };
+}
+
 // A connection is intentionally credentials-free. MAUI stores each profile's API key in platform
 // secure storage; the web app stores it in its local IndexedDB profile record.
 public sealed record ApiConnectionProfile(Guid Id, string Name, Uri? BaseUrl)

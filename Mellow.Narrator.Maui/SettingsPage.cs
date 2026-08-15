@@ -128,7 +128,7 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
             FontSize = 12
         });
         content.Children.Add(Ui.SecondaryButton("Configure Pipeline Calls", async (_, _) =>
-            await Navigation.PushAsync(new PipelineSettingsPage(_app, PipelineCalls(SelectedPipeline())))));
+            await Navigation.PushAsync(new PipelineSettingsPage(_app, TurnPipelineCalls.For(SelectedPipeline())))));
         content.Children.Add(Ui.SecondaryButton("Manage API Connections", async (_, _) =>
             await Navigation.PushAsync(new ConnectionProfilesPage(_app))));
 
@@ -214,17 +214,6 @@ public sealed class SettingsPage : ContentPage, IPendingOperationPage, IInFlight
         0 => TurnPipelineMode.OneCall, 1 => TurnPipelineMode.TwoCalls, 2 => TurnPipelineMode.ThreeCalls,
         3 => TurnPipelineMode.FourCalls, 4 => TurnPipelineMode.FiveCalls, 5 => TurnPipelineMode.SevenCalls,
         6 => TurnPipelineMode.SevenCallsParallel, 7 => TurnPipelineMode.EightCalls, _ => TurnPipelineMode.FourCalls
-    };
-
-    private static IReadOnlyList<GenerationCall> PipelineCalls(TurnPipelineMode pipeline) => pipeline switch
-    {
-        TurnPipelineMode.OneCall => [GenerationCall.StoryDefinition, GenerationCall.Turn],
-        TurnPipelineMode.TwoCalls => [GenerationCall.StoryDefinition, GenerationCall.Narration, GenerationCall.StateExtraction],
-        TurnPipelineMode.ThreeCalls => [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.Narration, GenerationCall.StateExtraction],
-        TurnPipelineMode.FourCalls => [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.Narration, GenerationCall.StateExtraction],
-        TurnPipelineMode.FiveCalls => [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.PlanCritic, GenerationCall.Narration, GenerationCall.StateExtraction],
-        TurnPipelineMode.EightCalls => [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.Narration, GenerationCall.StoryBibleAnalysis, GenerationCall.PlannedEventAnalysis, GenerationCall.ConditionSummaryAnalysis, GenerationCall.StateExtraction, GenerationCall.ProseRevision],
-        _ => [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.Narration, GenerationCall.StoryBibleAnalysis, GenerationCall.PlannedEventAnalysis, GenerationCall.ConditionSummaryAnalysis, GenerationCall.StateExtraction]
     };
 
     PendingOperationState? IPendingOperationPage.PendingOperation => _pendingOperation;

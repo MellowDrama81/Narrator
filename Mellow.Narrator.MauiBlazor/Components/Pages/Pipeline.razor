@@ -2,13 +2,45 @@
 @inject NarratorWorkspace Workspace
 
 <header><p class="eyebrow">Generation</p><h1>Pipeline calls</h1><p class="lead">Each step can select an independent connection, model, timeout, output limit, and sampling parameters.</p></header>
-@if (_settings is null) { <p>Loading pipeline…</p> } else { @foreach (var call in _calls) { var edit = _routes[call]; <section class="editor-card"><h2>@Display(call)</h2><label>Connection<select @bind="edit.ConnectionId">@foreach (var connection in _settings.Connections) { <option value="@connection.Id">@connection.Name</option> }</select></label><label>Model ID<input @bind="edit.ModelId" list="@($"models-{call}")" /></label><datalist id="@($"models-{call}")">@foreach (var model in Models(edit.ConnectionId)) { <option value="@model" /> }</datalist><button class="button" @onclick="() => LoadModels(edit)">Load available models</button><label>Timeout seconds<input type="number" @bind="edit.Timeout" /></label><label>Maximum output tokens<input type="number" @bind="edit.MaxTokens" /></label><label>Temperature (blank = provider default)<input type="number" step="0.1" @bind="edit.Temperature" /></label><label>Top-p (blank = provider default)<input type="number" step="0.1" @bind="edit.TopP" /></label><label>Reasoning effort<input @bind="edit.ReasoningEffort" /></label><label>Automatic retries<input type="number" @bind="edit.Retries" /></label><label>Initial retry delay seconds<input type="number" step="0.25" @bind="edit.InitialDelay" /></label><label>Maximum retry delay seconds<input type="number" step="0.25" @bind="edit.MaxDelay" /></label><label>Maximum Retry-After seconds<input type="number" step="1" @bind="edit.MaxRetryAfter" /></label><p class="hint">@edit.Status</p></section> }<button class="button primary" @onclick="Save">Save all pipeline calls and test untested models</button>@if (_message is not null) { <p class="status">@_message</p> } }
+@if (_settings is null)
+{
+    <p>Loading pipeline…</p>
+}
+else
+{
+    @foreach (var call in _calls)
+    {
+        var edit = _routes[call];
+        <section class="editor-card">
+            <h2>@Display(call)</h2>
+            <label>Connection<select @bind="edit.ConnectionId">@foreach (var connection in _settings.Connections) { <option value="@connection.Id">@connection.Name</option> }</select></label>
+            <label>Model ID<input @bind="edit.ModelId" list="@($"models-{call}")" /></label>
+            <datalist id="@($"models-{call}")">@foreach (var model in Models(edit.ConnectionId)) { <option value="@model" /> }</datalist>
+            <button class="button" @onclick="() => LoadModels(edit)">Load available models</button>
+            <p class="hint">@edit.Status</p>
+            <details>
+                <summary>Advanced request behavior</summary>
+                <label>Timeout seconds<input type="number" @bind="edit.Timeout" /></label>
+                <label>Maximum output tokens<input type="number" @bind="edit.MaxTokens" /></label>
+                <label>Temperature (blank = provider default)<input type="number" step="0.1" @bind="edit.Temperature" /></label>
+                <label>Top-p (blank = provider default)<input type="number" step="0.1" @bind="edit.TopP" /></label>
+                <label>Reasoning effort<input @bind="edit.ReasoningEffort" /></label>
+                <label>Automatic retries<input type="number" @bind="edit.Retries" /></label>
+                <label>Initial retry delay seconds<input type="number" step="0.25" @bind="edit.InitialDelay" /></label>
+                <label>Maximum retry delay seconds<input type="number" step="0.25" @bind="edit.MaxDelay" /></label>
+                <label>Maximum Retry-After seconds<input type="number" step="1" @bind="edit.MaxRetryAfter" /></label>
+            </details>
+        </section>
+    }
+    <button class="button primary" @onclick="Save">Save all pipeline calls and test untested models</button>
+    @if (_message is not null) { <p class="status">@_message</p> }
+}
 @code {
-    private ApiConnectionSettings? _settings; private readonly GenerationCall[] _calls = Enum.GetValues<GenerationCall>(); private readonly Dictionary<GenerationCall, RouteEdit> _routes = []; private readonly Dictionary<Guid, IReadOnlyList<string>> _models = []; private string? _message;
-    protected override async Task OnInitializedAsync() { _settings = await Workspace.SettingsAsync(); foreach (var call in _calls) { _settings.GenerationCallRoutes.TryGetValue(call, out var route); _routes[call] = new(route, _settings); } }
+    private ApiConnectionSettings? _settings; private IReadOnlyList<GenerationCall> _calls = []; private readonly Dictionary<GenerationCall, RouteEdit> _routes = []; private readonly Dictionary<Guid, IReadOnlyList<string>> _models = []; private string? _message;
+    protected override async Task OnInitializedAsync() { _settings = await Workspace.SettingsAsync(); _calls = TurnPipelineCalls.For(_settings.TurnPipeline); foreach (var call in _calls) { _settings.GenerationCallRoutes.TryGetValue(call, out var route); _routes[call] = new(route, _settings); } }
     private IReadOnlyList<string> Models(Guid id) => _models.TryGetValue(id, out var values) ? values : [];
     private async Task LoadModels(RouteEdit edit) { try { if (!_models.ContainsKey(edit.ConnectionId)) _models[edit.ConnectionId] = await Workspace.DiscoverModelsAsync(edit.ConnectionId); edit.Status = $"Loaded {Models(edit.ConnectionId).Count} models."; } catch (Exception ex) { edit.Status = ex.Message; } }
-    private async Task Save() { if (_settings is null) return; try { var routes = _routes.ToDictionary(x => x.Key, x => x.Value.ToRoute()); await Workspace.SaveSettingsAsync(_settings with { GenerationCallRoutes = routes }); var tests = routes.Values.Where(x => x.ConnectionId is not null && !string.IsNullOrWhiteSpace(x.ModelId)).Select(x => (x.ConnectionId!.Value, x.ModelId!)).Distinct().ToArray(); foreach (var (connectionId, modelId) in tests) { var result = await Workspace.TestModelAsync(connectionId, modelId); foreach (var edit in _routes.Values.Where(x => x.ConnectionId == connectionId && x.ModelId == modelId)) edit.Status = result.Success ? $"Tested: {result.Capabilities.StructuredOutputTier}." : result.Error ?? "Model test failed."; } _settings = await Workspace.SettingsAsync(); _message = "Pipeline calls saved; selected models were tested."; } catch (Exception ex) { _message = ex.Message; } }
+    private async Task Save() { if (_settings is null) return; try { var routes = _settings.GenerationCallRoutes.ToDictionary(x => x.Key, x => x.Value); foreach (var (call, edit) in _routes) routes[call] = edit.ToRoute(); await Workspace.SaveSettingsAsync(_settings with { GenerationCallRoutes = routes }); var tests = _calls.Select(call => routes[call]).Where(x => x.ConnectionId is not null && !string.IsNullOrWhiteSpace(x.ModelId)).Select(x => (x.ConnectionId!.Value, x.ModelId!)).Distinct().ToArray(); foreach (var (connectionId, modelId) in tests) { var result = await Workspace.TestModelAsync(connectionId, modelId); foreach (var edit in _routes.Values.Where(x => x.ConnectionId == connectionId && x.ModelId == modelId)) edit.Status = result.Success ? $"Tested: {result.Capabilities.StructuredOutputTier}." : result.Error ?? "Model test failed."; } _settings = await Workspace.SettingsAsync(); _message = "Pipeline calls saved; selected models were tested."; } catch (Exception ex) { _message = ex.Message; } }
     private static string Display(GenerationCall value) => string.Concat(value.ToString().Select((c, i) => i > 0 && char.IsUpper(c) ? " " + c : c.ToString()));
     private sealed class RouteEdit { public RouteEdit(GenerationCallRoute? route, ApiConnectionSettings settings) { ConnectionId=route?.ConnectionId ?? settings.Connections.FirstOrDefault()?.Id ?? Guid.Empty; ModelId=route?.ModelId ?? settings.ModelId ?? ""; Timeout=(int)(route?.RequestTimeout ?? settings.RequestTimeout).TotalSeconds; MaxTokens=route?.MaxOutputTokens ?? settings.MaxOutputTokens; Temperature=(route?.Parameters?.Temperature ?? settings.Parameters.Temperature)?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? ""; TopP=(route?.Parameters?.TopP ?? settings.Parameters.TopP)?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? ""; ReasoningEffort=route?.Parameters?.ReasoningEffort ?? settings.Parameters.ReasoningEffort ?? ""; var retry=route?.Retry??settings.Retry; Retries=retry.MaxAutomaticRetries;InitialDelay=retry.InitialDelay.TotalSeconds;MaxDelay=retry.MaxDelay.TotalSeconds;MaxRetryAfter=retry.MaxRetryAfter.TotalSeconds; } public Guid ConnectionId { get; set; } public string ModelId { get; set; } public int Timeout { get; set; } public int MaxTokens { get; set; } public string Temperature { get; set; } public string TopP { get; set; } public string ReasoningEffort { get; set; } public int Retries { get; set; } public double InitialDelay { get; set; } public double MaxDelay { get; set; } public double MaxRetryAfter { get; set; } public string Status { get; set; } = ""; public GenerationCallRoute ToRoute() => new(ConnectionId, string.IsNullOrWhiteSpace(ModelId) ? null : ModelId.Trim()) { RequestTimeout=TimeSpan.FromSeconds(Timeout), MaxOutputTokens=MaxTokens, Parameters=new(Parse(Temperature), Parse(TopP), string.IsNullOrWhiteSpace(ReasoningEffort) ? null : ReasoningEffort.Trim()), Retry=new(Retries,TimeSpan.FromSeconds(InitialDelay),TimeSpan.FromSeconds(MaxDelay),TimeSpan.FromSeconds(MaxRetryAfter)) }; private static double? Parse(string value) => string.IsNullOrWhiteSpace(value) ? null : double.Parse(value, System.Globalization.CultureInfo.InvariantCulture); }
 }

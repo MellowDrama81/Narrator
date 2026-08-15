@@ -301,7 +301,8 @@ public sealed class OpenAiCompatibleProvider(
         var messages = BuildStoryMessages(settings.ContentLimits, settings.StoryGeneration, context, opening);
         var revised = await GenerateNarrationDraftAsync(settings, credential, messages,
             Templates.ProseRevisionInstruction.Replace("{turn}", "") +
-            JsonSerializer.Serialize(new { extracted.Narration, extracted.SuggestedActions, extracted.StorySummary }, Json), cancellationToken);
+            JsonSerializer.Serialize(new { extracted.Narration, extracted.SuggestedActions, extracted.StorySummary }, Json), cancellationToken,
+            GenerationCall.ProseRevision);
         return extracted with { Narration = revised.Narration, SuggestedActions = revised.SuggestedActions };
     }
 

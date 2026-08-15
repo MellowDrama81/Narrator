@@ -4,6 +4,23 @@ namespace Mellow.Narrator.Tests;
 
 public sealed class SettingsTests
 {
+    public static TheoryData<TurnPipelineMode, GenerationCall[]> PipelineCalls => new()
+    {
+        { TurnPipelineMode.OneCall, [GenerationCall.StoryDefinition, GenerationCall.Turn] },
+        { TurnPipelineMode.TwoCalls, [GenerationCall.StoryDefinition, GenerationCall.Narration, GenerationCall.StateExtraction] },
+        { TurnPipelineMode.ThreeCalls, [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.Narration, GenerationCall.StateExtraction] },
+        { TurnPipelineMode.FourCalls, [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.Narration, GenerationCall.StateExtraction] },
+        { TurnPipelineMode.FiveCalls, [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.PlanCritic, GenerationCall.Narration, GenerationCall.StateExtraction] },
+        { TurnPipelineMode.SevenCalls, [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.Narration, GenerationCall.StoryBibleAnalysis, GenerationCall.PlannedEventAnalysis, GenerationCall.ConditionSummaryAnalysis, GenerationCall.StateExtraction] },
+        { TurnPipelineMode.SevenCallsParallel, [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.Narration, GenerationCall.StoryBibleAnalysis, GenerationCall.PlannedEventAnalysis, GenerationCall.ConditionSummaryAnalysis, GenerationCall.StateExtraction] },
+        { TurnPipelineMode.EightCalls, [GenerationCall.StoryDefinition, GenerationCall.Adjudication, GenerationCall.ScenePlan, GenerationCall.Narration, GenerationCall.StoryBibleAnalysis, GenerationCall.PlannedEventAnalysis, GenerationCall.ConditionSummaryAnalysis, GenerationCall.StateExtraction, GenerationCall.ProseRevision] }
+    };
+
+    [Theory]
+    [MemberData(nameof(PipelineCalls))]
+    public void TurnPipelineCalls_ListsOnlyCallsUsedByMode(TurnPipelineMode pipeline, GenerationCall[] expected) =>
+        Assert.Equal(expected, TurnPipelineCalls.For(pipeline));
+
     [Fact]
     public void Defaults_AreValid()
     {

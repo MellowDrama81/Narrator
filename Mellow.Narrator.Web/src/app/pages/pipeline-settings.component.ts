@@ -12,7 +12,7 @@ import { RouterLink } from '@angular/router';
 import { DbService } from '../core/db.service';
 import { defaultSettings } from '../core/defaults';
 import { LlmService } from '../core/llm.service';
-import { AppSettings, GenerationCall, GenerationCallRoute } from '../core/models';
+import { AppSettings, GenerationCall, GenerationCallRoute, TurnPipelineMode } from '../core/models';
 import { validateSettings } from '../core/settings-validator';
 
 @Component({
@@ -45,10 +45,9 @@ import { validateSettings } from '../core/settings-validator';
 })
 export class PipelineSettingsComponent implements OnInit {
   settings: AppSettings = defaultSettings();
-  readonly allCalls: GenerationCall[] = ['storyDefinition', 'turn', 'adjudication', 'scenePlan', 'planCritic', 'narration', 'storyBibleAnalysis', 'plannedEventAnalysis', 'conditionSummaryAnalysis', 'stateExtraction', 'proseRevision'];
   constructor(private readonly db: DbService, private readonly llm: LlmService, private readonly snack: MatSnackBar, private readonly changeDetector: ChangeDetectorRef) {}
   async ngOnInit(): Promise<void> { this.settings = await this.db.settings(); this.changeDetector.markForCheck(); }
-  get selectedCalls(): GenerationCall[] { return this.allCalls.filter(call => call === 'storyDefinition' || this.callsForPipeline().includes(call)); }
+  get selectedCalls(): GenerationCall[] { return this.callsForPipeline(this.settings.turnPipeline); }
   route(call: GenerationCall): GenerationCallRoute {
     return this.settings.generationCallRoutes[call] ??= {
       connectionId: this.settings.connections[0]?.id ?? '', modelId: this.settings.modelId,
@@ -77,14 +76,16 @@ export class PipelineSettingsComponent implements OnInit {
     }
     await this.db.saveSettings(this.settings); this.snack.open('Pipeline calls saved and selected models tested.', 'Dismiss', { duration: 2500 });
   }
-  private callsForPipeline(): GenerationCall[] {
-    const calls: GenerationCall[] = ['turn'];
-    if (!['oneCall'].includes(this.settings.turnPipeline)) calls.push('stateExtraction');
-    if (!['oneCall', 'twoCalls'].includes(this.settings.turnPipeline)) calls.push('adjudication');
-    if (!['oneCall', 'twoCalls', 'threeCalls'].includes(this.settings.turnPipeline)) calls.push('scenePlan', 'narration');
-    if (['fiveCalls', 'sevenCalls', 'sevenCallsParallel', 'eightCalls'].includes(this.settings.turnPipeline)) calls.push('planCritic');
-    if (['sevenCalls', 'sevenCallsParallel', 'eightCalls'].includes(this.settings.turnPipeline)) calls.push('storyBibleAnalysis', 'plannedEventAnalysis', 'conditionSummaryAnalysis');
-    if (this.settings.turnPipeline === 'eightCalls') calls.push('proseRevision');
-    return calls;
+  private callsForPipeline(pipeline: TurnPipelineMode): GenerationCall[] {
+    switch (pipeline) {
+      case 'oneCall': return ['storyDefinition', 'turn'];
+      case 'twoCalls': return ['storyDefinition', 'narration', 'stateExtraction'];
+      case 'threeCalls': return ['storyDefinition', 'adjudication', 'narration', 'stateExtraction'];
+      case 'fourCalls': return ['storyDefinition', 'adjudication', 'scenePlan', 'narration', 'stateExtraction'];
+      case 'fiveCalls': return ['storyDefinition', 'adjudication', 'scenePlan', 'planCritic', 'narration', 'stateExtraction'];
+      case 'sevenCalls':
+      case 'sevenCallsParallel': return ['storyDefinition', 'adjudication', 'scenePlan', 'narration', 'storyBibleAnalysis', 'plannedEventAnalysis', 'conditionSummaryAnalysis', 'stateExtraction'];
+      case 'eightCalls': return ['storyDefinition', 'adjudication', 'scenePlan', 'narration', 'storyBibleAnalysis', 'plannedEventAnalysis', 'conditionSummaryAnalysis', 'stateExtraction', 'proseRevision'];
+    }
   }
 }

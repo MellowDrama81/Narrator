@@ -230,7 +230,9 @@ public sealed class NarratorApplication(
         CancellationToken cancellationToken = default)
     {
         if (targetId == Guid.Empty) throw new ArgumentException("Target ID cannot be empty.", nameof(targetId));
-        var (settings, credential) = await ConnectionAsync(cancellationToken);
+        var (settings, credential) = await GenerationConnectionAsync(
+            _ => GenerationCall.StoryDefinition,
+            cancellationToken);
         ValidateDraft(draft, settings.ContentLimits);
         _logger.LogInformation(
             "Generating Story Definition {StoryDefinitionId}; overwrite: {Overwrite}; model: {ModelId}.",
@@ -562,7 +564,7 @@ public sealed class NarratorApplication(
         using var requestLease = storyRequests.Enter(targetStateId);
         if (string.IsNullOrWhiteSpace(draft.Definition.StoryPrompt))
             throw new NarratorException("Enter a Story Prompt before starting the story.");
-        var (settings, credential) = await ConnectionAsync(cancellationToken);
+        var (settings, credential) = await GenerationConnectionAsync(FinalTurnCall, cancellationToken);
         _logger.LogInformation(
             "Generating opening scene for Story State {StoryStateId} with model {ModelId}.",
             targetStateId,
@@ -668,7 +670,7 @@ public sealed class NarratorApplication(
     {
         using var requestLease = storyRequests.Enter(stateId);
         var state = await states.GetAsync(stateId, cancellationToken) ?? throw new NarratorException("Story State not found.");
-        var (settings, credential) = await ConnectionAsync(cancellationToken);
+        var (settings, credential) = await GenerationConnectionAsync(FinalTurnCall, cancellationToken);
         if (string.IsNullOrWhiteSpace(action)) throw new NarratorException("Enter an action.");
         if (action.Length > settings.ContentLimits.MaxPlayerActionCharacters) throw new NarratorException("The action exceeds the configured limit.");
         if (!StoryBibleProcessor.IsWithinLimits(state.CurrentStoryBible, settings.StoryGeneration))
@@ -744,6 +746,54 @@ public sealed class NarratorApplication(
             throw new NarratorException("Load models and select one, or enter a model ID first.");
         return (settings, credential);
     }
+
+    private Task<(ApiConnectionSettings Settings, string? Credential)> GenerationConnectionAsync(
+        Func<ApiConnectionSettings, GenerationCall> selectCall,
+        CancellationToken cancellationToken) =>
+        connectionCoordinator.RunExclusiveAsync(async () =>
+        {
+            if (connectionCoordinator.RequiresCredentialReentry)
+                throw new NarratorException("Re-enter and save the API credential before making another request.");
+            var settings = await settingsStore.LoadAsync(cancellationToken);
+            var call = selectCall(settings);
+            if (!settings.GenerationCallRoutes.TryGetValue(call, out var route) || route.ConnectionId is not { } connectionId)
+            {
+                if (settings.BaseUrl is null)
+                    throw new NarratorException($"Select a connection for {CallName(call)} first.");
+                if (string.IsNullOrWhiteSpace(settings.ModelId))
+                    throw new NarratorException($"Select a model for {CallName(call)} first.");
+                return (settings, await secureStorage.GetAsync(SecureStorageKeys.ApiCredential, cancellationToken));
+            }
+
+            var connection = settings.Connections.FirstOrDefault(candidate => candidate.Id == connectionId)
+                ?? throw new NarratorException($"The connection selected for {CallName(call)} no longer exists.");
+            if (connection.BaseUrl is null)
+                throw new NarratorException($"Configure an API base URL for the {connection.Name} connection first.");
+            var modelId = string.IsNullOrWhiteSpace(route.ModelId) ? settings.ModelId : route.ModelId;
+            if (string.IsNullOrWhiteSpace(modelId))
+                throw new NarratorException($"Select a model for {CallName(call)} first.");
+            var credential = await secureStorage.GetAsync(SecureStorageKeys.ApiCredentialForConnection(connection.Id), cancellationToken)
+                ?? await secureStorage.GetAsync(SecureStorageKeys.ApiCredential, cancellationToken);
+            var capabilities = connection.ModelCapabilities.TryGetValue(modelId, out var tested)
+                ? tested
+                : connection.Capabilities with { StructuredOutputTier = StructuredOutputTier.Untested, TestedModelId = null, TestedAtUtc = null };
+            return (settings with
+            {
+                BaseUrl = connection.BaseUrl,
+                ModelId = modelId,
+                RequestTimeout = route.RequestTimeout ?? settings.RequestTimeout,
+                MaxOutputTokens = route.MaxOutputTokens ?? settings.MaxOutputTokens,
+                Parameters = route.Parameters ?? settings.Parameters,
+                Retry = route.Retry ?? settings.Retry,
+                Capabilities = capabilities
+            }, credential);
+        }, cancellationToken);
+
+    private static GenerationCall FinalTurnCall(ApiConnectionSettings settings) =>
+        TurnPipelineCalls.For(settings.TurnPipeline)[^1];
+
+    private static string CallName(GenerationCall call) =>
+        string.Concat(call.ToString().Select((character, index) => index > 0 && char.IsUpper(character) ? " " + character : character.ToString()));
 
     private async Task<(ApiConnectionSettings Settings, string? Credential)> DiscoveryConnectionAsync(CancellationToken cancellationToken)
     {

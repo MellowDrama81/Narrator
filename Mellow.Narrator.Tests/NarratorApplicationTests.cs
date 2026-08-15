@@ -324,6 +324,36 @@ public sealed class NarratorApplicationTests
     }
 
     [Fact]
+    public async Task StartStory_UsesConfiguredCallRouteWithoutLegacyConnectionSettings()
+    {
+        var connectionId = Guid.NewGuid();
+        var connection = new ApiConnectionProfile(connectionId, "Primary", new Uri("https://route.example.test/v1"));
+        var settings = NarratorDefaults.Create() with
+        {
+            TurnPipeline = TurnPipelineMode.OneCall,
+            Connections = [connection],
+            GenerationCallRoutes = new Dictionary<GenerationCall, GenerationCallRoute>
+            {
+                [GenerationCall.StoryDefinition] = new(connectionId, "definition-model"),
+                [GenerationCall.Turn] = new(connectionId, "turn-model")
+            }
+        };
+        var provider = new FakeProvider
+        {
+            StoryResponse = new("Opening", ["Continue"], [], [], [], [], [], [], [], [], "Summary", "response", 10, 20)
+        };
+        var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider, settings);
+        var draft = new StartStoryDraft(Guid.NewGuid(), new(
+            "Story", "Prompt", "", StoryBible.Empty, PlannedEvents.Empty, StoryConditions.Empty, StoryConditions.Empty));
+
+        var result = await app.StartStoryAsync(draft, Guid.NewGuid());
+
+        Assert.Equal(new Uri("https://route.example.test/v1"), provider.OpeningSettings!.BaseUrl);
+        Assert.Equal("turn-model", provider.OpeningSettings.ModelId);
+        Assert.Equal("turn-model", result.Opening.Generation.ModelId);
+    }
+
+    [Fact]
     public async Task PlayTurn_AccumulatesRevealedAndMetConditionIdsCumulativelyWhileEachTurnKeepsOnlyItsOwnDelta()
     {
         var condition = new StoryCondition(Guid.NewGuid(), "Defeat the dragon.", false);
@@ -1367,6 +1397,7 @@ public sealed class NarratorApplicationTests
         public int DefinitionCalls { get; private set; }
         public int OpeningCalls { get; private set; }
         public GenerationContext? LastContext { get; private set; }
+        public ApiConnectionSettings? OpeningSettings { get; private set; }
         public ApiConnectionSettings? DiscoverySettings { get; private set; }
         public Task<IReadOnlyList<string>> DiscoverModelsAsync(ApiConnectionSettings settings, string? credential, CancellationToken cancellationToken = default)
         {
@@ -1384,6 +1415,7 @@ public sealed class NarratorApplicationTests
         public Task<StoryGenerationResponse> GenerateOpeningAsync(ApiConnectionSettings settings, string? credential, GenerationContext context, CancellationToken cancellationToken = default)
         {
             OpeningCalls++;
+            OpeningSettings = settings;
             LastContext = context;
             return Task.FromResult(StoryResponseFactory?.Invoke(context) ?? StoryResponse);
         }
