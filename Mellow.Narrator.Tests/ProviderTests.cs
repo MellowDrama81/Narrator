@@ -1518,7 +1518,10 @@ public sealed class ProviderTests
                 3 => """{"narration":"The door gives beneath your hand.","suggestedActions":["Descend the stairs","Listen at the threshold"]}""",
                 7 => """{"turnNumber":1,"acknowledgedPlayerAction":"Open the door","narration":"Placeholder","suggestedActions":["Placeholder"],"relevantStoryBibleEntryIds":[],"storyBibleUpdates":[],"relevantPlannedEventIds":[],"plannedEventUpdates":[],"revealedVictoryConditionIds":[],"metVictoryConditionIds":[],"revealedLossConditionIds":[],"metLossConditionIds":[],"storySummary":"The door has opened."}""",
                 8 => """{"narration":"The door yields, and cold air rises from the stairwell.","suggestedActions":["Descend the stairs","Listen at the threshold"]}""",
-                _ => """{"result":"Internal analysis."}"""
+                4 => """{"adds":[],"replacements":[],"removals":[]}""",
+                5 => """{"relevantEventIds":[],"updates":[]}""",
+                6 => """{"revealedVictoryIds":[],"metVictoryIds":[],"revealedLossIds":[],"metLossIds":[],"summary":"The door is open."}""",
+                _ => throw new InvalidOperationException("The pipeline made an unexpected extra request.")
             };
             return Task.FromResult(Response(content));
         });

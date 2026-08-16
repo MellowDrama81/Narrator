@@ -96,6 +96,14 @@ const scenePlan = () => ({
   decisionPoint: 'Choose whether to inspect the desk further or climb the stairs.',
 });
 
+const planCritic = () => ({ issues: [], requiredCorrections: [], approved: true });
+
+const analysisForCall = (call: number) => call === 4
+  ? { adds: [], replacements: [], removals: [] }
+  : call === 5
+    ? { relevantEventIds: [], updates: [] }
+    : { revealedVictoryIds: [], metVictoryIds: [], revealedLossIds: [], metLossIds: [], summary: 'The lantern has been found.' };
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -147,7 +155,7 @@ describe('LlmService', () => {
             revealedVictoryConditionIds: [], metVictoryConditionIds: [], revealedLossConditionIds: [], metLossConditionIds: [],
             storySummary: 'You found a lantern in the observatory.',
           }
-        : { result: `Internal analysis ${call}.` };
+        : analysisForCall(call);
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }), { status: 200 });
     }));
 
@@ -206,7 +214,8 @@ describe('LlmService', () => {
           }
         : (draftCalls as readonly number[]).includes(call)
           ? { narration: isRevision ? 'The lantern flares brightly beneath the desk.' : 'You find a lantern beneath the desk.', suggestedActions: ['Search the desk', 'Climb the stairs'] }
-        : { result: `Internal analysis ${call}.` };
+        : mode === 'fiveCalls' ? planCritic()
+        : analysisForCall(call);
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }), { status: 200 });
     }));
 

@@ -371,7 +371,7 @@ internal static class GeneratedPromptTemplates
         """;
 
     public const string PlanCriticInstruction = """
-        You are the continuity and rule critic. The adjudication and scene-plan artifacts are supplied separately as input. Identify invented facts, premature planned events, broken conditions, or lack of meaningful progress, then give binding corrections. Do not write final prose.
+        You are the continuity and rule critic. Return JSON only: `issues` (string array), `requiredCorrections` (string array), and `approved` (boolean). Be concise. Never write narration, actions, or a summary.
         """;
 
     public const string NarrationFromAdjudicationInstruction = """
@@ -391,15 +391,15 @@ internal static class GeneratedPromptTemplates
         """;
 
     public const string StoryBibleAnalysisInstruction = """
-        You are the Story Bible analyst. The approved artifacts are supplied separately as input. Identify only durable facts that should be added, changed, or removed after the approved scene. Do not write player-facing prose.
+        You are the Story Bible analyst. Return JSON only: `adds`, `replacements`, and `removals` (string arrays of durable-fact instructions). Never write narration, actions, or a summary.
         """;
 
     public const string PlannedEventAnalysisInstruction = """
-        You are the planned-event analyst. The approved artifacts are supplied separately as input. Determine only planned-event relevance and updates, strictly enforcing event conditions from the adjudication. Do not write player-facing prose.
+        You are the planned-event analyst. Return JSON only: `relevantEventIds` and `updates` (string arrays). Enforce event conditions. Never write narration, actions, or a summary.
         """;
 
     public const string ConditionSummaryAnalysisInstruction = """
-        You are the condition and summary analyst. The approved artifacts are supplied separately as input. Determine victory/loss condition reports and a concise replacement summary from the approved scene. Do not write player-facing prose.
+        You are the condition and summary analyst. Return JSON only: `revealedVictoryIds`, `metVictoryIds`, `revealedLossIds`, `metLossIds` (string arrays), and `summary` (one compact string). Never write narration or actions.
         """;
 
     public const string StateExtractionInstruction = """

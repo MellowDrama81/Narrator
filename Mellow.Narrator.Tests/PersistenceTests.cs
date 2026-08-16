@@ -219,6 +219,21 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task ConnectionSettings_LoadsUtf8Bom()
+    {
+        var repository = (IApiConnectionSettingsStore)_store;
+        var expected = NarratorDefaults.Create();
+        await repository.SaveAsync(expected);
+        var path = Path.Combine(_root, "Mellow.Narrator", "settings", "api-connection.json");
+        var bytes = await File.ReadAllBytesAsync(path);
+        await File.WriteAllBytesAsync(path, [0xEF, 0xBB, 0xBF, .. bytes]);
+
+        var loaded = await repository.LoadAsync();
+
+        Assert.Equal(expected.ModelId, loaded.ModelId);
+    }
+
+    [Fact]
     public async Task ConnectionSettingsWithoutPlannedEventFields_LoadDefaultsAndPassValidation()
     {
         var repository = (IApiConnectionSettingsStore)_store;

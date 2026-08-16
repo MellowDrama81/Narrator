@@ -1,0 +1,10 @@
+{
+  "baseUrl": "https://api.example.com/v1/",
+  "apiKey": "replace-with-your-key",
+  "modelId": "your-model-id",
+  "structuredOutputTier": "strictJsonSchema",
+  "instructionMessageRole": "developer",
+  "outputTokenParameter": "maxCompletionTokens",
+  "requestTimeoutSeconds": 120,
+  "maxOutputTokens": null
+}

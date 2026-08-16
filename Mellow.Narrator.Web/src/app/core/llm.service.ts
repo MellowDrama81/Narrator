@@ -476,9 +476,10 @@ export class LlmService {
 
   private async generateStage(settings: AppSettings, baseMessages: Message[], instruction: string, call: GenerationCall, artifacts?: object): Promise<string> {
     return this.completeWithCorrection(this.connectionSettings(settings, call), this.pipelineRoleMessages(baseMessages, instruction, false, artifacts),
-      this.stageSchema(), value => {
+      this.stageSchema(call), value => {
+        if (this.isTypedAnalysisCall(call)) return this.parseTypedAnalysis(value, call);
         const result = value['result'];
-        if (typeof result !== 'string' || !result.trim() || result.length > 4000 || this.looksLikeConstraintEcho(result))
+        if (typeof result !== 'string' || !result.trim() || result.length > this.stageLimit(call) || this.looksLikeConstraintEcho(result))
           throw new Error('The pipeline stage returned malformed internal analysis.');
         return result;
       });
@@ -877,8 +878,51 @@ export class LlmService {
     });
   }
 
-  private stageSchema(): JsonSchema {
-    return this.objectSchema({ result: { type: 'string', maxLength: 4000 } });
+  private stageSchema(call: GenerationCall): JsonSchema {
+    switch (call) {
+      case 'planCritic':
+        return this.objectSchema({
+          issues: this.analysisStringsSchema(), requiredCorrections: this.analysisStringsSchema(), approved: { type: 'boolean' },
+        });
+      case 'storyBibleAnalysis':
+        return this.objectSchema({ adds: this.analysisStringsSchema(), replacements: this.analysisStringsSchema(), removals: this.analysisStringsSchema() });
+      case 'plannedEventAnalysis':
+        return this.objectSchema({ relevantEventIds: this.analysisStringsSchema(), updates: this.analysisStringsSchema() });
+      case 'conditionSummaryAnalysis':
+        return this.objectSchema({
+          revealedVictoryIds: this.analysisStringsSchema(), metVictoryIds: this.analysisStringsSchema(),
+          revealedLossIds: this.analysisStringsSchema(), metLossIds: this.analysisStringsSchema(), summary: { type: 'string', maxLength: 800 },
+        });
+      default:
+        return this.objectSchema({ result: { type: 'string', maxLength: this.stageLimit(call) } });
+    }
+  }
+
+  private analysisStringsSchema(): JsonSchema {
+    return { type: 'array', maxItems: 12, items: { type: 'string', minLength: 1, maxLength: 300 } };
+  }
+
+  private isTypedAnalysisCall(call: GenerationCall): boolean {
+    return call === 'planCritic' || call === 'storyBibleAnalysis' || call === 'plannedEventAnalysis' || call === 'conditionSummaryAnalysis';
+  }
+
+  private stageLimit(call: GenerationCall): number {
+    return this.isTypedAnalysisCall(call) ? 1200 : 4000;
+  }
+
+  private parseTypedAnalysis(value: Record<string, unknown>, call: GenerationCall): string {
+    const arrayProperties = call === 'planCritic' ? ['issues', 'requiredCorrections']
+      : call === 'storyBibleAnalysis' ? ['adds', 'replacements', 'removals']
+      : call === 'plannedEventAnalysis' ? ['relevantEventIds', 'updates']
+      : ['revealedVictoryIds', 'metVictoryIds', 'revealedLossIds', 'metLossIds'];
+    if (arrayProperties.some(name => !Array.isArray(value[name]) || (value[name] as unknown[]).length > 12 ||
+      (value[name] as unknown[]).some(item => typeof item !== 'string' || !item.trim() || item.length > 300)))
+      throw new Error('The internal analysis contains too much detail.');
+    if (call === 'planCritic' && typeof value['approved'] !== 'boolean')
+      throw new Error('The critic approval must be boolean.');
+    if (call === 'conditionSummaryAnalysis' && (typeof value['summary'] !== 'string' || !value['summary'].trim() || value['summary'].length > 800))
+      throw new Error('The internal summary is too long.');
+    return JSON.stringify(value);
   }
 
   private narrationDraftSchema(settings: AppSettings): JsonSchema {

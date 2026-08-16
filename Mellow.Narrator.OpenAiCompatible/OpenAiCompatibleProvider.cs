@@ -312,8 +312,8 @@ public sealed class OpenAiCompatibleProvider(
     {
         var messages = PipelineRoleMessages(baseMessages, instruction, artifacts: artifacts);
         return await CompleteWithCorrectionAsync(
-            settings, credential, messages, StageSchema(),
-            node => ParseGenericStage(node), cancellationToken, generationCall);
+            settings, credential, messages, StageSchema(generationCall),
+            node => ParseStage(node, generationCall), cancellationToken, generationCall);
     }
 
     private async Task<AdjudicationArtifact> GenerateAdjudicationAsync(
@@ -1101,6 +1101,17 @@ public sealed class OpenAiCompatibleProvider(
             }
         }
 
+        // An LLM can occasionally put a Planned Event ID into a Story Bible replace/remove update.
+        // That is not a valid persistent mutation; drop it rather than rejecting the whole turn.
+        var knownStoryBibleIds = context.StoryBible.Entries.Select(entry => entry.Id).ToHashSet();
+        for (var index = updates.Count - 1; index >= 0; index--)
+        {
+            var update = (JsonObject)updates[index]!;
+            if (RequiredString(update, "operation") == "add") continue;
+            var entryId = Guid.Parse(StringValue(update["entryId"]!, "A Story Bible entry ID"));
+            if (!knownStoryBibleIds.Contains(entryId)) updates.RemoveAt(index);
+        }
+
         var dto = node.Deserialize<StoryResponseDto>(Json) ?? throw new JsonException("Empty story response.");
         var projectedRelevant = opening
             ? dto.RelevantStoryBibleEntryIds.Concat(context.StoryBible.Entries.Select(x => x.Id)).Distinct().ToArray()
@@ -1169,9 +1180,11 @@ public sealed class OpenAiCompatibleProvider(
         foreach (var value in RequiredArray(node, "eligiblePlannedEventIds"))
         {
             var text = StringValue(value, "An eligible planned-event ID");
-            if (!Guid.TryParse(text, out var id) || !candidates.Contains(id) || !eligible.Contains(id))
-                throw new JsonException("The adjudication contains an unknown or duplicate planned-event ID.");
-            eligible.Add(id);
+            // Eligibility IDs are an internal planning hint, not a persistent mutation. Models can
+            // occasionally repeat a stale ID from context, so normalize invalid/duplicate values
+            // away just as we do relevance IDs in the state-extraction response.
+            if (Guid.TryParse(text, out var id) && candidates.Contains(id) && !eligible.Contains(id))
+                eligible.Add(id);
         }
         return new(outcome, reason, consequences, eligible);
     }
@@ -1191,12 +1204,37 @@ public sealed class OpenAiCompatibleProvider(
         return new(beats, resultingSituation, decisionPoint);
     }
 
-    private static string ParseGenericStage(JsonObject node)
+    private static string ParseGenericStage(JsonObject node, int maxLength)
     {
         var result = RequiredString(node, "result");
-        if (string.IsNullOrWhiteSpace(result) || result.Length > 4000 || LooksLikeConstraintEcho(result))
+        if (string.IsNullOrWhiteSpace(result) || result.Length > maxLength || LooksLikeConstraintEcho(result))
             throw new JsonException("The pipeline stage returned malformed internal analysis.");
         return result;
+    }
+
+    private static int StageLimit(GenerationCall call) => call is GenerationCall.PlanCritic or GenerationCall.StoryBibleAnalysis
+        or GenerationCall.PlannedEventAnalysis or GenerationCall.ConditionSummaryAnalysis ? 1200 : 4000;
+
+    private static string ParseStage(JsonObject node, GenerationCall call)
+    {
+        if (call is not (GenerationCall.PlanCritic or GenerationCall.StoryBibleAnalysis or GenerationCall.PlannedEventAnalysis or GenerationCall.ConditionSummaryAnalysis))
+            return ParseGenericStage(node, StageLimit(call));
+        var required = call switch
+        {
+            GenerationCall.PlanCritic => new[] { "issues", "requiredCorrections", "approved" },
+            GenerationCall.StoryBibleAnalysis => new[] { "adds", "replacements", "removals" },
+            GenerationCall.PlannedEventAnalysis => new[] { "relevantEventIds", "updates" },
+            _ => new[] { "revealedVictoryIds", "metVictoryIds", "revealedLossIds", "metLossIds", "summary" }
+        };
+        RequireProperties(node, required);
+        foreach (var property in required.Where(name => name != "approved" && name != "summary"))
+            if (RequiredArray(node, property).Count > 12 || RequiredArray(node, property).Any(item => string.IsNullOrWhiteSpace(StringValue(item, property)) || StringValue(item, property).Length > 300))
+                throw new JsonException("The internal analysis contains too much detail.");
+        if (node["summary"] is not null && (string.IsNullOrWhiteSpace(RequiredString(node, "summary")) || RequiredString(node, "summary").Length > 800))
+            throw new JsonException("The internal summary is too long.");
+        if (node["approved"] is not null && (node["approved"] is not JsonValue value || !value.TryGetValue<bool>(out _)))
+            throw new JsonException("The critic approval must be boolean.");
+        return node.ToJsonString(Json);
     }
 
     private static bool LooksLikeConstraintEcho(string value) =>
@@ -1450,10 +1488,19 @@ public sealed class OpenAiCompatibleProvider(
         ["decisionPoint"] = new JsonObject { ["type"] = "string", ["maxLength"] = 800 }
     }, ["beats", "resultingSituation", "decisionPoint"]);
 
-    private static JsonObject StageSchema() => ObjectSchema(new Dictionary<string, JsonNode?>
+    private static JsonObject StageSchema(GenerationCall call) => call switch
     {
-        ["result"] = new JsonObject { ["type"] = "string", ["maxLength"] = 4000 }
-    }, ["result"]);
+        GenerationCall.PlanCritic => ObjectSchema(new Dictionary<string, JsonNode?> { ["issues"] = StringArraySchema(8, 300), ["requiredCorrections"] = StringArraySchema(8, 300), ["approved"] = new JsonObject { ["type"] = "boolean" } }, ["issues", "requiredCorrections", "approved"]),
+        GenerationCall.StoryBibleAnalysis => ObjectSchema(new Dictionary<string, JsonNode?> { ["adds"] = StringArraySchema(12, 300), ["replacements"] = StringArraySchema(12, 300), ["removals"] = StringArraySchema(12, 300) }, ["adds", "replacements", "removals"]),
+        GenerationCall.PlannedEventAnalysis => ObjectSchema(new Dictionary<string, JsonNode?> { ["relevantEventIds"] = StringArraySchema(12, 100), ["updates"] = StringArraySchema(12, 300) }, ["relevantEventIds", "updates"]),
+        GenerationCall.ConditionSummaryAnalysis => ObjectSchema(new Dictionary<string, JsonNode?> { ["revealedVictoryIds"] = StringArraySchema(12, 100), ["metVictoryIds"] = StringArraySchema(12, 100), ["revealedLossIds"] = StringArraySchema(12, 100), ["metLossIds"] = StringArraySchema(12, 100), ["summary"] = new JsonObject { ["type"] = "string", ["maxLength"] = 800 } }, ["revealedVictoryIds", "metVictoryIds", "revealedLossIds", "metLossIds", "summary"]),
+        _ => ObjectSchema(new Dictionary<string, JsonNode?>
+    {
+        ["result"] = new JsonObject { ["type"] = "string", ["maxLength"] = StageLimit(call) }
+    }, ["result"])
+    };
+
+    private static JsonObject StringArraySchema(int maxItems, int maxLength) => new() { ["type"] = "array", ["maxItems"] = maxItems, ["items"] = new JsonObject { ["type"] = "string", ["minLength"] = 1, ["maxLength"] = maxLength } };
 
     private static JsonObject NarrationDraftSchema(ApiConnectionSettings settings) => ObjectSchema(new Dictionary<string, JsonNode?>
     {

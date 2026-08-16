@@ -145,6 +145,9 @@ internal static class JsonFileStore
 
     private static (T Value, int Version) DeserializeWithVersion<T>(byte[] bytes)
     {
+        // JsonSerializer's byte[] overload expects the JSON token at byte zero. Accept a UTF-8
+        // BOM because common editors and PowerShell can add one to otherwise valid JSON files.
+        if (bytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF })) bytes = bytes[3..];
         var document = JsonSerializer.Deserialize<PersistenceDocument<T>>(bytes, Options)
             ?? throw new JsonException("The persistence document is empty.");
         // A negative version is malformed data - treat it like any other corruption so it can fall

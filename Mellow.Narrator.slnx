@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="Mellow.Narrator.Cli/Mellow.Narrator.Cli.csproj" />
+  <Project Path="Mellow.Narrator.PipelineTester/Mellow.Narrator.PipelineTester.csproj" />
   <Project Path="Mellow.Narrator.Core/Mellow.Narrator.Core.csproj" />
   <Project Path="Mellow.Narrator.Maui/Mellow.Narrator.Maui.csproj" />
   <Project Path="Mellow.Narrator.MauiBlazor/Mellow.Narrator.MauiBlazor.csproj" />

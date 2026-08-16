@@ -10,6 +10,8 @@ TestResults/
 *.coverage
 *.coveragexml
 artifacts/
+Mellow.Narrator.PipelineTester/*.local.json
+Mellow.Narrator.PipelineTester/logs/
 *.apk
 *.aab
 *.msix
