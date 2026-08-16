@@ -1,19 +1,33 @@
 <div class="app-shell">
-  <mat-toolbar class="topbar">
+  <aside class="sidebar">
     <a class="brand" routerLink="/definitions" aria-label="Mellow Narrator home">
-      <span class="brand-mark">M</span>
-      <span><strong>Mellow</strong> Narrator</span>
+      <span class="brand-mark">M</span><span><strong>Mellow</strong> Narrator</span>
     </a>
     <nav aria-label="Primary navigation">
-      <a mat-button routerLink="/definitions" routerLinkActive="active">Definitions</a>
-      <a mat-button routerLink="/stories" routerLinkActive="active">Stories</a>
+      <a mat-button routerLink="/definitions" routerLinkActive="active">Story definitions</a>
+      <a mat-button routerLink="/stories" routerLinkActive="active">Active stories</a>
+      @if (openStories.length) {
+        <section class="open-stories" aria-label="Open stories">
+          @for (story of openStories; track story.id) {
+            <div class="open-story-row">
+              @if (renamingId === story.id) {
+                <input [(ngModel)]="renameValue" aria-label="Story name" (keyup.enter)="saveRename(story)">
+                <button mat-button class="icon-button" title="Save name" aria-label="Save name" (click)="saveRename(story)">✓</button>
+                <button mat-button class="icon-button" title="Cancel rename" aria-label="Cancel rename" (click)="cancelRename()">×</button>
+              } @else {
+                <a mat-button [routerLink]="['/stories', story.id]" routerLinkActive="active" title="{{ story.label }}">{{ story.label }}</a>
+                <button mat-button class="icon-button" title="Rename story" aria-label="Rename story" (click)="beginRename(story)">✎</button>
+                <button mat-button class="icon-button" title="Close story" aria-label="Close story" (click)="close(story.id)">×</button>
+              }
+            </div>
+          }
+        </section>
+      }
+      <a mat-button routerLink="/connections" routerLinkActive="active">Connections</a>
       <a mat-button routerLink="/settings" routerLinkActive="active">Settings</a>
+      <a mat-button routerLink="/pipeline" routerLinkActive="active">Pipeline calls</a>
+      <a mat-button routerLink="/trash" routerLinkActive="active">Trash</a>
     </nav>
-    <span class="local-badge">Local-first</span>
-  </mat-toolbar>
+  </aside>
   <main class="page"><router-outlet></router-outlet></main>
-  <footer>
-    <span>Mellow Narrator</span>
-    <span>Your stories stay in this browser unless you export them.</span>
-  </footer>
 </div>

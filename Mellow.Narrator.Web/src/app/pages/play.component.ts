@@ -12,35 +12,30 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DbService } from '../core/db.service';
 import { defaultSettings } from '../core/defaults';
 import { downloadJson, downloadText, safeFilename } from '../core/download';
-import { nowIso, PlannedEvent, StoryBibleEntry, StoryState, StoryTurn } from '../core/models';
+import { nowIso, PlannedEvent, StoryBibleEntry, StoryCondition, StoryState, StoryTurn } from '../core/models';
+import { OpenStoriesService } from '../core/open-stories.service';
 import { NarratorService } from '../core/narrator.service';
 import { validateBibleEntry } from '../core/story-bible';
 import { BibleEditorComponent } from '../shared/bible-editor.component';
 import { PlannedEventsEditorComponent } from '../shared/planned-events-editor.component';
+import { ConditionsEditorComponent } from '../shared/conditions-editor.component';
 
 @Component({
   imports: [
     CommonModule, FormsModule, RouterLink, MatButtonModule, MatCardModule, MatFormFieldModule,
-    MatInputModule, MatProgressSpinnerModule, BibleEditorComponent, PlannedEventsEditorComponent,
+    MatInputModule, MatProgressSpinnerModule, BibleEditorComponent, PlannedEventsEditorComponent, ConditionsEditorComponent,
   ],
   template: `
     @if (story) {
       <header class="page-header play-header">
         <div><a class="back-link" routerLink="/stories">← Stories</a><p class="eyebrow">Turn {{ story.turns.length }}</p><h1>{{ story.label }}</h1></div>
-        <div class="actions">
-          <button mat-button (click)="bibleOpen = !bibleOpen">{{ bibleOpen ? 'Hide' : 'Open' }} Story Bible</button>
-          <button mat-button (click)="plannedEventsOpen = !plannedEventsOpen">{{ plannedEventsOpen ? 'Hide' : 'Open' }} Planned Events</button>
-          <button mat-button (click)="summaryOpen = !summaryOpen">{{ summaryOpen ? 'Hide' : 'Open' }} Story So Far</button>
-          <button mat-stroked-button [disabled]="culling" (click)="cullToLimits()">Cull to limits</button>
-          <button mat-stroked-button (click)="copy()">Copy story</button>
-          <button mat-button (click)="export()">Export</button>
-        </div>
+        <button mat-stroked-button (click)="toolsOpen = !toolsOpen">{{ toolsOpen ? 'Close tools' : 'Story tools' }}</button>
       </header>
-      <div class="play-layout" [class.bible-open]="bibleOpen || plannedEventsOpen || summaryOpen">
+      <div class="play-layout" [class.tools-open]="toolsOpen">
         <main class="narrative">
           @for (turn of story.turns; track turn.id) {
+            @if (turn.playerAction) { <p class="player-action">{{ turn.playerAction }}</p> }
             <article class="turn" [class.opening]="turn.playerAction === null">
-              @if (turn.playerAction) { <p class="player-action">{{ turn.playerAction }}</p> }
               @for (paragraph of paragraphs(turn.narration); track $index) { <p class="prose">{{ paragraph }}</p> }
               <span class="turn-meta">{{ turn.modelId }} · {{ turn.completedAtUtc | date:'short' }}</span>
             </article>
@@ -70,26 +65,21 @@ import { PlannedEventsEditorComponent } from '../shared/planned-events-editor.co
             <button mat-button class="danger" (click)="remove()">Move story to trash</button>
           </div>
         </main>
-        @if (bibleOpen || plannedEventsOpen || summaryOpen) {
-          <aside class="bible-panel">
-            @if (bibleOpen) {
+        @if (toolsOpen) {
+          <aside class="story-tools">
+            <div class="actions"><button mat-button (click)="export()">Export story</button><button mat-button (click)="exportHistory()">Export narration history</button><button mat-stroked-button [disabled]="culling" (click)="cullToLimits()">Cull to limits</button><button mat-stroked-button (click)="copy()">Copy story</button></div>
+            <section class="summary-editor">
+              <h2>Story state editor</h2>
+              <mat-form-field appearance="outline" class="wide"><mat-label>Story label</mat-label><input matInput [(ngModel)]="story.label"></mat-form-field>
+              <button mat-stroked-button (click)="saveLabel()">Save label</button>
+              <h3>Story So Far</h3><p class="summary-hint">A compact recap the narrator rewrites every turn. Edit here only to correct drift from the actual story.</p>
+              <mat-form-field appearance="outline" class="wide"><mat-label>Story So Far</mat-label><textarea matInput rows="12" [(ngModel)]="summaryDraft" [maxlength]="maxSummaryLength" placeholder="(empty until the opening scene establishes it)"></textarea><mat-hint>{{ summaryDraft.length }} / {{ maxSummaryLength }}</mat-hint></mat-form-field>
+              <button mat-stroked-button (click)="saveSummary()">Save Summary</button>
               <app-bible-editor [(entries)]="story.currentStoryBible" (entriesChange)="saveBible($event)"></app-bible-editor>
-            }
-            @if (plannedEventsOpen) {
               <app-planned-events-editor [(entries)]="story.currentPlannedEvents" (entriesChange)="savePlannedEvents($event)"></app-planned-events-editor>
-            }
-            @if (summaryOpen) {
-              <div class="summary-editor">
-                <h3>Story So Far</h3>
-                <p class="summary-hint">A compact recap the narrator rewrites every turn. Edit here only to correct drift from the actual story.</p>
-                <mat-form-field appearance="outline" class="wide">
-                  <mat-label>Story So Far</mat-label>
-                  <textarea matInput rows="12" [(ngModel)]="summaryDraft" [maxlength]="maxSummaryLength" placeholder="(empty until the opening scene establishes it)"></textarea>
-                  <mat-hint>{{ summaryDraft.length }} / {{ maxSummaryLength }}</mat-hint>
-                </mat-form-field>
-                <button mat-stroked-button (click)="saveSummary()">Save Summary</button>
-              </div>
-            }
+              <app-conditions-editor [(entries)]="story.currentVictoryConditions" heading="Victory conditions" (entriesChange)="saveVictoryConditions($event)"></app-conditions-editor>
+              <app-conditions-editor [(entries)]="story.currentLossConditions" heading="Loss conditions" (entriesChange)="saveLossConditions($event)"></app-conditions-editor>
+            </section>
           </aside>
         }
       </div>
@@ -97,11 +87,13 @@ import { PlannedEventsEditorComponent } from '../shared/planned-events-editor.co
   `,
   styles: [`
     .play-layout { display:grid; grid-template-columns:minmax(0, 760px); justify-content:center; gap:1.5rem; transition:.2s ease; }
-    .play-layout.bible-open { grid-template-columns:minmax(0, 1.7fr) minmax(340px, 1fr); max-width:1400px; margin:auto; }
+    .play-layout.tools-open { grid-template-columns:1fr; max-width:100%; margin:auto; }
     .narrative { min-width:0; }
     .turn { padding:1.25rem 0 1.7rem; border-bottom:1px solid var(--line); }
     .player-action { color:var(--accent); font-weight:700; font-size:.82rem; letter-spacing:.04em; text-transform:uppercase; }
     .player-action::before { content:'YOU · '; color:var(--muted); }
+    .player-action { margin:1rem 0 0; padding:.7rem .9rem; border-left:3px solid var(--accent-2); border-radius:10px; background:var(--soft); color:var(--text); font-style:italic; }
+    .player-action::before { content:none; }
     .prose { font-family:var(--serif); font-size:clamp(1.08rem,1.7vw,1.28rem); line-height:1.78; margin:.75rem 0; }
     .turn-meta { color:var(--muted); font-size:.7rem; }
     .choice-box { position:sticky; bottom:1rem; z-index:3; margin:1.5rem 0; padding:1.1rem; background:color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter:blur(18px); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow); }
@@ -111,12 +103,12 @@ import { PlannedEventsEditorComponent } from '../shared/planned-events-editor.co
     .writing { min-height:100px; display:flex; align-items:center; justify-content:center; gap:1rem; }
     .writing div { display:flex; flex-direction:column; gap:.2rem; }
     .writing span { color:var(--muted); font-size:.82rem; }
-    .bible-panel { border-left:1px solid var(--line); padding-left:1.5rem; min-width:0; }
+    .story-tools { order:-1; width:100%; padding:1.5rem; border:1px solid color-mix(in srgb, var(--accent), var(--line)); border-radius:18px; background:color-mix(in srgb, var(--soft) 72%, var(--surface)); }
     .summary-editor { display:flex; flex-direction:column; gap:.6rem; }
     .summary-editor h3 { margin:0; }
     .summary-hint { color:var(--muted); font-size:.82rem; margin:0; }
     .history-actions { display:flex; justify-content:space-between; }
-    @media (max-width:1000px) { .play-layout.bible-open { grid-template-columns:1fr; }.bible-panel{border-left:0;padding-left:0;border-top:1px solid var(--line)} }
+    @media (max-width:1000px) { .play-layout.tools-open { grid-template-columns:1fr; } }
     @media (max-width:600px) { .action-row{grid-template-columns:1fr}.choice-box{bottom:.4rem}.play-header{align-items:flex-start} }
   `],
 })
@@ -125,9 +117,7 @@ export class PlayComponent implements OnInit {
   action = '';
   busy = false;
   culling = false;
-  bibleOpen = false;
-  plannedEventsOpen = false;
-  summaryOpen = false;
+  toolsOpen = false;
   summaryDraft = '';
   maxSummaryLength = defaultSettings().maxStorySummaryCharacters;
   private pendingKey = '';
@@ -140,6 +130,7 @@ export class PlayComponent implements OnInit {
     private readonly snack: MatSnackBar,
     private readonly changeDetector: ChangeDetectorRef,
     private readonly destroyRef: DestroyRef,
+    private readonly openStories: OpenStoriesService,
   ) {}
 
   ngOnInit(): void {
@@ -156,9 +147,8 @@ export class PlayComponent implements OnInit {
   private async load(id: string): Promise<void> {
     this.story = await this.db.story(id);
     if (!this.story) { await this.router.navigate(['/stories']); return; }
-    this.bibleOpen = false;
-    this.plannedEventsOpen = false;
-    this.summaryOpen = false;
+    await this.openStories.open(id);
+    this.toolsOpen = false;
     this.pendingKey = `pending-action-${id}`;
     this.action = await this.db.meta<string>(this.pendingKey) ?? '';
     this.summaryDraft = this.story.storySummary;
@@ -223,6 +213,32 @@ export class PlayComponent implements OnInit {
     if (!this.story) return;
     this.story.currentPlannedEvents = entries;
     await this.db.saveStory(this.story);
+  }
+
+  async saveVictoryConditions(entries: StoryCondition[]): Promise<void> {
+    if (!this.story) return;
+    this.story.currentVictoryConditions = entries.filter(entry => entry.description.trim()).map(entry => ({ ...entry, description: entry.description.trim() }));
+    const ids = new Set(this.story.currentVictoryConditions.map(entry => entry.id));
+    this.story.revealedVictoryConditionIds = this.story.revealedVictoryConditionIds.filter(id => ids.has(id));
+    this.story.metVictoryConditionIds = this.story.metVictoryConditionIds.filter(id => ids.has(id));
+    await this.db.saveStory(this.story);
+  }
+
+  async saveLossConditions(entries: StoryCondition[]): Promise<void> {
+    if (!this.story) return;
+    this.story.currentLossConditions = entries.filter(entry => entry.description.trim()).map(entry => ({ ...entry, description: entry.description.trim() }));
+    const ids = new Set(this.story.currentLossConditions.map(entry => entry.id));
+    this.story.revealedLossConditionIds = this.story.revealedLossConditionIds.filter(id => ids.has(id));
+    this.story.metLossConditionIds = this.story.metLossConditionIds.filter(id => ids.has(id));
+    await this.db.saveStory(this.story);
+  }
+
+  async saveLabel(): Promise<void> {
+    if (!this.story) return;
+    this.story.label = this.story.label.trim() || this.story.definition.title;
+    await this.db.saveStory(this.story);
+    this.openStories.notifyChanged();
+    this.snack.open('Label saved.', 'Dismiss', { duration: 2500 });
   }
 
   // Manual override for the narrator-maintained Story So Far recap - mirrors PlayStoryPage's
@@ -297,6 +313,7 @@ export class PlayComponent implements OnInit {
   async remove(): Promise<void> {
     if (!this.story || !confirm(`Move “${this.story.label}” to Trash?`)) return;
     await this.narrator.trashStory(this.story);
+    await this.openStories.close(this.story.id);
     await this.router.navigate(['/stories']);
   }
 }

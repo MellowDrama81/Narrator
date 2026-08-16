@@ -16,18 +16,7 @@ import { NarratorService } from '../core/narrator.service';
 @Component({
   imports: [CommonModule, FormsModule, RouterLink, MatButtonModule, MatCardModule, MatChipsModule, MatProgressBarModule],
   template: `
-    <section class="hero">
-      <div>
-        <p class="eyebrow">Reusable worlds</p>
-        <h1>Story Definitions</h1>
-        <p>Shape a premise into a durable world, then begin as many independent stories as you like.</p>
-      </div>
-      <div class="hero-actions">
-        <a mat-flat-button routerLink="/definitions/new">Create definition</a>
-        <button mat-stroked-button (click)="importInput.click()">Import JSON</button>
-        <input #importInput hidden type="file" accept=".json,application/json" (change)="importFile($event)">
-      </div>
-    </section>
+    <header class="page-header"><div><p class="eyebrow">Reusable worlds</p><h1>Story Definitions</h1></div></header>
     @if (busyId) { <mat-progress-bar mode="indeterminate"></mat-progress-bar> }
     @if (!definitions.length) {
       <div class="empty-state">
@@ -61,7 +50,9 @@ import { NarratorService } from '../core/narrator.service';
         }
       </div>
     }
+    <section class="feature-card create-definition"><div class="create-copy"><p class="lead">Create a blank definition or describe every aspect of a story for the generator to organise.</p></div><div class="hero-actions"><a mat-flat-button routerLink="/definitions/new">Generate a definition</a><a mat-stroked-button routerLink="/definitions/new">Blank definition</a><button mat-stroked-button (click)="importInput.click()">Import JSON</button><input #importInput hidden type="file" accept=".json,application/json" (change)="importFile($event)"></div></section>
   `,
+  styles: [`.create-definition { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-top:2rem; padding:1.25rem; }.create-copy .lead { margin:0; } @media(max-width:700px){ .create-definition{align-items:stretch; flex-direction:column;} .hero-actions{justify-content:flex-start;} }`],
 })
 export class DefinitionsComponent implements OnInit {
   definitions: StoryDefinition[] = [];
