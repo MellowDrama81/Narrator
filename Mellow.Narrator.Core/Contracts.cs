@@ -152,6 +152,8 @@ public interface INarratorApplication
     Task<StoryState> UpdateCurrentPlannedEventsAsync(Guid stateId, PlannedEvents events, CancellationToken cancellationToken = default);
     Task<StoryDefinition> UpdateInitialVictoryConditionsAsync(Guid definitionId, StoryConditions conditions, CancellationToken cancellationToken = default);
     Task<StoryDefinition> UpdateInitialLossConditionsAsync(Guid definitionId, StoryConditions conditions, CancellationToken cancellationToken = default);
+    Task<StoryState> UpdateCurrentVictoryConditionsAsync(Guid stateId, StoryConditions conditions, CancellationToken cancellationToken = default);
+    Task<StoryState> UpdateCurrentLossConditionsAsync(Guid stateId, StoryConditions conditions, CancellationToken cancellationToken = default);
     Task<StoryState> UpdateStorySummaryAsync(Guid stateId, string summary, CancellationToken cancellationToken = default);
     Task<(StoryState State, StoryTurn Opening)> StartStoryAsync(StartStoryDraft draft, Guid targetStateId, CancellationToken cancellationToken = default);
     Task<(StoryState State, StoryTurn Turn)> PlayTurnAsync(Guid stateId, string action, CancellationToken cancellationToken = default);

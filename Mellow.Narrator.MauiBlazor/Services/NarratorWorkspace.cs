@@ -35,6 +35,8 @@ public sealed class NarratorWorkspace(
     public Task<StoryState> SaveStoryBibleAsync(Guid id, StoryBible bible) => application.UpdateCurrentStoryBibleAsync(id, bible);
     public Task<StoryState> CullStoryAsync(Guid id) => application.CullStoryStateAsync(id);
     public Task<StoryState> SaveStoryEventsAsync(Guid id, PlannedEvents events) => application.UpdateCurrentPlannedEventsAsync(id, events);
+    public Task<StoryState> SaveStoryVictoryConditionsAsync(Guid id, StoryConditions conditions) => application.UpdateCurrentVictoryConditionsAsync(id, conditions);
+    public Task<StoryState> SaveStoryLossConditionsAsync(Guid id, StoryConditions conditions) => application.UpdateCurrentLossConditionsAsync(id, conditions);
     public Task<StoryState> SaveStorySummaryAsync(Guid id, string summary) => application.UpdateStorySummaryAsync(id, summary);
     public Task<IReadOnlyList<string>> DiscoverModelsAsync(Guid connectionId) => application.DiscoverModelsAsync(connectionId);
     public Task<ConnectionTestResult> TestConnectionAsync(Guid connectionId) => application.TestConnectionAsync(connectionId);

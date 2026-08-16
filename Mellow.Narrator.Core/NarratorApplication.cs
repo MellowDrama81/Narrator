@@ -536,6 +536,12 @@ public sealed class NarratorApplication(
     public Task<StoryDefinition> UpdateInitialLossConditionsAsync(Guid definitionId, StoryConditions conditions, CancellationToken cancellationToken = default) =>
         UpdateInitialConditionsAsync(definitionId, conditions, isVictory: false, cancellationToken);
 
+    public Task<StoryState> UpdateCurrentVictoryConditionsAsync(Guid stateId, StoryConditions conditions, CancellationToken cancellationToken = default) =>
+        UpdateCurrentConditionsAsync(stateId, conditions, isVictory: true, cancellationToken);
+
+    public Task<StoryState> UpdateCurrentLossConditionsAsync(Guid stateId, StoryConditions conditions, CancellationToken cancellationToken = default) =>
+        UpdateCurrentConditionsAsync(stateId, conditions, isVictory: false, cancellationToken);
+
     private async Task<StoryDefinition> UpdateInitialConditionsAsync(
         Guid definitionId, StoryConditions conditions, bool isVictory, CancellationToken cancellationToken)
     {
@@ -552,6 +558,40 @@ public sealed class NarratorApplication(
         _logger.LogInformation(
             "Story Definition {StoryDefinitionId} {ConditionKind} Conditions manually updated with {ConditionCount} entries.",
             definitionId,
+            isVictory ? "Victory" : "Loss",
+            normalized.Entries.Count);
+        return updated;
+    }
+
+    private async Task<StoryState> UpdateCurrentConditionsAsync(
+        Guid stateId, StoryConditions conditions, bool isVictory, CancellationToken cancellationToken)
+    {
+        var state = await states.GetAsync(stateId, cancellationToken) ?? throw new NarratorException("Story State not found.");
+        var settings = await settingsStore.LoadAsync(cancellationToken);
+        var normalized = NormalizeManualConditions(conditions, settings.ContentLimits);
+        if (!StoryConditionProcessor.IsWithinLimits(normalized, settings.ContentLimits))
+            throw new NarratorException("The conditions exceed current limits.");
+
+        // Retain each condition's discovered and met state when it remains in the edited list,
+        // and discard status for deleted conditions so the saved state cannot contain dangling ids.
+        var conditionIds = normalized.Entries.Select(entry => entry.Id).ToHashSet();
+        var updated = isVictory
+            ? state with
+            {
+                CurrentVictoryConditions = normalized,
+                RevealedVictoryConditionIds = state.RevealedVictoryConditionIds.Where(conditionIds.Contains).ToArray(),
+                MetVictoryConditionIds = state.MetVictoryConditionIds.Where(conditionIds.Contains).ToArray()
+            }
+            : state with
+            {
+                CurrentLossConditions = normalized,
+                RevealedLossConditionIds = state.RevealedLossConditionIds.Where(conditionIds.Contains).ToArray(),
+                MetLossConditionIds = state.MetLossConditionIds.Where(conditionIds.Contains).ToArray()
+            };
+        await states.SaveAsync(updated, cancellationToken);
+        _logger.LogInformation(
+            "Story State {StoryStateId} {ConditionKind} Conditions manually updated with {ConditionCount} entries.",
+            stateId,
             isVictory ? "Victory" : "Loss",
             normalized.Entries.Count);
         return updated;
