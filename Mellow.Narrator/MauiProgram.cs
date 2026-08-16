@@ -1,11 +1,11 @@
 using Mellow.Narrator.Core;
-using Mellow.Narrator.MauiBlazor.Services;
+using Mellow.Narrator.Services;
 using Mellow.Narrator.OpenAiCompatible;
 using Mellow.Narrator.Persistence;
 using Microsoft.Extensions.Logging;
 using Microsoft.Maui.Storage;
 
-namespace Mellow.Narrator.MauiBlazor;
+namespace Mellow.Narrator;
 
 public static class MauiProgram
 {

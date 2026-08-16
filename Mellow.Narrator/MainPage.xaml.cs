@@ -1,4 +1,4 @@
-namespace Mellow.Narrator.MauiBlazor;
+namespace Mellow.Narrator;
 
 public partial class MainPage : ContentPage
 {

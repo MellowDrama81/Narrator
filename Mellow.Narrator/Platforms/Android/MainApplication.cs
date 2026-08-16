@@ -1,7 +1,7 @@
 using Android.App;
 using Android.Runtime;
 
-namespace Mellow.Narrator.MauiBlazor;
+namespace Mellow.Narrator;
 
 [Application]
 public sealed class MainApplication(IntPtr handle, JniHandleOwnership ownership) : MauiApplication(handle, ownership)

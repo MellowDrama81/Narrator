@@ -1,6 +1,6 @@
 using Mellow.Narrator.Core;
 
-namespace Mellow.Narrator.MauiBlazor.Services;
+namespace Mellow.Narrator.Services;
 
 // The Hybrid UI uses route documents rather than native tabs, but persists the same durable workspace
 // concepts: recent documents, unsent drafts, and an interruption marker for a request that could not

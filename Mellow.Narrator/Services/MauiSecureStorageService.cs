@@ -1,7 +1,7 @@
 using Mellow.Narrator.Core;
 using Microsoft.Maui.Storage;
 
-namespace Mellow.Narrator.MauiBlazor.Services;
+namespace Mellow.Narrator.Services;
 
 public sealed class MauiSecureStorageService(ISecureStorage storage) : ISecureStorageService
 {

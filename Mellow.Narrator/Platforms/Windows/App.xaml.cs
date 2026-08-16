@@ -1,4 +1,4 @@
-namespace Mellow.Narrator.MauiBlazor.WinUI;
+namespace Mellow.Narrator.WinUI;
 
 public partial class App : MauiWinUIApplication
 {

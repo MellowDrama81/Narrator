@@ -1,6 +1,6 @@
 using Mellow.Narrator.Core;
 
-namespace Mellow.Narrator.MauiBlazor.Services;
+namespace Mellow.Narrator.Services;
 
 // Thin UI-facing facade. It deliberately delegates all story mutations to the shared application
 // service, keeping the Hybrid UI behavior identical to the native MAUI application.

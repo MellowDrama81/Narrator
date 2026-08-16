@@ -1,6 +1,6 @@
 using Mellow.Narrator.Core;
 
-namespace Mellow.Narrator.MauiBlazor.Services;
+namespace Mellow.Narrator.Services;
 
 // Route components are short-lived: navigating away disposes the page, but must not dispose a story
 // request. This singleton owns active turns until the application service has committed or failed them.

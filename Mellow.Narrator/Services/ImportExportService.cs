@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 using Mellow.Narrator.Core;
 using Microsoft.Maui.Storage;
 
-namespace Mellow.Narrator.MauiBlazor.Services;
+namespace Mellow.Narrator.Services;
 
 // Uses native platform pickers from the Hybrid host. Imports are always copied into a new durable record.
 public sealed class ImportExportService(IStoryDefinitionRepository definitions, IStoryStateRepository stories, INarratorApplication application)

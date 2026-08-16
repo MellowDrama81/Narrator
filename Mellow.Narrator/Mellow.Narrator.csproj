@@ -2,15 +2,15 @@
   <PropertyGroup>
     <TargetFrameworks>net10.0-android;net10.0-windows10.0.19041.0</TargetFrameworks>
     <OutputType>Exe</OutputType>
-    <RootNamespace>Mellow.Narrator.MauiBlazor</RootNamespace>
+    <RootNamespace>Mellow.Narrator</RootNamespace>
     <UseMaui>true</UseMaui>
     <SingleProject>true</SingleProject>
     <ImplicitUsings>enable</ImplicitUsings>
     <EnableDefaultCssItems>false</EnableDefaultCssItems>
     <Nullable>enable</Nullable>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <ApplicationTitle>Mellow Narrator Hybrid</ApplicationTitle>
-    <ApplicationId>au.com.mellow.narrator.hybrid</ApplicationId>
+    <ApplicationTitle>Mellow Narrator</ApplicationTitle>
+    <ApplicationId>au.com.mellow.narrator</ApplicationId>
     <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
     <ApplicationVersion>1</ApplicationVersion>
     <WindowsPackageType>None</WindowsPackageType>

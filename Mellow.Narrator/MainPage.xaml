@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             xmlns:components="clr-namespace:Mellow.Narrator.MauiBlazor.Components"
-             x:Class="Mellow.Narrator.MauiBlazor.MainPage">
+             xmlns:components="clr-namespace:Mellow.Narrator.Components"
+             x:Class="Mellow.Narrator.MainPage">
   <BlazorWebView HostPage="wwwroot/index.html">
     <BlazorWebView.RootComponents>
       <RootComponent Selector="#app" ComponentType="{x:Type components:Main}" />
