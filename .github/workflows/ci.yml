@@ -28,26 +28,14 @@ jobs:
       - name: Restore packages
         run: dotnet restore Mellow.Narrator.slnx --locked-mode
 
-      - name: Build Android target
-        run: dotnet build Mellow.Narrator.Maui/Mellow.Narrator.Maui.csproj --framework net10.0-android --configuration Release --no-restore
-
       - name: Build Blazor Hybrid Android target
         run: dotnet build Mellow.Narrator.MauiBlazor/Mellow.Narrator.MauiBlazor.csproj --framework net10.0-android --configuration Release --no-restore
-
-      - name: Restore Windows runtime pack
-        run: dotnet restore Mellow.Narrator.Maui/Mellow.Narrator.Maui.csproj --runtime win-x64 --no-dependencies --force-evaluate --lock-file-path obj/ci-runtime-packages.lock.json -p:TargetFrameworks=net10.0-windows10.0.19041.0
 
       - name: Restore Blazor Hybrid Windows runtime pack
         run: dotnet restore Mellow.Narrator.MauiBlazor/Mellow.Narrator.MauiBlazor.csproj --runtime win-x64 --no-dependencies --force-evaluate --lock-file-path obj/ci-runtime-packages.lock.json -p:TargetFrameworks=net10.0-windows10.0.19041.0
 
-      - name: Build Windows target
-        run: dotnet build Mellow.Narrator.Maui/Mellow.Narrator.Maui.csproj --framework net10.0-windows10.0.19041.0 --runtime win-x64 --configuration Release --no-restore
-
       - name: Build Blazor Hybrid Windows target
         run: dotnet build Mellow.Narrator.MauiBlazor/Mellow.Narrator.MauiBlazor.csproj --framework net10.0-windows10.0.19041.0 --runtime win-x64 --configuration Release --no-restore
-
-      - name: Build CLI
-        run: dotnet build Mellow.Narrator.Cli/Mellow.Narrator.Cli.csproj --configuration Release --no-restore
 
       - name: Run Core, provider, and persistence tests
         run: dotnet test Mellow.Narrator.Tests/Mellow.Narrator.Tests.csproj --configuration Release --no-restore --collect:"XPlat Code Coverage"
