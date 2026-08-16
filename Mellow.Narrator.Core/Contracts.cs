@@ -69,7 +69,8 @@ public sealed record StoryDefinitionGenerationResponse(
     IReadOnlyList<ProposedStoryBibleEntry> InitialStoryBibleEntries,
     IReadOnlyList<ProposedPlannedEvent> InitialPlannedEvents,
     IReadOnlyList<ProposedStoryCondition> InitialVictoryConditions,
-    IReadOnlyList<ProposedStoryCondition> InitialLossConditions);
+    IReadOnlyList<ProposedStoryCondition> InitialLossConditions,
+    string Description = "");
 
 public sealed record StoryGenerationResponse(
     string Narration,

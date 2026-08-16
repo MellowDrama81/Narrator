@@ -899,7 +899,7 @@ public sealed class OpenAiCompatibleProvider(
         ApiConnectionSettings settings)
     {
         node.Remove("_transport");
-        RequireProperties(node, settings, "refinedStoryPrompt", "suggestedTitle", "initialEventsPrompt", "initialStoryBibleEntries",
+        RequireProperties(node, settings, "refinedStoryPrompt", "suggestedTitle", "description", "initialEventsPrompt", "initialStoryBibleEntries",
             "initialPlannedEvents", "initialVictoryConditions", "initialLossConditions");
         var refinedStoryPrompt = RequiredString(node, "refinedStoryPrompt");
         if (string.IsNullOrWhiteSpace(refinedStoryPrompt) || refinedStoryPrompt.Length > settings.ContentLimits.MaxStoryPromptCharacters)
@@ -907,6 +907,9 @@ public sealed class OpenAiCompatibleProvider(
         var suggestedTitle = RequiredString(node, "suggestedTitle");
         if (string.IsNullOrWhiteSpace(suggestedTitle) || suggestedTitle.Length > settings.ContentLimits.MaxStoryTitleCharacters)
             throw new JsonException("The suggested title is empty or exceeds the configured limit.");
+        var description = RequiredString(node, "description");
+        if (string.IsNullOrWhiteSpace(description) || description.Length > settings.ContentLimits.MaxStoryPromptCharacters)
+            throw new JsonException("The description is empty or exceeds the configured limit.");
         var initialEventsPrompt = RequiredString(node, "initialEventsPrompt");
         if (initialEventsPrompt.Length > settings.ContentLimits.MaxStoryPromptCharacters)
             throw new JsonException("The Initial Events prompt exceeds the configured limit.");
@@ -1395,6 +1398,7 @@ public sealed class OpenAiCompatibleProvider(
     {
         ["refinedStoryPrompt"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxStoryPromptCharacters },
         ["suggestedTitle"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxStoryTitleCharacters },
+        ["description"] = new JsonObject { ["type"] = "string", ["minLength"] = 1, ["maxLength"] = settings.ContentLimits.MaxStoryPromptCharacters },
         ["initialEventsPrompt"] = new JsonObject { ["type"] = "string", ["maxLength"] = settings.ContentLimits.MaxStoryPromptCharacters },
         ["initialStoryBibleEntries"] = new JsonObject
         {
@@ -1420,7 +1424,7 @@ public sealed class OpenAiCompatibleProvider(
             ["maxItems"] = SettingsValidator.MaxConditionsUpperBound,
             ["items"] = ProposedConditionSchema(settings)
         }
-    }, ["refinedStoryPrompt", "suggestedTitle", "initialEventsPrompt", "initialStoryBibleEntries", "initialPlannedEvents",
+    }, ["refinedStoryPrompt", "suggestedTitle", "description", "initialEventsPrompt", "initialStoryBibleEntries", "initialPlannedEvents",
         "initialVictoryConditions", "initialLossConditions"]);
 
     private static JsonObject TurnSchema(ApiConnectionSettings settings) => ObjectSchema(new Dictionary<string, JsonNode?>

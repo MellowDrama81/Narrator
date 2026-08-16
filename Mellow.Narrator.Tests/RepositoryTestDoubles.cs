@@ -8,7 +8,7 @@ internal sealed class MemoryDefinitions : IStoryDefinitionRepository
 {
     private readonly Dictionary<Guid, StoryDefinition> _values = [];
     public Task<IReadOnlyList<StoryDefinitionSummary>> ListAsync(CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<StoryDefinitionSummary>>(_values.Values.Select(x => new StoryDefinitionSummary(x.Id, x.Title, x.SortOrder, x.UpdatedAtUtc)).ToArray());
+        Task.FromResult<IReadOnlyList<StoryDefinitionSummary>>(_values.Values.Select(x => new StoryDefinitionSummary(x.Id, x.Title, x.SortOrder, x.UpdatedAtUtc, x.Description)).ToArray());
     public Task<StoryDefinition?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
         Task.FromResult(_values.GetValueOrDefault(id));
     public Task SaveAsync(StoryDefinition definition, CancellationToken cancellationToken = default)

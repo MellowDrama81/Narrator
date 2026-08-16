@@ -52,7 +52,7 @@ Application-wide LLM prompt templates and rolling structured logging are configu
    - click **New** and then **Create Blank Definition** to bypass generation and open an empty,
      persisted definition for manual authoring; or
    - click **Import** and choose an exported `*-definition.json` file — for example,
-     [The Awakening AI-definition.json](examples/The%20Awakening%20AI-definition.json), an example
+     [The Awakening-definition.json](examples/The%20Awakening-definition.json), an example
      Story Definition included in this repository.
 3. Review the generated, blank, or imported definition — you can edit the title, Story Prompt, Initial
    Events, and Story Bible entries directly — then click **Start Story**.

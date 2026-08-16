@@ -34,7 +34,9 @@ public sealed class HybridWorkspace(IWorkspaceStateStore store)
     {
         var existing = _state.Tabs.FirstOrDefault(x => x.Type == type && x.DurableRecordId == recordId);
         var tab = new OpenTabState(existing?.TabId ?? Guid.NewGuid(), type, 0, recordId, draft, playDraft, existing?.PendingOperation);
-        var tabs = _state.Tabs.Where(x => x.TabId != tab.TabId).Prepend(tab).Take(12).Select((x, i) => x with { Position = i }).ToArray();
+        // Open stories are durable user documents. Do not evict them merely because the user visited
+        // other pages; only an explicit close/delete action may remove a story from the workspace.
+        var tabs = _state.Tabs.Where(x => x.TabId != tab.TabId).Prepend(tab).Select((x, i) => x with { Position = i }).ToArray();
         _state = new(tab.TabId, tabs);
         await store.SaveAsync(_state);
     }

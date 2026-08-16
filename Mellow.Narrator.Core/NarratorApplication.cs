@@ -312,7 +312,8 @@ public sealed class NarratorApplication(
                 lossConditions,
                 source?.SortOrder ?? (definitionSummaries.Count == 0 ? 0 : definitionSummaries.Max(x => x.SortOrder) + 1),
                 source?.CreatedAtUtc ?? now,
-                now);
+                now,
+                generated.Description.Trim());
             await definitions.SaveAsync(definition, cancellationToken);
         }
         finally { _definitionCreateGate.Release(); }
@@ -355,7 +356,8 @@ public sealed class NarratorApplication(
                 StoryConditions.Empty,
                 summaries.Count == 0 ? 0 : summaries.Max(x => x.SortOrder) + 1,
                 now,
-                now);
+                now,
+                "");
             await definitions.SaveAsync(definition, cancellationToken);
         }
         finally { _definitionCreateGate.Release(); }

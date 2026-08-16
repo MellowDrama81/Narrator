@@ -68,6 +68,10 @@ import { PlannedEventsEditorComponent } from '../shared/planned-events-editor.co
               <input matInput [(ngModel)]="definition.title">
             </mat-form-field>
             <mat-form-field appearance="outline">
+              <mat-label>Description</mat-label>
+              <textarea matInput rows="3" [(ngModel)]="definition.description" placeholder="Shown in the definition list"></textarea>
+            </mat-form-field>
+            <mat-form-field appearance="outline">
               <mat-label>Story Prompt · immutable world and narration rules</mat-label>
               <textarea matInput rows="9" [(ngModel)]="definition.storyPrompt"></textarea>
             </mat-form-field>

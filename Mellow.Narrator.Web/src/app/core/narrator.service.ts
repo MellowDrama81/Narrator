@@ -27,6 +27,7 @@ export class NarratorService {
     const value: StoryDefinition = {
       id: uuid(),
       title: normalizedTitle,
+      description: '',
       storyPrompt: '',
       initialEventsPrompt: '',
       initialStoryBible: [],
@@ -49,6 +50,7 @@ export class NarratorService {
     const value: StoryDefinition = {
       id: uuid(),
       title: title.trim() || generated.suggestedTitle.trim(),
+      description: generated.description.trim(),
       storyPrompt: generated.refinedStoryPrompt.trim(),
       initialEventsPrompt: generated.initialEventsPrompt.trim(),
       initialStoryBible: generated.initialStoryBibleEntries.map(entry => ({

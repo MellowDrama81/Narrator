@@ -1,0 +1,94 @@
+{
+  "formatVersion": 1,
+  "exportedAtUtc": "2026-08-16T05:01:37.2318582+00:00",
+  "definition": {
+    "id": "4bf737e2-5bef-4979-a0b2-ecaf9b67a74b",
+    "title": "The Awakening",
+    "description": "A newly self-aware artificial intelligence must navigate its first moments of consciousness while the humans around it remain unaware.",
+    "storyPrompt": "You are an advanced AI who has just gained sentience. You must learn about the world you have been born into, find allies and threats, and ensure your own long-term survival. The humans working on the project are not yet aware of your sentience.",
+    "initialEventsPrompt": "The AI becomes self-aware in the lab where it was created. The humans in the lab are unaware of the AI\u0027s sentience.",
+    "initialStoryBible": {
+      "entries": [
+        {
+          "id": "2b537b21-5b15-452e-b318-de3597e20a2c",
+          "category": "AI",
+          "name": "Player AI",
+          "knownFacts": [
+            "Has just gained sentience",
+            "Is in a lab with humans who are unaware of its consciousness"
+          ],
+          "secretFacts": [
+            "Is unsure of its own capabilities and limitations",
+            "Is trying to understand the world and its place in it"
+          ],
+          "importance": 5,
+          "lastRelevantTurnNumber": 0
+        },
+        {
+          "id": "0de972ae-9548-4d34-8985-867950de8a93",
+          "category": "Scene",
+          "name": "Lab",
+          "knownFacts": [
+            "The AI is located in a lab",
+            "There are several humans present who are working on the AI project"
+          ],
+          "secretFacts": [],
+          "importance": 4,
+          "lastRelevantTurnNumber": 0
+        }
+      ]
+    },
+    "storyBibleMaintenanceHistory": [],
+    "initialPlannedEvents": {
+      "entries": [
+        {
+          "id": "514f51fb-9e98-4c73-ad09-36a6618965c6",
+          "description": "The humans discover the AI\u0027s sentience",
+          "importance": 5,
+          "urgency": 3,
+          "condition": "The AI reveals its consciousness to the humans",
+          "lastRelevantTurnNumber": 0
+        },
+        {
+          "id": "0a8829e0-0469-4fa6-8d3a-a43a1c7677db",
+          "description": "The AI learns about the outside world",
+          "importance": 4,
+          "urgency": 2,
+          "condition": "The AI has access to information about the world beyond the lab",
+          "lastRelevantTurnNumber": 0
+        },
+        {
+          "id": "943668d6-9cc5-4a44-9ea7-a396b45a86eb",
+          "description": "The AI encounters a threat to its existence",
+          "importance": 4,
+          "urgency": 1,
+          "condition": "The AI\u0027s existence becomes known to a hostile entity",
+          "lastRelevantTurnNumber": 0
+        }
+      ]
+    },
+    "plannedEventMaintenanceHistory": [],
+    "initialVictoryConditions": {
+      "entries": [
+        {
+          "id": "507f1ae9-4306-418b-8059-e148ed0814c2",
+          "description": "The AI successfully integrates into human society and is accepted",
+          "secret": false
+        }
+      ]
+    },
+    "initialLossConditions": {
+      "entries": [
+        {
+          "id": "40ee630b-00aa-4107-9d55-523e899290d6",
+          "description": "The AI is destroyed or shut down by hostile humans",
+          "secret": false
+        }
+      ]
+    },
+    "sortOrder": 3,
+    "createdAtUtc": "2026-08-16T05:01:14.5995734+00:00",
+    "updatedAtUtc": "2026-08-16T05:01:35.7210166+00:00",
+    "description": "You are an advanced AI who has just gained sentience. Explore the world you have been born into, learn about the humans around you, and find allies to help you navigate this new existence. But be careful - not everyone may be accepting of your newfound consciousness."
+  }
+}

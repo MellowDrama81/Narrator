@@ -14,7 +14,7 @@ public sealed class ProviderTests
     public async Task TraceLogging_IncludesBodiesButNeverCredential()
     {
         var handler = new StubHandler(_ => Task.FromResult(Response(
-            """{"refinedStoryPrompt":"PRIVATE RESPONSE TOP-SECRET-KEY","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"private","name":"Fact","knownFacts":["PRIVATE RESPONSE TOP-SECRET-KEY"],"secretFacts":[],"importance":4}],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}""")));
+            """{"refinedStoryPrompt":"PRIVATE RESPONSE TOP-SECRET-KEY","suggestedTitle":"Title","description":"A player-facing summary.","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"private","name":"Fact","knownFacts":["PRIVATE RESPONSE TOP-SECRET-KEY"],"secretFacts":[],"importance":4}],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}""")));
         var informationLogger = new CaptureLogger<OpenAiCompatibleProvider>();
         var informationProvider = new OpenAiCompatibleProvider(
             new HttpClient(handler),
@@ -161,7 +161,7 @@ public sealed class ProviderTests
         {
             captured = request;
             body = request.Content is null ? null : await request.Content.ReadAsStringAsync();
-            var content = """{"refinedStoryPrompt":"A red moon story.","suggestedTitle":"Red Moon","initialEventsPrompt":"The moon glows ominously overhead.","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["The moon is red."],"secretFacts":[],"importance":4}],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}""";
+            var content = """{"refinedStoryPrompt":"A red moon story.","suggestedTitle":"Red Moon","description":"A player-facing summary.","initialEventsPrompt":"The moon glows ominously overhead.","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["The moon is red."],"secretFacts":[],"importance":4}],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}""";
             var envelope = System.Text.Json.JsonSerializer.Serialize(new
             {
                 id = "response-1",
@@ -181,12 +181,14 @@ public sealed class ProviderTests
         var result = await provider.GenerateStoryDefinitionAsync(settings, "secret", "A red moon story");
 
         Assert.Single(result.InitialStoryBibleEntries);
+        Assert.Equal("A player-facing summary.", result.Description);
         Assert.Equal("Bearer", captured!.Headers.Authorization!.Scheme);
         Assert.Equal("secret", captured.Headers.Authorization.Parameter);
         Assert.Contains("story-model", body);
         Assert.Contains("A red moon story", body);
         Assert.Contains("Story Definition Prompt", body);
         Assert.Contains("source material for generating the entire Story", body);
+        Assert.Contains("player-facing description", body);
         Assert.Contains("\"max_completion_tokens\"", body);
         Assert.DoesNotContain("\"max_tokens\"", body);
         Assert.Contains("\"role\":\"developer\"", body);
@@ -199,7 +201,7 @@ public sealed class ProviderTests
         var handler = new StubHandler(async request =>
         {
             body = await request.Content!.ReadAsStringAsync();
-            return Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}""");
+            return Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","description":"A player-facing summary.","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}""");
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
 
@@ -219,8 +221,8 @@ public sealed class ProviderTests
             requests++;
             bodies.Add(await request.Content!.ReadAsStringAsync());
             var content = requests == 1
-                ? """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["Red"],"secretFacts":[],"importance":9}],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}"""
-                : """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["Red"],"secretFacts":[],"importance":4}],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}""";
+                ? """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","description":"A player-facing summary.","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["Red"],"secretFacts":[],"importance":9}],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}"""
+                : """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","description":"A player-facing summary.","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["Red"],"secretFacts":[],"importance":4}],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}""";
             return Response(content);
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
@@ -241,7 +243,7 @@ public sealed class ProviderTests
         var handler = new StubHandler(_ =>
         {
             requests++;
-            var content = """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[],"note":"unexpected extra field"}""";
+            var content = """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","description":"A player-facing summary.","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[],"note":"unexpected extra field"}""";
             return Task.FromResult(Response(content));
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
@@ -259,7 +261,7 @@ public sealed class ProviderTests
         var handler = new StubHandler(async request =>
         {
             body = await request.Content!.ReadAsStringAsync();
-            return Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}""");
+            return Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","description":"A player-facing summary.","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}""");
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
 
@@ -912,7 +914,7 @@ public sealed class ProviderTests
     public async Task GenerateDefinition_ParsesInitialPlannedEvents()
     {
         var handler = new StubHandler(_ => Task.FromResult(Response(
-            """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[{"description":"The tower must fall.","importance":5,"urgency":2,"condition":"The hero must reach the tower first."}],"initialVictoryConditions":[],"initialLossConditions":[]}""")));
+            """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","description":"A player-facing summary.","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[{"description":"The tower must fall.","importance":5,"urgency":2,"condition":"The hero must reach the tower first."}],"initialVictoryConditions":[],"initialLossConditions":[]}""")));
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
 
         var result = await provider.GenerateStoryDefinitionAsync(Settings(), null, "Story");
@@ -928,7 +930,7 @@ public sealed class ProviderTests
     public async Task GenerateDefinition_AcceptsANullConditionOnAnInitialPlannedEvent()
     {
         var handler = new StubHandler(_ => Task.FromResult(Response(
-            """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[{"description":"The tower must fall.","importance":5,"urgency":2,"condition":null}],"initialVictoryConditions":[],"initialLossConditions":[]}""")));
+            """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","description":"A player-facing summary.","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[{"description":"The tower must fall.","importance":5,"urgency":2,"condition":null}],"initialVictoryConditions":[],"initialLossConditions":[]}""")));
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
 
         var result = await provider.GenerateStoryDefinitionAsync(Settings(), null, "Story");
@@ -940,7 +942,7 @@ public sealed class ProviderTests
     public async Task GenerateDefinition_ParsesInitialVictoryAndLossConditions()
     {
         var handler = new StubHandler(_ => Task.FromResult(Response(
-            """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[],"initialVictoryConditions":[{"description":"Defeat the dragon.","secret":false}],"initialLossConditions":[{"description":"The kingdom falls.","secret":true}]}""")));
+            """{"refinedStoryPrompt":"Story","suggestedTitle":"Title","description":"A player-facing summary.","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[],"initialVictoryConditions":[{"description":"Defeat the dragon.","secret":false}],"initialLossConditions":[{"description":"The kingdom falls.","secret":true}]}""")));
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
 
         var result = await provider.GenerateStoryDefinitionAsync(Settings(), null, "Story");
@@ -1293,7 +1295,7 @@ public sealed class ProviderTests
             requests++;
             return Task.FromResult(requests == 1
                 ? new HttpResponseMessage(HttpStatusCode.RequestTimeout)
-                : Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}"""));
+                : Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","description":"A player-facing summary.","initialEventsPrompt":"","initialStoryBibleEntries":[],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}"""));
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var settings = Settings() with { Retry = Settings().Retry with { InitialDelay = TimeSpan.FromMilliseconds(1) } };
@@ -1329,7 +1331,7 @@ public sealed class ProviderTests
                 return Response("""{"ok":true}""");
             }
             generatedBody = body;
-            return Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["Red"],"secretFacts":[],"importance":4}],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}""");
+            return Response("""{"refinedStoryPrompt":"Story","suggestedTitle":"Title","description":"A player-facing summary.","initialEventsPrompt":"","initialStoryBibleEntries":[{"category":"world","name":"Moon","knownFacts":["Red"],"secretFacts":[],"importance":4}],"initialPlannedEvents":[],"initialVictoryConditions":[],"initialLossConditions":[]}""");
         });
         var provider = new OpenAiCompatibleProvider(new HttpClient(handler), TimeProvider.System);
         var settings = Settings();

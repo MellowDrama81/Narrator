@@ -5,8 +5,7 @@ using Microsoft.Maui.Storage;
 
 namespace Mellow.Narrator.MauiBlazor.Services;
 
-// Uses the platform picker and share sheet, which work from a Blazor Hybrid page without needing a
-// browser download implementation. Imports are always copied into a new durable record.
+// Uses native platform pickers from the Hybrid host. Imports are always copied into a new durable record.
 public sealed class ImportExportService(IStoryDefinitionRepository definitions, IStoryStateRepository stories, INarratorApplication application)
 {
     private static readonly FilePickerFileType JsonFileType = new(new Dictionary<DevicePlatform, IEnumerable<string>>
@@ -20,11 +19,11 @@ public sealed class ImportExportService(IStoryDefinitionRepository definitions, 
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
     };
 
-    public Task ExportDefinitionAsync(StoryDefinition definition) => ShareAsync($"{Safe(definition.Title)}-definition.json", new StoryDefinitionExport(ImportExportProcessor.CurrentFormatVersion, DateTimeOffset.UtcNow, definition));
+    public Task ExportDefinitionAsync(StoryDefinition definition) => SaveJsonAsync($"{Safe(definition.Title)}-definition.json", new StoryDefinitionExport(ImportExportProcessor.CurrentFormatVersion, DateTimeOffset.UtcNow, definition));
     public async Task ExportStoryAsync(StoryState state)
     {
         var turns = await stories.GetTurnsAsync(state.Id);
-        await ShareAsync($"{Safe(state.Label)}-story.json", new StoryStateExport(ImportExportProcessor.CurrentFormatVersion, DateTimeOffset.UtcNow, state, turns));
+        await SaveJsonAsync($"{Safe(state.Label)}-story.json", new StoryStateExport(ImportExportProcessor.CurrentFormatVersion, DateTimeOffset.UtcNow, state, turns));
     }
     public async Task ExportNarrationHistoryAsync(StoryState state)
     {
@@ -70,11 +69,26 @@ public sealed class ImportExportService(IStoryDefinitionRepository definitions, 
         var copy = ImportExportProcessor.CopyState(document.State, document.Turns, list.Count == 0 ? 0 : list.Max(x => x.SortOrder) + 1, settings.ContentLimits, settings.StoryGeneration);
         await stories.ImportAsync(copy.State, copy.Turns); return copy.State;
     }
-    private static async Task ShareAsync<T>(string name, T value)
+    private static async Task SaveJsonAsync<T>(string name, T value)
     {
+#if WINDOWS
+        var picker = new Windows.Storage.Pickers.FileSavePicker
+        {
+            SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
+            SuggestedFileName = Path.GetFileNameWithoutExtension(name)
+        };
+        picker.FileTypeChoices.Add("JSON file", [".json"]);
+        var window = Application.Current?.Windows.FirstOrDefault()?.Handler?.PlatformView as Microsoft.UI.Xaml.Window
+            ?? throw new InvalidOperationException("The application window is not available.");
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(window));
+        var file = await picker.PickSaveFileAsync();
+        if (file is null) return;
+        await Windows.Storage.FileIO.WriteTextAsync(file, JsonSerializer.Serialize(value, Json));
+#else
         var path = Path.Combine(FileSystem.CacheDirectory, name);
         await using (var stream = File.Create(path)) await JsonSerializer.SerializeAsync(stream, value, Json);
         await Share.Default.RequestAsync(new ShareFileRequest("Export Mellow Narrator", new ShareFile(path)));
+#endif
     }
     private static async Task ShareTextAsync(string name, string value)
     {

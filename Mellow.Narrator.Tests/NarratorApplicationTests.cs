@@ -46,13 +46,14 @@ public sealed class NarratorApplicationTests
         var draft = new StoryPromptDraft(null, "Title", "Raw prompt mentioning today's mutable state");
         var provider = new FakeProvider
         {
-            DefinitionResponse = new("Refined immutable prompt", "Suggested Title", "Initial events", [new("fact", "Fact", ["Content"], [], 3)], [], [], [])
+            DefinitionResponse = new("Refined immutable prompt", "Suggested Title", "Initial events", [new("fact", "Fact", ["Content"], [], 3)], [], [], [], "A player-facing summary")
         };
         var app = CreateApplication(new MemoryDefinitions(), new MemoryStates(), provider);
 
         var definition = await app.GenerateDefinitionAsync(draft, false, Guid.NewGuid());
 
         Assert.Equal("Refined immutable prompt", definition.StoryPrompt);
+        Assert.Equal("A player-facing summary", definition.Description);
         Assert.Single(definition.InitialStoryBible.Entries);
     }
 

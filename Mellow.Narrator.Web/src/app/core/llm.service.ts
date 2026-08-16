@@ -205,11 +205,12 @@ export class LlmService {
 
   private parseDefinition(value: Record<string, unknown>): DefinitionGeneration {
     const result = value as Partial<DefinitionGeneration>;
-    if (!result.refinedStoryPrompt || !result.suggestedTitle || !Array.isArray(result.initialStoryBibleEntries))
+    if (!result.refinedStoryPrompt || !result.suggestedTitle || !result.description || !Array.isArray(result.initialStoryBibleEntries))
       throw new Error('The model returned an incomplete Story Definition.');
     return {
       refinedStoryPrompt: result.refinedStoryPrompt,
       suggestedTitle: result.suggestedTitle,
+      description: result.description,
       initialEventsPrompt: result.initialEventsPrompt ?? '',
       initialStoryBibleEntries: result.initialStoryBibleEntries.map(entry => ({
         category: String(entry.category ?? '').trim(),
@@ -793,6 +794,7 @@ export class LlmService {
     return this.objectSchema({
       refinedStoryPrompt: { type: 'string' },
       suggestedTitle: { type: 'string' },
+      description: { type: 'string', minLength: 1, maxLength: settings.maxStoryPromptCharacters },
       initialEventsPrompt: { type: 'string' },
       initialStoryBibleEntries: {
         type: 'array',

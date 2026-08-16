@@ -166,7 +166,8 @@ public sealed record StoryDefinition(
     StoryConditions InitialLossConditions,
     int SortOrder,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc,
+    string Description = "");
 
 public sealed record StoryDefinitionSnapshot(
     string Title,
@@ -175,7 +176,8 @@ public sealed record StoryDefinitionSnapshot(
     StoryBible InitialStoryBible,
     PlannedEvents InitialPlannedEvents,
     StoryConditions InitialVictoryConditions,
-    StoryConditions InitialLossConditions);
+    StoryConditions InitialLossConditions,
+    string Description = "");
 
 public sealed record StorySetupSnapshot(StoryDefinitionSnapshot Definition);
 
@@ -235,7 +237,7 @@ public sealed record StoryStateAggregateSnapshot(
     StoryState State,
     IReadOnlyList<StoryTurn> Turns);
 
-public sealed record StoryDefinitionSummary(Guid Id, string Title, int SortOrder, DateTimeOffset UpdatedAtUtc);
+public sealed record StoryDefinitionSummary(Guid Id, string Title, int SortOrder, DateTimeOffset UpdatedAtUtc, string Description = "");
 public sealed record StoryStateSummary(Guid Id, string Label, int SortOrder, DateTimeOffset StartedAtUtc, DateTimeOffset? LastActionAtUtc);
 
 public sealed record StoryPromptDraft(

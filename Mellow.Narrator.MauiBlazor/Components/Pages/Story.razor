@@ -1,7 +1,9 @@
 @page "/story/{Id:guid}"
+@implements IDisposable
 @inject NarratorWorkspace Workspace
 @inject ImportExportService ImportExport
 @inject HybridWorkspace HybridWorkspace
+@inject StoryTurnRunner TurnRunner
 
 <header><p class="eyebrow">Interactive story</p><h1>@_story?.Label</h1>@if (_story is not null) { <div class="actions"><button class="button" @onclick="Export">Export story</button><button class="button" @onclick="ExportNarration">Export narration history</button><button class="button" @onclick="ExportBibleHistory">Export Bible history</button><button class="button" @onclick="ExportEventHistory">Export event history</button></div> }</header>
 @if (_turns is null || _story is null) { <p>Loading story…</p> }
@@ -44,8 +46,11 @@ else {
 }
 @code {
  [Parameter] public Guid Id { get; set; } private StoryState? _story; private ApiConnectionSettings? _settings; private IReadOnlyList<StoryTurn>? _turns; private IReadOnlyList<string> CurrentSuggestedActions=>_turns?.LastOrDefault()?.SuggestedActions??[]; private string _action="", _summary="", _label=""; private string? _status; private bool _busy; private readonly Dictionary<Guid, BibleEdit> _bibleEdits=[]; private readonly Dictionary<Guid, EventEdit> _eventEdits=[]; private BibleEdit _newBible=new(); private EventEdit _newEvent=new();
- protected override async Task OnParametersSetAsync() { await HybridWorkspace.InitializeAsync(); _story=await Workspace.StoryAsync(Id); _settings=await Workspace.SettingsAsync(); _turns=await Workspace.TurnsAsync(Id); if (_story is null) return; _summary=_story.StorySummary; _label=_story.Label; _action=HybridWorkspace.PlayDraft(Id)?.PendingPlayerAction??_action; _bibleEdits.Clear(); _eventEdits.Clear(); foreach(var e in _story.CurrentStoryBible.Entries)_bibleEdits[e.Id]=new(e); foreach(var e in _story.CurrentPlannedEvents.Entries)_eventEdits[e.Id]=new(e); }
- private Task SaveActionDraft()=>HybridWorkspace.SavePlayDraftAsync(Id,_action); private async Task PlaySuggestion(string action){_action=action;await Play();}private async Task Play(){if(_busy||NeedsCull||string.IsNullOrWhiteSpace(_action))return;var action=_action;_busy=true;try{await HybridWorkspace.BeginAsync(TabType.PlayStory,Id,PendingOperationType.GenerateStoryTurn,_story?.LastCommittedTurnSequence+1);await Workspace.PlayAsync(Id,action);_action="";await HybridWorkspace.SavePlayDraftAsync(Id,"");await OnParametersSetAsync();}catch(Exception ex){_status=ex.Message;}finally{await HybridWorkspace.CompleteAsync(TabType.PlayStory,Id);_busy=false;}}
+ protected override void OnInitialized() => TurnRunner.Changed += OnTurnRunnerChanged;
+ private void OnTurnRunnerChanged(Guid storyId) { if (storyId == Id) _ = InvokeAsync(async () => { _busy = TurnRunner.IsRunning(Id); _status = TurnRunner.Failure(Id) ?? _status; if (!_busy) await OnParametersSetAsync(); StateHasChanged(); }); }
+ public void Dispose() => TurnRunner.Changed -= OnTurnRunnerChanged;
+ protected override async Task OnParametersSetAsync() { await HybridWorkspace.InitializeAsync(); _busy=TurnRunner.IsRunning(Id); _status=TurnRunner.Failure(Id)??_status; _story=await Workspace.StoryAsync(Id); _settings=await Workspace.SettingsAsync(); _turns=await Workspace.TurnsAsync(Id); if (_story is null) return; _summary=_story.StorySummary; _label=_story.Label; _action=HybridWorkspace.PlayDraft(Id)?.PendingPlayerAction??_action; _bibleEdits.Clear(); _eventEdits.Clear(); foreach(var e in _story.CurrentStoryBible.Entries)_bibleEdits[e.Id]=new(e); foreach(var e in _story.CurrentPlannedEvents.Entries)_eventEdits[e.Id]=new(e); }
+ private Task SaveActionDraft()=>HybridWorkspace.SavePlayDraftAsync(Id,_action); private async Task PlaySuggestion(string action){_action=action;await Play();}private async Task Play(){if(_busy||NeedsCull||string.IsNullOrWhiteSpace(_action))return;var action=_action;_busy=true;try{await TurnRunner.StartAsync(Id,action,_story?.LastCommittedTurnSequence+1);_action="";await HybridWorkspace.SavePlayDraftAsync(Id,"");}catch(Exception ex){_status=ex.Message;_busy=false;}}
  private async Task SaveLabel(){try{await Workspace.UpdateStoryLabelAsync(Id,_label);await OnParametersSetAsync();_status="Label saved.";}catch(Exception ex){_status=ex.Message;}}
  private async Task SaveSummary(){try{_story=await Workspace.SaveStorySummaryAsync(Id,_summary);_status="Summary saved.";}catch(Exception ex){_status=ex.Message;}}
  private async Task SaveBible(Guid id){if(_story is null)return;try{var entries=_story.CurrentStoryBible.Entries.Select(e=>e.Id==id?_bibleEdits[id].ToEntry(e.Id,e.LastRelevantTurnNumber):e).ToArray();_story=await Workspace.SaveStoryBibleAsync(Id,new(entries));await OnParametersSetAsync();}catch(Exception ex){_status=ex.Message;}}

@@ -46,7 +46,7 @@ import { NarratorService } from '../core/narrator.service';
               <mat-card-subtitle>Updated {{ item.updatedAtUtc | date:'mediumDate' }}</mat-card-subtitle>
             </mat-card-header>
             <mat-card-content>
-              <p>{{ item.storyPrompt }}</p>
+              @if (item.description) { <p>{{ item.description }}</p> }
               <mat-chip-set><mat-chip>{{ item.initialStoryBible.length }} Bible entries</mat-chip><mat-chip>{{ item.initialPlannedEvents.length }} Planned Events</mat-chip></mat-chip-set>
             </mat-card-content>
             <mat-card-actions align="end">
@@ -137,6 +137,7 @@ export class DefinitionsComponent implements OnInit {
       const imported: StoryDefinition = {
         id: sourceId && await this.db.definition(sourceId) ? uuid() : (sourceId ?? uuid()),
         title: String(source.title ?? 'Imported definition'),
+        description: String(source.description ?? ''),
         storyPrompt: String(source.storyPrompt ?? ''),
         initialEventsPrompt: String(source.initialEventsPrompt ?? ''),
         initialStoryBible: bible,

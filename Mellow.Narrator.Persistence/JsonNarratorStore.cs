@@ -58,7 +58,7 @@ public sealed class JsonNarratorStore :
             var id = Path.GetFileNameWithoutExtension(file);
             var item = await LockedAsync($"definition:{id}",
                 async () => Normalize(await JsonFileStore.ReadAsync<StoryDefinition>(file, cancellationToken, ReportRecovery)), cancellationToken);
-            if (item is not null) result.Add(new(item.Id, item.Title, item.SortOrder, item.UpdatedAtUtc));
+            if (item is not null) result.Add(new(item.Id, item.Title, item.SortOrder, item.UpdatedAtUtc, item.Description));
         }
         return result.OrderBy(x => x.SortOrder).ThenBy(x => x.Title).ToArray();
     }
@@ -712,6 +712,7 @@ public sealed class JsonNarratorStore :
     // PlannedEventProcessor.IsWithinLimits that dereference these collections unconditionally.
     private static StoryDefinition? Normalize(StoryDefinition? value) => value is null ? null : value with
     {
+        Description = value.Description ?? "",
         InitialEventsPrompt = value.InitialEventsPrompt ?? "",
         InitialPlannedEvents = NormalizePlannedEvents(value.InitialPlannedEvents),
         PlannedEventMaintenanceHistory = value.PlannedEventMaintenanceHistory ?? [],

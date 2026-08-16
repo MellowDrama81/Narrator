@@ -9,9 +9,15 @@ internal static class GeneratedPromptTemplates
         The user's message is a Story Definition Prompt: source material for generating the entire Story
         Definition. It is not the Story Prompt that will be stored in that definition. Use everything in the
         Story Definition Prompt to generate the most appropriate parts of the response: the refined Story
-        Prompt, suggested title, Initial Events prompt, initial Story Bible entries, initial Planned Events,
+        Prompt, suggested title, player-facing description, Initial Events prompt, initial Story Bible entries, initial Planned Events,
         and initial victory and loss conditions. Preserve every fact and instruction, but place each one only
         where it belongs; do not assume it must go into the refined Story Prompt or Story Bible.
+
+        Also write a concise, player-facing description of the story. This is shown in the story-definition list,
+        so it should communicate the premise, mood, and immediate appeal without exposing secret facts, planned
+        events, or hidden victory/loss conditions. It is display copy only: it is never sent to the narrator on
+        turns. Keep it distinct from the refined Story Prompt, which defines the enduring themes and rules sent
+        to the LLM every turn.
 
         The refined Story Prompt is sent verbatim with every request for the entire story, so it must contain
         only immutable facts and instructions that will never change: setting, premise, tone, and narration
@@ -74,7 +80,7 @@ internal static class GeneratedPromptTemplates
         won or lost; an ordinary story may have as few as one of each, or none of one kind if it has no natural
         loss condition, but never invent one that doesn't fit the premise just to fill the list.
 
-        Return JSON only with refinedStoryPrompt, suggestedTitle, initialEventsPrompt,
+        Return JSON only with refinedStoryPrompt, suggestedTitle, description, initialEventsPrompt,
         initialStoryBibleEntries, initialPlannedEvents, initialVictoryConditions, and initialLossConditions.
         """;
 

@@ -26,6 +26,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<ISecureStorageService, MauiSecureStorageService>();
         builder.Services.AddSingleton<NarratorWorkspace>();
         builder.Services.AddSingleton<HybridWorkspace>();
+        builder.Services.AddSingleton<StoryTurnRunner>();
         builder.Services.AddSingleton<ImportExportService>();
         return builder.Build();
     }

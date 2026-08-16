@@ -73,6 +73,7 @@ export interface ProposedStoryCondition {
 export interface StoryDefinition {
   id: string;
   title: string;
+  description?: string;
   storyPrompt: string;
   initialEventsPrompt: string;
   initialStoryBible: StoryBibleEntry[];
@@ -236,6 +237,7 @@ export interface TrashItem {
 export interface DefinitionGeneration {
   refinedStoryPrompt: string;
   suggestedTitle: string;
+  description: string;
   initialEventsPrompt: string;
   initialStoryBibleEntries: Array<Omit<StoryBibleEntry, 'id' | 'lastRelevantTurnNumber'>>;
   initialPlannedEvents: ProposedPlannedEvent[];
