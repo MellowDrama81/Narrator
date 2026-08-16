@@ -34,10 +34,20 @@ public sealed class HybridWorkspace(IWorkspaceStateStore store)
     {
         var existing = _state.Tabs.FirstOrDefault(x => x.Type == type && x.DurableRecordId == recordId);
         var tab = new OpenTabState(existing?.TabId ?? Guid.NewGuid(), type, 0, recordId, draft, playDraft, existing?.PendingOperation);
-        // Open stories are durable user documents. Do not evict them merely because the user visited
-        // other pages; only an explicit close/delete action may remove a story from the workspace.
-        var tabs = _state.Tabs.Where(x => x.TabId != tab.TabId).Prepend(tab).Select((x, i) => x with { Position = i }).ToArray();
-        _state = new(tab.TabId, tabs);
+        // Open stories are durable user documents. Do not evict or reorder them merely because the
+        // player revisits one: preserve an existing story's position and append a newly opened story.
+        var tabs = _state.Tabs.OrderBy(x => x.Position).Where(x => x.TabId != tab.TabId).ToList();
+        if (type == TabType.PlayStory)
+        {
+            var position = existing is null ? tabs.Count : Math.Min(existing.Position, tabs.Count);
+            tabs.Insert(position, tab);
+        }
+        else
+        {
+            tabs.Insert(0, tab);
+        }
+        var orderedTabs = tabs.Select((item, index) => item with { Position = index }).ToArray();
+        _state = new(tab.TabId, orderedTabs);
         await store.SaveAsync(_state);
     }
 
@@ -55,6 +65,18 @@ public sealed class HybridWorkspace(IWorkspaceStateStore store)
     {
         var tabs = _state.Tabs.Select(x => x.Type == type && x.DurableRecordId == recordId ? x with { PendingOperation = null } : x).ToArray();
         _state = _state with { Tabs = tabs };
+        await store.SaveAsync(_state);
+    }
+
+    public async Task CloseStoryAsync(Guid storyId)
+    {
+        var closingActiveStory = _state.Tabs.Any(x => x.TabId == _state.ActiveTabId && x.Type == TabType.PlayStory && x.DurableRecordId == storyId);
+        var tabs = _state.Tabs
+            .OrderBy(x => x.Position)
+            .Where(x => x.Type != TabType.PlayStory || x.DurableRecordId != storyId)
+            .Select((item, index) => item with { Position = index })
+            .ToArray();
+        _state = new(closingActiveStory ? tabs.FirstOrDefault()?.TabId ?? Guid.Empty : _state.ActiveTabId, tabs);
         await store.SaveAsync(_state);
     }
 

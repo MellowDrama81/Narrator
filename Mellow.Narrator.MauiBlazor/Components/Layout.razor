@@ -2,12 +2,52 @@
 @implements IDisposable
 @inject NavigationManager Navigation
 @inject HybridWorkspace Workspace
+@inject NarratorWorkspace NarratorWorkspace
+
+<style>
+  nav .open-stories { display: grid; gap: 5px; margin: 3px 0 12px 16px; padding: 3px 0 3px 9px; border-left: 2px solid #7185d2; }
+  nav .open-stories a { position: relative; padding: 7px 9px 7px 23px; color: #dbe3ff; font-size: 12px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  nav .open-stories a::before { position: absolute; left: 8px; color: #9caeff; content: "•"; }
+  @@media (max-width: 760px) { nav .open-stories { display: none; } }
+</style>
+
+<style>
+  nav .open-story-row { display: flex; gap: 4px; min-width: 0; }
+  nav .open-story-row a { min-width: 0; flex: 1; }
+  nav .open-story-rename, nav .open-story-save, nav .open-story-cancel, nav .open-story-close { min-width: 32px; border: 1px solid #4b5c98; border-radius: 7px; background: #182142; color: #cbd6ff; cursor: pointer; font-size: 11px; font-weight: 700; }
+  nav .open-story-rename:hover, nav .open-story-save:hover, nav .open-story-cancel:hover, nav .open-story-close:hover { background: #2a3567; color: #fff; }
+  nav .open-story-rename svg, nav .open-story-save svg, nav .open-story-cancel svg, nav .open-story-close svg { width: 14px; height: 14px; vertical-align: middle; }
+  nav .open-story-input { min-width: 0; flex: 1; padding: 6px 8px; font-size: 12px; }
+</style>
 
 <div class="shell">
   <aside><a class="brand" href="">Mellow <em>Narrator</em></a><nav aria-label="Main navigation">
-    <NavLink href="" Match="NavLinkMatch.All">Library</NavLink>
     <NavLink href="definitions">Story definitions</NavLink>
     <NavLink href="stories">Active stories</NavLink>
+    @if (_openStories.Count > 0)
+    {
+      <section class="open-stories" aria-label="Open stories">
+        @foreach (var story in _openStories)
+        {
+          @if (_renamingStoryId == story.Id)
+          {
+            <div class="open-story-row">
+              <input class="open-story-input" @bind="_newStoryLabel" aria-label="Story name" />
+              <button class="open-story-save" title="Save name" aria-label="Save name" @onclick="SaveStoryName"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m9.2 16.6-4.5-4.5 1.4-1.4 3.1 3.1 8.7-8.7 1.4 1.4-10.1 10.1Z" /></svg></button>
+              <button class="open-story-cancel" title="Cancel rename" aria-label="Cancel rename" @onclick="CancelStoryRename"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m6.3 4.9 12.8 12.8-1.4 1.4L4.9 6.3l1.4-1.4Zm12.8 1.4L6.3 19.1l-1.4-1.4L17.7 4.9l1.4 1.4Z" /></svg></button>
+            </div>
+          }
+          else
+          {
+            <div class="open-story-row">
+              <NavLink href="@($"story/{story.Id}")" title="@story.Label">@story.Label</NavLink>
+              <button class="open-story-rename" title="Rename story" aria-label="Rename story" @onclick="() => BeginStoryRename(story)"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m4 16.9 12.8-12.8 3.1 3.1L7.1 20H4v-3.1Zm14.2-14.2 1.2-1.2a1.5 1.5 0 0 1 2.1 2.1l-1.2 1.2-3.1-3.1Z" /></svg></button>
+              <button class="open-story-close" title="Close story" aria-label="Close story" @onclick="() => CloseStory(story.Id)"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m6.3 4.9 12.8 12.8-1.4 1.4L4.9 6.3l1.4-1.4Zm12.8 1.4L6.3 19.1l-1.4-1.4L17.7 4.9l1.4 1.4Z" /></svg></button>
+            </div>
+          }
+        }
+      </section>
+    }
     <NavLink href="connections">Connections</NavLink>
     <NavLink href="settings">Settings</NavLink>
     <NavLink href="pipeline">Pipeline calls</NavLink>
@@ -23,18 +63,64 @@
     await TrackCurrentAsync();
   }
   private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(TrackCurrentAsync);
-  private Task TrackCurrentAsync()
+  private async Task TrackCurrentAsync()
   {
     var path = Navigation.ToBaseRelativePath(Navigation.Uri).Trim('/');
     var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
-    return parts.FirstOrDefault() switch
+    switch (parts.FirstOrDefault())
     {
-      "definition" when parts.Length > 1 && Guid.TryParse(parts[1], out var definitionId) => Workspace.TrackAsync(TabType.StoryDefinition, definitionId),
-      "story" when parts.Length > 1 && Guid.TryParse(parts[1], out var storyId) => Workspace.TrackAsync(TabType.PlayStory, storyId),
-      "definitions" => Workspace.TrackAsync(TabType.StoryDefinitionList, null),
-      "stories" => Workspace.TrackAsync(TabType.PlayStoryList, null),
-      _ => Task.CompletedTask
-    };
+      case "definition" when parts.Length > 1 && Guid.TryParse(parts[1], out var definitionId):
+        await Workspace.TrackAsync(TabType.StoryDefinition, definitionId);
+        break;
+      case "story" when parts.Length > 1 && Guid.TryParse(parts[1], out var storyId):
+        await Workspace.TrackAsync(TabType.PlayStory, storyId);
+        break;
+      case "definitions":
+        await Workspace.TrackAsync(TabType.StoryDefinitionList, null);
+        break;
+      case "stories":
+        await Workspace.TrackAsync(TabType.PlayStoryList, null);
+        break;
+      case "":
+        await Workspace.TrackAsync(TabType.StoryDefinitionList, null);
+        break;
+    }
+    await RefreshOpenStoriesAsync();
+    StateHasChanged();
   }
+  private async Task RefreshOpenStoriesAsync()
+  {
+    var storyIds = Workspace.Recent
+      .Where(tab => tab.Type == TabType.PlayStory && tab.DurableRecordId is not null)
+      .Select(tab => tab.DurableRecordId!.Value);
+    var stories = new List<OpenStory>();
+    foreach (var id in storyIds)
+    {
+      var story = await NarratorWorkspace.StoryAsync(id);
+      if (story is not null) stories.Add(new(id, story.Label));
+    }
+    _openStories = stories;
+  }
+  private IReadOnlyList<OpenStory> _openStories = [];
+  private Guid? _renamingStoryId;
+  private string _newStoryLabel = "";
+  private void BeginStoryRename(OpenStory story) { _renamingStoryId = story.Id; _newStoryLabel = story.Label; }
+  private async Task SaveStoryName()
+  {
+    if (_renamingStoryId is not { } id || string.IsNullOrWhiteSpace(_newStoryLabel)) return;
+    var label = _newStoryLabel.Trim();
+    await NarratorWorkspace.UpdateStoryLabelAsync(id, label);
+    _openStories = _openStories.Select(story => story.Id == id ? story with { Label = label } : story).ToArray();
+    _renamingStoryId = null;
+  }
+  private void CancelStoryRename() => _renamingStoryId = null;
+  private async Task CloseStory(Guid id)
+  {
+    await Workspace.CloseStoryAsync(id);
+    _openStories = _openStories.Where(story => story.Id != id).ToArray();
+    _renamingStoryId = null;
+    if (Navigation.ToBaseRelativePath(Navigation.Uri).Trim('/') == $"story/{id}") Navigation.NavigateTo("stories");
+  }
+  private sealed record OpenStory(Guid Id, string Label);
   public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
 }
